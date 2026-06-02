@@ -1,0 +1,82 @@
+{
+  "style": "simple",
+  "emailSubscription": {
+    "enabled": false,
+    "title": "Subscribe to our newsletter",
+    "subtitle": "Get the latest updates directly in your inbox."
+  },
+  "brandMenu": {
+    "brandItem": {
+      "visible": true,
+      "imageUrl": "/uploads/headers-footers/1776526156115.png",
+      "imageWidth": 200,
+      "imageAlign": "left"
+    },
+    "column1": {
+      "visible": true,
+      "title": "",
+      "menuId": "footer"
+    },
+    "column2": {
+      "visible": true,
+      "title": "Resources",
+      "menuId": "14100300"
+    },
+    "column3": {
+      "visible": true,
+      "title": "Support",
+      "menuId": "10766215"
+    }
+  },
+  "social": {
+    "visible": true,
+    "links": [
+      {
+        "platform": "facebook",
+        "url": "https://feisman.cn/"
+      },
+      {
+        "platform": "instagram",
+        "url": "https://feisman.cn/"
+      },
+      {
+        "platform": "youtube",
+        "url": "https://feisman.cn/"
+      },
+      {
+        "platform": "tiktok",
+        "url": "https://feisman.cn/"
+      },
+      {
+        "platform": "twitter",
+        "url": "https://feisman.cn/"
+      },
+      {
+        "platform": "snapchat",
+        "url": "https://feisman.cn/"
+      },
+      {
+        "platform": "pinterest",
+        "url": "https://feisman.cn/"
+      },
+      {
+        "platform": "tumblr",
+        "url": "https://feisman.cn/"
+      },
+      {
+        "platform": "vimeo",
+        "url": "https://feisman.cn/"
+      }
+    ]
+  },
+  "utilities": {
+    "showPolicyLinks": false,
+    "topSpacing": 0,
+    "bottomSpacing": 0
+  },
+  "textInfo": {
+    "enabled": true,
+    "title": "CONTACT US",
+    "content": "abc@abc.com\n9am - 11pm HKT\nMonday - Sunday (except for public holidays)"
+  }
+}

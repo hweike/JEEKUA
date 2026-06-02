@@ -1,0 +1,30 @@
+import { NextRequest, NextResponse } from 'next/server';
+import fs from 'fs';
+import path from 'path';
+
+const HEADER_DIR = path.join(process.cwd(), 'data', 'SiteHeadersFooters', 'header');
+
+export async function GET(request: NextRequest) {
+  const id = request.nextUrl.searchParams.get('id');
+  const locale = request.nextUrl.searchParams.get('locale');
+  if (!locale) return NextResponse.json({ error: 'Missing locale' }, { status: 400 });
+  // 页头是单例，id 固定为 'header'，忽略 id 参数
+  const filePath = path.join(HEADER_DIR, `${locale}.json`);
+  if (!fs.existsSync(filePath)) {
+    return NextResponse.json({ error: 'Not found' }, { status: 404 });
+  }
+  const data = JSON.parse(fs.readFileSync(filePath, 'utf-8'));
+  return NextResponse.json(data);
+}
+
+export async function POST(request: NextRequest) {
+  const { id, locale, data } = await request.json();
+  if (!locale || !data) {
+    return NextResponse.json({ error: 'Missing locale or data' }, { status: 400 });
+  }
+  const dir = HEADER_DIR;
+  if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+  const filePath = path.join(dir, `${locale}.json`);
+  fs.writeFileSync(filePath, JSON.stringify(data, null, 2));
+  return NextResponse.json({ success: true });
+}

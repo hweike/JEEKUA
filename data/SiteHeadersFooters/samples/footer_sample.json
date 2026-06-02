@@ -1,0 +1,46 @@
+{
+  "style": "simple",
+  "emailSubscription": {
+    "enabled": false,
+    "title": "Subscribe to our newsletter",
+    "subtitle": "Get the latest updates directly in your inbox."
+  },
+  "brandMenu": {
+    "brandItem": {
+      "visible": true,
+      "imageUrl": "",
+      "imageWidth": 120,
+      "imageAlign": "left"
+    },
+    "column1": {
+      "visible": true,
+      "title": "Quick Links",
+      "menuId": "footer-menu-1"
+    },
+    "column2": {
+      "visible": true,
+      "title": "Resources",
+      "menuId": "footer-menu-2"
+    },
+    "column3": {
+      "visible": true,
+      "title": "Support",
+      "menuId": "footer-menu-3"
+    },
+     "textInfo": {
+    "enabled": false,
+    "title": "CONTACT US",
+    "content": "abc@abc.com\n9am - 11pm HKT\nMonday - Sunday (except for public holidays)"
+  }
+  },
+  "social": {
+    "visible": true,
+    "links": []
+  },
+  "utilities": {
+    "showPolicyLinks": true,
+    "topSpacing": 32,
+    "bottomSpacing": 32
+  }
+ 
+}

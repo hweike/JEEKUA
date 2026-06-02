@@ -1,0 +1,42 @@
+{
+  "defaultSettings": {
+    "default_min_order_qty": 1,
+    "default_availability": "in_stock",
+    "default_brand": "Generic",
+    "sku_rule": "P-{timestamp}",
+    "default_currency": "USD",
+    "default_shipping_cost": 0,
+    "default_return_days": 30,
+    "default_mpn": ""
+  },
+  "attributeTemplates": [
+    {
+      "id": "27424927",
+      "name": "金色会",
+      "attributes": [
+        {
+          "name": "对对对",
+          "rule": "请输入{属性名}"
+        },
+        {
+          "name": "对对对",
+          "rule": "请输入{属性名}"
+        }
+      ]
+    },
+    {
+      "id": "59359342",
+      "name": "大事发生",
+      "attributes": [
+        {
+          "name": "对对对",
+          "rule": "请输入{属性名}"
+        },
+        {
+          "name": "啊大法师",
+          "rule": "请输入{属性名}"
+        }
+      ]
+    }
+  ]
+}

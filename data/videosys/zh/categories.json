@@ -1,0 +1,24 @@
+{
+  "56338493": {
+    "name": "视频分类2",
+    "slug": "shi-pin-fen-lei-2",
+    "order": 2,
+    "commentStatus": "allowed",
+    "template": "default_video_category_published",
+    "seo_keywords": "",
+    "seo_title": "",
+    "seo_description": "",
+    "isSystem": false
+  },
+  "product-video": {
+    "name": "产品视频",
+    "slug": "product-video",
+    "order": 0,
+    "commentStatus": "allowed",
+    "template": "default_video_category_published",
+    "seo_keywords": "11",
+    "seo_title": "22",
+    "seo_description": "233",
+    "isSystem": true
+  }
+}

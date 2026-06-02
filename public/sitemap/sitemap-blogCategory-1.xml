@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9"
+        xmlns:xhtml="http://www.w3.org/1999/xhtml">
+  
+    <url>
+      <loc>http://localhost:3000/blogs/1-1-1-2-2-2</loc>
+      <lastmod>2026-05-09T09:26:35.497Z</lastmod>
+      <priority>0.5</priority>
+      <changefreq>weekly</changefreq>
+      <xhtml:link rel="alternate" hreflang="zh" href="http://localhost:3000/blogs/1-1-1-2-2-2" />
+<xhtml:link rel="alternate" hreflang="x-default" href="http://localhost:3000/blogs/1-1-1-2-2-2" />
+    </url>
+    <url>
+      <loc>http://localhost:3000/blogs/bo-ke-fen-lei-1222</loc>
+      <lastmod>2026-05-15T04:10:40.884Z</lastmod>
+      <priority>0.5</priority>
+      <changefreq>weekly</changefreq>
+      <xhtml:link rel="alternate" hreflang="zh" href="http://localhost:3000/blogs/bo-ke-fen-lei-1222" />
+<xhtml:link rel="alternate" hreflang="x-default" href="http://localhost:3000/blogs/bo-ke-fen-lei-1222" />
+    </url>
+</urlset>

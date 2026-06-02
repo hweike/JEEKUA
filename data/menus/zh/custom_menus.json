@@ -1,0 +1,96 @@
+[
+  {
+    "id": "14100300",
+    "name": "测试自定义菜单",
+    "isEditable": true,
+    "items": [
+      {
+        "id": "e127811c-d821-402d-8477-b37693f3fe45",
+        "parentId": null,
+        "label": "同步至多",
+        "linkType": "internal",
+        "linkValue": "/products",
+        "order": 0
+      },
+      {
+        "id": "266c0f18-4a53-4a56-b4f8-d367357375d7",
+        "parentId": null,
+        "label": "多语言站点",
+        "linkType": "internal",
+        "linkValue": "/products",
+        "order": 1
+      },
+      {
+        "id": "69f13b5a-d307-44db-9038-1ffb3452df14",
+        "parentId": null,
+        "label": "内容映射同步",
+        "linkType": "internal",
+        "linkValue": "/products",
+        "order": 2
+      },
+      {
+        "id": "9ee65b70-e366-4389-927f-8e2ccea11c0a",
+        "parentId": null,
+        "label": "",
+        "linkType": "internal",
+        "linkValue": "",
+        "order": 3
+      }
+    ]
+  },
+  {
+    "id": "10766215",
+    "name": "帮助中心",
+    "isEditable": true,
+    "items": [
+      {
+        "id": "a53abdd5-6208-405f-a6dc-73bcde3522d8",
+        "parentId": null,
+        "label": "数据库层面",
+        "linkType": "internal",
+        "linkValue": "/products",
+        "order": 0
+      },
+      {
+        "id": "48fed86c-ca12-4372-9415-dee3a3a00b72",
+        "parentId": null,
+        "label": "Web API层面",
+        "linkType": "internal",
+        "linkValue": "/products",
+        "order": 1
+      },
+      {
+        "id": "47a71eed-0fb4-4bfd-80ec-b3d46112a7e9",
+        "parentId": null,
+        "label": "现代开发中",
+        "linkType": "internal",
+        "linkValue": "/products",
+        "order": 2
+      },
+      {
+        "id": "b28d5cb9-6039-4a28-b5c5-ac7e8a5bb36d",
+        "parentId": null,
+        "label": "学生管理",
+        "linkType": "internal",
+        "linkValue": "/products",
+        "order": 3
+      },
+      {
+        "id": "f9fd242c-9ff9-403e-b29d-9168e8e7f03d",
+        "parentId": null,
+        "label": "商品库存",
+        "linkType": "internal",
+        "linkValue": "/products",
+        "order": 4
+      },
+      {
+        "id": "19f548d6-d485-4505-99ec-959287bb6251",
+        "parentId": null,
+        "label": "基础逻辑",
+        "linkType": "internal",
+        "linkValue": "/products",
+        "order": 5
+      }
+    ]
+  }
+]

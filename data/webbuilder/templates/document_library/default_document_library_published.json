@@ -1,0 +1,18 @@
+{
+  "id": "default_document_library_published",
+  "name": "默认文档库模板",
+  "category": "document_library",
+  "data": {
+    "root": {
+      "props": {
+        "title": "默认文档库模板"
+      }
+    },
+    "content": [],
+    "zones": {}
+  },
+  "isSystem": true,
+  "version": "published",
+  "createdAt": "2026-05-04T10:59:44.073Z",
+  "updatedAt": "2026-05-17T06:56:05.816Z"
+}

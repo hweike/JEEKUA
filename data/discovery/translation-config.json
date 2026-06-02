@@ -1,0 +1,38 @@
+{
+  "home": {
+    "fields": ["title", "seo_title", "seo_description", "seo_keywords"]
+  },
+  "page": {
+    "fields": ["title", "content", "seo_title", "seo_description", "seo_keywords"]
+  },
+  "product": {
+    "fields": ["title", "short_description", "content", "seo_title", "seo_description", "seo_keywords"]
+  },
+  "productCollection": {
+    "fields": ["title", "description", "seo_title", "seo_description", "seo_keywords"]
+  },
+  "blogCategory": {
+    "fields": ["title", "seo_title", "seo_description", "seo_keywords"]
+  },
+  "blogPost": {
+    "fields": ["title", "excerpt", "content", "seo_title", "seo_description", "seo_keywords"]
+  },
+  "docLibrary": {
+    "fields": ["title", "description", "seo_title", "seo_description", "seo_keywords"]
+  },
+  "doc": {
+    "fields": ["title", "content", "seo_title", "seo_description", "seo_keywords"]
+  },
+  "videoCategory": {
+    "fields": ["title", "seo_title", "seo_description", "seo_keywords"]
+  },
+  "video": {
+    "fields": ["title", "content", "seo_title", "seo_description", "seo_keywords"]
+  },
+  "inquiry": {
+    "fields": ["title", "seo_title", "seo_description", "seo_keywords"]
+  },
+  "policy": {
+    "fields": ["title", "content", "seo_title", "seo_description", "seo_keywords"]
+  }
+}

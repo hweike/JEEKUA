@@ -1,0 +1,192 @@
+{
+  "modelName": "标准产品模型",
+  "fields": [
+    {
+      "name": "name",
+      "label": "标题",
+      "type": "text",
+      "required": true,
+      "placeholder": "请输入产品名称",
+      "maxLength": 100
+    },
+    {
+      "name": "brand_name",
+      "label": "品牌",
+      "type": "text",
+      "placeholder": "例如：MORNSUN",
+      "maxLength": 50
+    },
+    {
+      "name": "model",
+      "label": "型号",
+      "type": "text",
+      "required": false,
+      "placeholder": "例如：LMF200-23B05UH",
+      "maxLength": 50
+    },
+    {
+      "name": "parent_product_id",
+      "label": "父产品ID",
+      "type": "text",
+      "placeholder": "如果有父产品，请填写",
+      "maxLength": 8,
+       "description": "关联父产品的商品码"
+    },
+
+    
+    {
+      "name": "main_image_url",
+      "label": "产品主图",
+      "type": "image",
+      "placeholder": "输入图片URL或上传"
+    },
+    {
+      "name": "image_url1",
+      "label": "产品图片1",
+      "type": "image"
+    },
+    {
+      "name": "image_url2",
+      "label": "产品图片2",
+      "type": "image"
+    },
+    {
+      "name": "image_url3",
+      "label": "产品图片3",
+      "type": "image"
+    },
+    {
+      "name": "image_url4",
+      "label": "产品图片4",
+      "type": "image"
+    },
+    {
+      "name": "image_url5",
+      "label": "产品图片5",
+      "type": "image"
+    },
+    {
+      "name": "image_url6",
+      "label": "产品图片6",
+      "type": "image"
+    },
+    {
+      "name": "description",
+      "label": "产品详情",
+      "type": "richText",
+      "placeholder": "详细描述产品特性、应用等"
+    },
+    {
+      "name": "tag",
+      "label": "标签",
+      "type": "text",
+      "placeholder": "多个标签用英文逗号分隔",
+      "maxLength": 200
+    },
+    {
+      "name": "variations",
+      "label": "商品规格",
+      "type": "textarea",
+      "placeholder": "多个规格用英文逗号分隔",
+      "rows": 3
+    }
+  ],
+  "priceTiers": [
+    { 
+      "name": "quantity1", "label": "1.最小起订量≥  ", "type": "number", "placeholder": "例如：1" },
+    { "name": "price1", "label": "单价价格 US$", "type": "number", "placeholder": "例如：10.00" },
+    { "name": "quantity2", "label": "2.最小起订量≥ ", "type": "number", "placeholder": "例如：100" },
+    { "name": "price2", "label": "单价价格 US$", "type": "number", "placeholder": "例如：8.50" },
+    { "name": "quantity3", "label": "3.最小起订量≥ ", "type": "number", "placeholder": "例如：1000" },
+    { "name": "price3", "label": "单价价格 US$", "type": "number", "placeholder": "例如：7.00" }
+  ],
+  "serviceFields": [
+    {
+      "name": "lead_time",
+      "label": "交货期",
+      "type": "textarea",
+      "placeholder": "例如：1-3 个工作日",
+      "rows": 2
+    },
+    {
+      "name": "customization",
+      "label": "定制服务",
+      "type": "textarea",
+      "placeholder": "可提供的定制说明",
+      "rows": 2
+    },
+    {
+      "name": "shipping",
+      "label": "运输说明",
+      "type": "textarea",
+      "placeholder": "运费、物流等说明",
+      "rows": 2
+    }
+  ],
+  "seo": {
+    "fields": [
+      {
+        "name": "seo_keywords",
+        "label": "核心关键词",
+        "type": "text",
+        "placeholder": "多个关键词用英文逗号分隔",
+        "maxLength": 200
+      },
+      {
+        "name": "seo_title",
+        "label": "元标题",
+        "type": "text",
+        "placeholder": "建议不超过60字符",
+        "maxLength": 60
+      },
+      {
+        "name": "seo_description",
+        "label": "元描述",
+        "type": "textarea",
+        "placeholder": "建议不超过160字符",
+        "maxLength": 160,
+        "rows": 2
+      }
+    ]
+  },
+  "zh-customAttributes": [
+    {
+      "name": "custom_power",
+      "type": "text",
+      "label": "功率(W)",
+      "label-F": "功率(W)",
+      "required": false,
+      "placeholder": "例如：100W",
+      "maxLength": 50
+    },
+    {
+      "name": "custom_efficiency",
+      "type": "text",
+      "label": "效率(%)",
+      "label-F": "效率(%)",
+      "required": false,
+      "placeholder": "例如：94",
+      "maxLength": 10
+    }
+  ],
+  "en-customAttributes": [
+    {
+      "name": "custom_power",
+      "type": "text",
+      "label": "功率(W)",
+      "label-F": "Power(W)",
+      "required": false,
+      "placeholder": "例如：100W",
+      "maxLength": 50
+    },
+    {
+      "name": "custom_efficiency",
+      "type": "text",
+      "label": "效率(%)",
+      "label-F": "Efficiency(%)",
+      "required": false,
+      "placeholder": "例如：94",
+      "maxLength": 10
+    }
+  ]
+}

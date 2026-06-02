@@ -1,0 +1,40 @@
+{
+  "style": "simple",
+  "logo": {
+    "imageUrl": "/uploads/headers-footers/1776740153689.png",
+    "width": 130,
+    "position": "middle-left",
+    "mobilePosition": "center",
+    "faviconUrl": "/uploads/headers-footers/1779096948870.png"
+  },
+  "menu": {
+    "menuSourceId": "navigation",
+    "menuType": "dropdown",
+    "stickyBehavior": "always",
+    "showSeparator": true
+  },
+  "utilities": {
+    "showLanguageSelector": true,
+    "topSpacing": 9,
+    "bottomSpacing": 10
+  },
+  "announcements": {
+    "enabled": true,
+    "items": [
+      {
+        "id": "faefe20a-a079-42c4-bfd4-a24c1ffd4b8e",
+        "text": "阿凡达手动阀",
+        "link": "https://feisman.cn/pages/contact"
+      },
+      {
+        "id": "9313dac8-1c4e-4aa3-aa7f-cda1b1199b50",
+        "text": "大大打算",
+        "link": "https://feisman.cn/"
+      }
+    ]
+  },
+  "search": {
+    "enabled": true,
+    "placeholder": ""
+  }
+}

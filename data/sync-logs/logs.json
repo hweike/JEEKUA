@@ -1,0 +1,72 @@
+[
+  {
+    "id": "02487f5a-00f6-4915-bd32-12015a9b357f",
+    "syncType": "menu",
+    "sourceLocale": "zh",
+    "targetLocale": "ja",
+    "status": "success",
+    "errorMsg": "",
+    "createdAt": "2026-04-18T06:25:45.647Z",
+    "itemId": "menus"
+  },
+  {
+    "id": "a391cf6f-f54b-47b2-b0d9-2d7296b8ddbf",
+    "syncType": "menu",
+    "sourceLocale": "zh",
+    "targetLocale": "de",
+    "status": "success",
+    "errorMsg": "",
+    "createdAt": "2026-04-18T06:25:45.378Z",
+    "itemId": "menus"
+  },
+  {
+    "id": "393b8262-40de-4dc1-b4ed-a862783e5f1e",
+    "syncType": "menu",
+    "sourceLocale": "zh",
+    "targetLocale": "ru",
+    "status": "success",
+    "errorMsg": "",
+    "createdAt": "2026-04-18T06:25:44.962Z",
+    "itemId": "menus"
+  },
+  {
+    "id": "df26cc46-c3a3-46a6-94fd-ec25c3625798",
+    "syncType": "menu",
+    "sourceLocale": "zh",
+    "targetLocale": "hi",
+    "status": "success",
+    "errorMsg": "",
+    "createdAt": "2026-04-18T06:25:44.688Z",
+    "itemId": "menus"
+  },
+  {
+    "id": "ea7effc0-1c52-430d-9f46-a8845b2b2e92",
+    "syncType": "menu",
+    "sourceLocale": "zh",
+    "targetLocale": "en",
+    "status": "success",
+    "errorMsg": "",
+    "createdAt": "2026-04-18T06:25:44.412Z",
+    "itemId": "menus"
+  },
+  {
+    "id": "666e4fd7-a8bf-42c6-a8c8-01333d8ef87e",
+    "syncType": "header",
+    "sourceLocale": "zh",
+    "targetLocale": "ja",
+    "status": "success",
+    "errorMsg": "",
+    "createdAt": "2026-04-18T01:58:26.251Z",
+    "itemId": "header"
+  },
+  {
+    "id": "1aa8d0cd-5e7a-4aaf-b0f9-1c5be709af2a",
+    "syncType": "header",
+    "sourceLocale": "zh",
+    "targetLocale": "en",
+    "status": "success",
+    "errorMsg": "",
+    "createdAt": "2026-04-18T01:58:25.938Z",
+    "itemId": "header"
+  }
+]

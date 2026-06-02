@@ -1,0 +1,32 @@
+{
+ "Common": {
+    "search_placeholder": "搜索...",
+    "subscribe_success": "订阅成功！",
+    "subscribe_error": "订阅失败，请重试。",
+    "subscribe_loading": "提交中...",
+    "close": "关闭",
+    "submit": "提交"
+  },
+  "Home": {
+    "title": "MORNSUN 电源解决方案",
+    "subtitle": "一站式工业电源解决方案提供商",
+    "description": "作为 MORNSUN 官方授权分销商，我们提供 100% 原装正品、专业技术支持和有竞争力的价格。",
+    "cta": "查看产品目录"
+  },
+  "Inquiry": {
+    "title": "询盘",
+    "subtitle": "请填写以下信息，我们将尽快与您联系",
+    "name": "姓名",
+    "email": "邮箱",
+    "company": "公司",
+    "phone": "电话",
+    "message": "询盘内容",
+    "relatedProduct": "关联产品",
+    "submit": "提交询盘",
+    "submitting": "提交中...",
+    "success": "提交成功！",
+    "thanks": "感谢您的询盘，我们会尽快回复您。",
+    "error": "提交失败，请稍后重试。"
+  }
+}
+

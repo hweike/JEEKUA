@@ -1,0 +1,18 @@
+{
+  "id": "default_video_category_published",
+  "name": "默认视频合集模板",
+  "category": "video_category",
+  "data": {
+    "root": {
+      "props": {
+        "title": "默认视频合集模板"
+      }
+    },
+    "content": [],
+    "zones": {}
+  },
+  "isSystem": true,
+  "version": "published",
+  "createdAt": "2026-05-04T11:15:56.976Z",
+  "updatedAt": "2026-05-17T06:56:05.817Z"
+}

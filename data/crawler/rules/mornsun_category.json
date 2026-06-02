@@ -1,0 +1,27 @@
+{
+  "name": "MORNSUN 产品分类树（两级）",
+  "crawlType": "category-tree",
+  "startUrl": "https://www.mornsun.cn/html/products/2980/compact-type-lm-r2s--35-350w.html",
+  "categoryTree": {
+    "containerSelector": [".pro-aside nav ul", ".aside nav ul"],
+    "level1": {
+      "itemSelector": "li",
+      "nameSelector": "a.classification",
+      "urlSelector": "a.classification"
+    },
+    "level2": {
+      "containerSelector": "dl",
+      "itemSelector": "dd",
+      "nameSelector": "a",
+      "urlSelector": "a"
+    },
+    "urlPrefix": "https://www.mornsun.cn",
+    "waitTimeout": 10000,
+    "descriptionSelector": ".description .left-con",
+    "fetchAllDescriptions": true,
+    "level2DescriptionDelay": 1000
+  },
+  "maxRetries": 3,
+  "requestTimeout": 60000,
+  "debugScreenshot": true
+}

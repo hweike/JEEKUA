@@ -1,0 +1,663 @@
+{
+  "id": "default_homepage_published",
+  "name": "默认HOME页模板",
+  "category": "page",
+  "data": {
+    "root": {
+      "props": {
+        "title": "默认HOME页模板"
+      }
+    },
+    "content": [
+      {
+        "type": "FullwidthSlider",
+        "props": {
+          "height": "550",
+          "autoplay": "none",
+          "images": [
+            {
+              "imageUrl": "https://cdn.shopify.com/s/files/1/0828/1872/8239/files/2_69e72619-2c03-45ae-8085-72a9df71e949.png",
+              "title": {
+                "zh": "中文标题",
+                "en": "hweike英文",
+                "textId": "I3-Faqc11k8GnhiRmIO2G_title"
+              },
+              "subtitle": {
+                "zh": "中文副标题",
+                "en": "hweike副英文",
+                "textId": "I3-Faqc11k8GnhiRmIO2G_sub"
+              },
+              "buttonText": {
+                "zh": "中文按钮",
+                "en": "hweike按钮",
+                "textId": "I3-Faqc11k8GnhiRmIO2G_btn"
+              },
+              "buttonLink": "",
+              "contentPosition": "center-center",
+              "desktopAlign": "left",
+              "mobileAlign": "left",
+              "titleFontSize": 40,
+              "titleColor": "#ffffff",
+              "subtitleFontSize": 24,
+              "subtitleColor": "#cccccc"
+            }
+          ],
+          "id": "FullwidthSlider-630eeeb4-4ca6-4af9-bab4-3fabb7a5a3f7"
+        }
+      },
+      {
+        "type": "Collapsible",
+        "props": {
+          "bannerType": "standard",
+          "backgroundColor": "#ffffff",
+          "globalTitle": {
+            "zh": "常见问题",
+            "en": "FAQ",
+            "textId": ""
+          },
+          "globalTitleFontSize": 40,
+          "globalTitleColor": "#000000",
+          "globalTitleAlign": "center",
+          "imageUrl": "",
+          "imageRatio": "adapt",
+          "imagePlacement": "left",
+          "rowTitleColor": "#000000",
+          "rowTitleFontSize": 18,
+          "rowContentColor": "#666666",
+          "rowContentFontSize": 16,
+          "containerType": "none",
+          "containerBgColor": "transparent",
+          "paddingTop": 32,
+          "paddingBottom": 32,
+          "items": [
+            {
+              "id": "SkJmJpds6P8QB6q7SpEnk",
+              "title": {
+                "zh": "adfasfasdf",
+                "en": "英文标题",
+                "textId": "QyywyA9EzTZKm3aq9QkTN"
+              },
+              "icon": "check_mark",
+              "content": {
+                "zh": "asdfsafdsafdsaf",
+                "en": "英文标题",
+                "textId": "WbXfHO4YNWQjU7J_R0CEt"
+              }
+            },
+            {
+              "id": "z8YD9kEt3dyUOvVQtoNaP",
+              "title": {
+                "zh": "阿德发生发大水发生大发手打发撒",
+                "en": "英文标题2",
+                "textId": "pqC2hSAA_QKeNyfZOROVS"
+              },
+              "icon": "box",
+              "content": {
+                "zh": "阿迪发沙发斯蒂芬阿道夫萨芬",
+                "en": "英文标题2",
+                "textId": "zsb3s4hR3bqeCzXCocosE"
+              }
+            }
+          ],
+          "id": "Collapsible-9a3b7f0b-2c16-409b-88a0-dd26a08fa100",
+          "titleGroup": {
+            "globalTitle": {
+              "zh": "可折叠标题",
+              "en": "英文阿打发发生",
+              "textId": "atNuxawaz-mUUpqUMbvkE"
+            },
+            "globalTitleFontSize": 43,
+            "globalTitleAlign": "left"
+          },
+          "imageGroup": {
+            "imageUrl": "https://cdn.shopify.com/s/files/1/0828/1872/8239/files/4_52f384ba-e8b0-4bd7-a711-36a12dfee982.png?v=1694513546&width=3840",
+            "imagePlacement": "right"
+          },
+          "layoutGroup": {
+            "containerType": "row",
+            "containerBgColor": "#e52f2f"
+          },
+          "bannerGroup": {
+            "backgroundColor": "#848080",
+            "bannerType": "fullwidth"
+          }
+        }
+      },
+      {
+        "type": "Multirow",
+        "props": {
+          "bannerType": "standard",
+          "backgroundColor": "#ffffff",
+          "imageHeight": "auto",
+          "imageWidth": "medium",
+          "imagePlacement": "alternate-left",
+          "columnBgColor": "#f9fafb",
+          "columnTitleColor": "#000000",
+          "columnTitleFontSize": 32,
+          "columnDescColor": "#666666",
+          "columnDescFontSize": 16,
+          "contentVertical": "middle",
+          "textAlign": "left",
+          "mobileTextAlign": "center",
+          "paddingTop": 32,
+          "paddingBottom": 32,
+          "items": [
+            {
+              "id": "C7_B3mbrtg33AfFOEOCBv",
+              "imageUrl": "https://cdn.shopify.com/s/files/1/0828/1872/8239/files/4_52f384ba-e8b0-4bd7-a711-36a12dfee982.png",
+              "title": {
+                "zh": "萨顶顶发生",
+                "en": "英文标题",
+                "textId": "YS4YZYtw9Uy7Y5z9llfKc"
+              },
+              "description": {
+                "zh": "阿斯顿发生发生发大水发啥打法",
+                "en": "英文描述",
+                "textId": "7eklE7zs8wfC_2xgR3D2K"
+              },
+              "linkLabel": {
+                "zh": "111",
+                "en": "",
+                "textId": "EFUzTG1WKY5NgtGoQKVmF"
+              },
+              "linkUrl": "http://localhost:3000/admin/webbuilder"
+            }
+          ],
+          "id": "Multirow-e7639e1d-3c26-4163-ab7f-9ee43940a8c0",
+          "bannerGroup": {
+            "bannerType": "fullwidth",
+            "backgroundColor": "#ef2626"
+          },
+          "imageGroup": {
+            "imageHeight": "large",
+            "imageWidth": "small",
+            "imagePlacement": "alternate-left"
+          }
+        }
+      },
+      {
+        "type": "Button",
+        "props": {
+          "text": {
+            "zh": "",
+            "en": "Learn more ...",
+            "textId": "Ybsrb1qBkherTMmqfgk35"
+          },
+          "buttonColor": "#f72020",
+          "textColor": "#ffffff",
+          "fontSize": 20,
+          "bold": false,
+          "italic": false,
+          "underline": false,
+          "textAlign": "center",
+          "buttonAlign": "center",
+          "link": "",
+          "borderRadius": "20px",
+          "id": "Button-6f2c7a1c-1cd7-4fbd-8200-4e413f42a5bf"
+        }
+      },
+      {
+        "type": "ImageBanner",
+        "props": {
+          "bannerType": "standard",
+          "imageSettings": {
+            "image1Url": "",
+            "image2Url": "",
+            "overlayOpacity": 0,
+            "heightPreset": "auto",
+            "animation": "none"
+          },
+          "contentSettings": {
+            "title": {
+              "zh": "图片横幅",
+              "en": "Image banner",
+              "textId": ""
+            },
+            "titleFontSize": 48,
+            "titleColor": "#ffffff",
+            "text": {
+              "zh": "向客户提供有关横幅图像的详细信息",
+              "en": "Give customers details about the banner image(s)",
+              "textId": ""
+            },
+            "textFontSize": 24,
+            "textColor": "#ffffff",
+            "button1Text": {
+              "zh": "按钮",
+              "en": "Button label",
+              "textId": ""
+            },
+            "button1Color": "#000000",
+            "button1Link": "",
+            "button2Text": {
+              "zh": "按钮",
+              "en": "Button label",
+              "textId": "U5UvmMeXgw-glS2xt9HlD"
+            },
+            "button2Color": "#000000",
+            "button2Link": "",
+            "contentPosition": "center-center",
+            "textAlign": "center",
+            "containerEnabled": true,
+            "containerBgColor": "rgba(0,0,0,0.6)",
+            "containerBorderRadius": 16,
+            "containerPadding": 32
+          },
+          "id": "ImageBanner-d17aa22b-94be-4f93-aa24-941429a45f40"
+        }
+      },
+      {
+        "type": "Accordion",
+        "props": {
+          "bannerType": "standard",
+          "backgroundColor": "#ffffff",
+          "rowTitleColor": "#000000",
+          "rowTitleFontSize": 20,
+          "rowTitleAlign": "left",
+          "rowHeaderBgColor": "#f3f4f6",
+          "itemsPerRow": 3,
+          "itemsGap": 20,
+          "contentTitleFontSize": 18,
+          "contentTitleAlign": "center",
+          "contentTextFontSize": 14,
+          "contentTextAlign": "center",
+          "paddingTop": 32,
+          "paddingBottom": 32,
+          "items": [
+            {
+              "id": "4xXQdtQT69etHdDgBcSwt",
+              "title": {
+                "zh": "手风琴项目 1",
+                "en": "",
+                "textId": "QQu9FaF3Iehdm4OTk881X"
+              },
+              "contents": [
+                {
+                  "id": "njNwucEUvoyQsAqEVSl5L",
+                  "imageUrl": "https://cdn.shopify.com/s/files/1/0828/1872/8239/files/2_69e72619-2c03-45ae-8085-72a9df71e949.png",
+                  "title": {
+                    "zh": "标题 (中文)",
+                    "en": "ddddd",
+                    "textId": "1BW5a9eHnLX4LeAUchgxl"
+                  },
+                  "paragraph": {
+                    "zh": "段落文本 (中文)段落文本 (中文)段落文本 (中文)段落文本 (中文)",
+                    "en": "段落文本 (英文)",
+                    "textId": "Vipjas1HMtblrxOeSzwD5"
+                  },
+                  "link": "http://localhost:3000/admin/webbuilder",
+                  "contents": 0
+                },
+                {
+                  "id": "lYFdR6NsdP60UM_wayyLc",
+                  "imageUrl": "",
+                  "title": {
+                    "zh": "标题 (中文)33",
+                    "en": "标题 (英文)2",
+                    "textId": "cLgqNU1It5jEKzUCbQmmm"
+                  },
+                  "paragraph": {
+                    "zh": "段落文本 (中文)",
+                    "en": "标题 (英文)段落文本",
+                    "textId": "ci9_RFQl-7VXJzRFG9kTV"
+                  },
+                  "link": ""
+                }
+              ]
+            }
+          ],
+          "id": "Accordion-e98ed67c-e133-451f-b3d7-dfc766ad503d",
+          "bannerGroup": {
+            "bannerType": "fullwidth"
+          },
+          "rowGroup": {
+            "rowTitleFontSize": 20,
+            "itemsPerRow": 4,
+            "itemsGap": 10
+          }
+        }
+      },
+      {
+        "type": "DividingLine",
+        "props": {
+          "lineType": "double",
+          "thickness": 14,
+          "color": "#1d4697",
+          "id": "DividingLine-134d0363-b98d-4c60-8710-34e163681a52"
+        }
+      },
+      {
+        "type": "List",
+        "props": {
+          "items": [
+            {
+              "id": "l3TgKHDrQhp7bfM-hl37t",
+              "text": {
+                "zh": "中文项目1",
+                "en": "222",
+                "textId": "m73iQIvfG4fZqh4ueO7f5"
+              },
+              "textColor": "#dd2c2c",
+              "fontSize": 20,
+              "textAlign": "left",
+              "bold": true,
+              "italic": true,
+              "underline": true,
+              "link": ""
+            },
+            {
+              "id": "fKcb9XJXkevcmk9wAMWuH",
+              "text": {
+                "zh": "中文项目2",
+                "en": "333",
+                "textId": "hXHG6iWoyaNwJ21mjS6T5"
+              },
+              "textColor": "#000000",
+              "fontSize": 16,
+              "textAlign": "left",
+              "bold": false,
+              "italic": false,
+              "underline": false,
+              "link": ""
+            },
+            {
+              "id": "68yGuCiW2-3EwO--TCwUj",
+              "text": {
+                "zh": "中文项目3",
+                "en": "444",
+                "textId": "yeVehW0mg-bSV9znJMfs0"
+              },
+              "textColor": "#000000",
+              "fontSize": 16,
+              "textAlign": "left",
+              "bold": false,
+              "italic": false,
+              "underline": false,
+              "link": ""
+            },
+            {
+              "id": "Zj8fc1m-t930Ggu1p1Z7L",
+              "text": {
+                "zh": "中文项目4",
+                "en": "555",
+                "textId": "Mjj-Ejlh7hr2REUNCWR6c"
+              },
+              "textColor": "#000000",
+              "fontSize": 16,
+              "textAlign": "left",
+              "bold": false,
+              "italic": false,
+              "underline": false,
+              "link": "http://localhost:3000/zh"
+            }
+          ],
+          "iconType": "none",
+          "id": "List-5f716fda-bae3-48e0-946d-73c7b9607bd9"
+        }
+      },
+      {
+        "type": "FullwidthSlider",
+        "props": {
+          "height": "550",
+          "autoplay": "none",
+          "images": [
+            {
+              "imageUrl": "",
+              "title": {
+                "zh": "顶顶顶顶订单",
+                "en": "对对对",
+                "textId": "J_z3H2Uv1LFeQcPAiJfVC_title"
+              },
+              "subtitle": {
+                "zh": "",
+                "en": "ddd333",
+                "textId": "J_z3H2Uv1LFeQcPAiJfVC_sub"
+              },
+              "buttonText": {
+                "zh": "444",
+                "en": "eee的",
+                "textId": "J_z3H2Uv1LFeQcPAiJfVC_btn"
+              },
+              "buttonLink": "",
+              "contentPosition": "center-center",
+              "desktopAlign": "left",
+              "mobileAlign": "left",
+              "titleFontSize": 40,
+              "titleColor": "#ef5151",
+              "subtitleFontSize": 24,
+              "subtitleColor": "#e85e5e"
+            }
+          ],
+          "id": "FullwidthSlider-859b5273-fde6-4fcc-8465-d7eaa1b798c7"
+        }
+      },
+      {
+        "type": "PicwithText",
+        "props": {
+          "bannerType": "fullwidth",
+          "backgroundColor": "#e92626",
+          "imageUrl": "https://cdn.shopify.com/s/files/1/0828/1872/8239/files/4_52f384ba-e8b0-4bd7-a711-36a12dfee982.png",
+          "imageHeight": "large",
+          "imageWidth": "medium",
+          "imagePosition": "right",
+          "animation": "none",
+          "title": {
+            "zh": "标题图文横幅",
+            "en": "Title",
+            "textId": "hQWbjrzTlL_gY2t61xqvN"
+          },
+          "titleFontSize": 32,
+          "titleColor": "#000000",
+          "text": {
+            "zh": "文本内容11hweike",
+            "en": "Text content",
+            "textId": "aHOx2jBFSH5NGkB5pn--y"
+          },
+          "textFontSize": 16,
+          "textColor": "#000000",
+          "buttonText": {
+            "zh": "按钮",
+            "en": "Button",
+            "textId": "XgsA0Ox850XF3AN4giUdu"
+          },
+          "buttonFontSize": 16,
+          "buttonColor": "#000000",
+          "buttonLink": "http://localhost:3000/admin/webbuilder",
+          "contentVertical": "center",
+          "textAlign": "right",
+          "textAreaBackgroundColor": "#e65454",
+          "paddingTop": 32,
+          "paddingBottom": 32,
+          "id": "PicwithText-3713c962-b123-4a47-9873-7d5ba39a9f32"
+        }
+      },
+      {
+        "type": "ImageBanner",
+        "props": {
+          "bannerType": "fullwidth",
+          "imageSettings": {
+            "image1Url": "https://cdn.shopify.com/s/files/1/0828/1872/8239/files/4_52f384ba-e8b0-4bd7-a711-36a12dfee982.png",
+            "image2Url": "",
+            "overlayOpacity": 0,
+            "heightPreset": "auto",
+            "animation": "parallax"
+          },
+          "contentSettings": {
+            "title": {
+              "zh": "图片横幅",
+              "en": "Image banner",
+              "textId": "treSdPXT8-ZwmDBnSZcBh"
+            },
+            "titleFontSize": 62,
+            "titleColor": "#000000",
+            "text": {
+              "zh": "东莞市福洋电子有限公司",
+              "en": "Give customers details about the banner image(s) banner image(s) ",
+              "textId": "ILIuzIyy9xkamJZQtIGzV"
+            },
+            "textFontSize": 28,
+            "textColor": "#1d1b1b",
+            "button1Text": {
+              "zh": "按钮1",
+              "en": "Button1",
+              "textId": "SVfO49uLZrUGGSj8sFJDr"
+            },
+            "button1Color": "#000000",
+            "button1Link": "",
+            "button2Text": {
+              "zh": "按钮2",
+              "en": "Button2",
+              "textId": "0YNi7BAlNHCOF08YflN6v"
+            },
+            "button2Color": "#000000",
+            "button2Link": "Button1",
+            "contentPosition": "center-center",
+            "textAlign": "center",
+            "containerEnabled": true,
+            "containerBgColor": "rgba(0,0,0,0.6)",
+            "containerBorderRadius": 41,
+            "containerPadding": 44
+          },
+          "id": "ImageBanner-81461441-17bd-4b98-bcbc-2d632f0c1ee2"
+        }
+      },
+      {
+        "type": "Video",
+        "props": {
+          "bannerType": "fullwidth",
+          "backgroundColor": "#fa8181",
+          "title": {
+            "zh": "视频标题",
+            "en": "Video Title",
+            "textId": "569RDWNRxKaj63EelipOR"
+          },
+          "titleFontSize": 32,
+          "titleColor": "#000000",
+          "titleAlign": "center",
+          "videoUrl": "https://www.bilibili.com/video/BV1NqL46oEuR?t=7.2",
+          "videoThumbnail": "https://cdn.shopify.com/s/files/1/0828/1872/8239/files/4_52f384ba-e8b0-4bd7-a711-36a12dfee982.png?v=1694513546&width=3840",
+          "loop": false,
+          "paddingTop": 32,
+          "paddingBottom": 32,
+          "id": "Video-1361866b-7194-4bb0-baa2-1e8d982ed940"
+        }
+      },
+      {
+        "type": "Heading",
+        "props": {
+          "level": 1,
+          "title": {
+            "zh": "标题-中文",
+            "en": "标题-英文是是是",
+            "textId": "p9wKEaa6fJUnXfa1BxsGp"
+          },
+          "textAlign": "left",
+          "bold": false,
+          "italic": false,
+          "underline": false,
+          "fontSize": "4xl",
+          "id": "Heading-32606d7e-57ac-40a7-bd1b-8e8b0b57a3e1"
+        }
+      },
+      {
+        "type": "Paragraph",
+        "props": {
+          "text": {
+            "zh": "假期出行需求集中释放，交通旅游服务持续升温。五一假期，深圳市民、游客出行需求暴增，全市交通运输、仓储和邮政业开票同比增长104.7%，其中航空运输增长59.3%。市内出行活跃，城市公共交通运输增长440%、出租汽车客运服务增长338.2%。\n\n国内游、出境游受热捧，旅游服务开票金额增长293.3%，旅行社及相关服务开票金额增长190.0%。 \n\n——“票根经济”拉动效应显著，批零住餐消费增势良好。假期全市批发和零售业开票增速整体稳中向好，食品消费需求旺盛，其中零售业开票增长77.3%。与此同时，以赛事、演出为起点的“票根经济”叠加有奖发票活动，充分释放市民和游客用餐住宿等需求，假期全市住宿业开票增长190.3%（旅游饭店等星级酒店增长174%）。",
+            "en": "asdfasfasf\nasdfasfdas\nddadadadss1111aasdfas\nasdfasfasf",
+            "textId": "Gn_347Wco3KCY8w0Cq7h2"
+          },
+          "fontSize": 18,
+          "textAlign": "left",
+          "bold": true,
+          "italic": false,
+          "underline": false,
+          "color": "#5d2121",
+          "id": "Paragraph-913dfc18-b90f-433d-905d-58add325d488",
+          "link": "https://feisman.cn/pages/about-us"
+        }
+      },
+      {
+        "type": "Richtext",
+        "props": {
+          "bannerType": "fullwidth",
+          "title": {
+            "zh": "000-13Bxx-NS 产品是金升阳为客户提供的灌胶超薄砖块开关电源， 适用于应用环境",
+            "en": "",
+            "textId": "i8T9-52juaKWR0qNFi8kv"
+          },
+          "titleFontSize": 48,
+          "titleColor": "#000000",
+          "text": {
+            "zh": "LBF1000-13Bxx-NS 产品是金升阳为客户提供的灌胶超薄砖块开关电源， 适用于应用环境相对恶劣的工业及户外等场合。 该系列电源具有全球通用输入电压范围、 交直流两用、 高性价比、 高效率、 高可靠性、 安全隔离等优点。 产品安全性高， EMC 性能好， EMC 及安全规格满足 IEC/UL/EN 62368、 GB4943 等标准。 广泛应用于工控、 LED、 路灯控制、 电力、 安防、 通讯、 智能家居等领域。  展开查看更多  ",
+            "en": "",
+            "textId": "iSPOUCWhldf7OuGjY121N"
+          },
+          "textFontSize": 24,
+          "textColor": "#000000",
+          "button1Text": {
+            "zh": "按钮1",
+            "en": "",
+            "textId": "9NyLOU0HY5XXwLuNtlcnl"
+          },
+          "button1Color": "#000000",
+          "button1Link": "",
+          "button2Text": {
+            "zh": "按钮2",
+            "en": "",
+            "textId": "DawlN_KPPjIY_pDiWU_MJ"
+          },
+          "button2Color": "#000000",
+          "button2Link": "",
+          "contentPosition": "center",
+          "textAlign": "center",
+          "containerPaddingTop": 69,
+          "containerPaddingBottom": 71,
+          "id": "Richtext-73965414-c6c8-4519-a783-d995180465c6",
+          "backgroundColor": "#e55353"
+        }
+      },
+      {
+        "type": "WidthSlider",
+        "props": {
+          "height": "550",
+          "autoplay": "none",
+          "images": [
+            {
+              "imageUrl": "",
+              "title": {
+                "zh": "对对对",
+                "en": "英文标题",
+                "textId": "yOZifwGdMiDXM4m85GzWj_title"
+              },
+              "subtitle": {
+                "zh": "打",
+                "en": "英文副标题",
+                "textId": "yOZifwGdMiDXM4m85GzWj_sub"
+              },
+              "buttonText": {
+                "zh": "啊大法师",
+                "en": "",
+                "textId": "yOZifwGdMiDXM4m85GzWj_btn"
+              },
+              "buttonLink": "",
+              "contentPosition": "center-center",
+              "desktopAlign": "left",
+              "mobileAlign": "left",
+              "titleFontSize": 40,
+              "titleColor": "#ffffff",
+              "subtitleFontSize": 24,
+              "subtitleColor": "#cccccc"
+            }
+          ],
+          "id": "WidthSlider-bff6dbfd-96c5-4d91-986c-110d82cd33c1"
+        }
+      }
+    ],
+    "zones": {}
+  },
+  "isSystem": true,
+  "version": "published",
+  "createdAt": "2026-05-17T06:56:05.801Z",
+  "updatedAt": "2026-05-25T15:59:37.918Z"
+}

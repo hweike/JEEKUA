@@ -1,0 +1,47 @@
+{
+  "id": "footer",
+  "name": "底部菜单",
+  "isEditable": false,
+  "items": [
+    {
+      "id": "e5f6a7b8-c9d0-4e1f-2a3b-4c5d6e7f8a9b",
+      "parentId": null,
+      "label": "关于我们",
+      "linkType": "internal",
+      "linkValue": "/about",
+      "order": 0
+    },
+    {
+      "id": "f6a7b8c9-d0e1-4f2a-3b4c-5d6e7f8a9b0c",
+      "parentId": null,
+      "label": "联系我们",
+      "linkType": "internal",
+      "linkValue": "/contact",
+      "order": 1
+    },
+    {
+      "id": "24c9fb9e-95c1-4f7e-82ad-4870f3846ebb",
+      "parentId": null,
+      "label": "理想比例",
+      "linkType": "internal",
+      "linkValue": "/products",
+      "order": 2
+    },
+    {
+      "id": "2ca391d4-5c3c-415f-b2e2-b483fb4378f7",
+      "parentId": null,
+      "label": "移动端适配",
+      "linkType": "internal",
+      "linkValue": "/products",
+      "order": 3
+    },
+    {
+      "id": "2ecc72ca-e6d3-478b-aa23-3ee55256267b",
+      "parentId": null,
+      "label": "特殊说明",
+      "linkType": "internal",
+      "linkValue": "/products",
+      "order": 4
+    }
+  ]
+}

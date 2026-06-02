@@ -1,0 +1,30 @@
+{
+  "style": "simple",
+  "logo": {
+    "imageUrl": "",
+    "width": 120,
+    "position": "middle-left",
+    "mobilePosition": "center",
+    "faviconUrl": ""
+  },
+  "menu": {
+    "menuSourceId": "navigation",
+    "menuType": "dropdown",
+    "stickyBehavior": "scroll-up",
+    "showSeparator": false
+  },
+  "utilities": {
+    "showLanguageSelector": true,
+    "topSpacing": 16,
+    "bottomSpacing": 16
+  },
+  "announcements": {
+    "enabled": false,
+    "items": [],
+    "link": "https://example.com"
+  },
+  "search": {
+    "enabled": true,
+    "placeholder": ""
+  }
+}

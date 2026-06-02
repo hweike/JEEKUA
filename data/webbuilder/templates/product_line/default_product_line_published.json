@@ -1,0 +1,27 @@
+{
+  "id": "default_product_line_published",
+  "name": "默认产品线模板",
+  "category": "product_line",
+  "data": {
+    "root": {
+      "props": {
+        "title": "默认产品线模板"
+      }
+    },
+    "content": [
+      {
+        "type": "ProductLineBlock",
+        "props": {
+          "showSidebar": true,
+          "productsPerRow": 3,
+          "id": "ProductLineBlock-b1a65277-6ea4-4b59-aa82-b4ba61ed3e10"
+        }
+      }
+    ],
+    "zones": {}
+  },
+  "isSystem": true,
+  "version": "published",
+  "createdAt": "2026-05-04T13:42:46.741Z",
+  "updatedAt": "2026-05-20T03:37:42.515Z"
+}

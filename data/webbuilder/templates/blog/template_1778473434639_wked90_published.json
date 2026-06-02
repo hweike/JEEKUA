@@ -1,0 +1,27 @@
+{
+  "id": "template_1778473434639_wked90_published",
+  "name": "公司新闻模板",
+  "category": "blog",
+  "data": {
+    "root": {
+      "props": {
+        "title": "公司新闻模板"
+      }
+    },
+    "content": [
+      {
+        "type": "BlogCollectionBlock",
+        "props": {
+          "showSidebar": false,
+          "postsPerRow": 1,
+          "id": "BlogCollectionBlock-f3f58402-42f6-4488-b3b3-ebb22a60f99a"
+        }
+      }
+    ],
+    "zones": {}
+  },
+  "isSystem": false,
+  "version": "published",
+  "createdAt": "2026-05-11T04:23:54.640Z",
+  "updatedAt": "2026-05-11T04:24:17.505Z"
+}

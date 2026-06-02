@@ -1,0 +1,26 @@
+[
+  {
+    "id": "lib_1777282260718_kbpfpm",
+    "name": "金升阳科技",
+    "description": "",
+    "sortOrder": 0,
+    "createdAt": "2026-04-27T09:31:00.718Z",
+    "templateId": "default_document_library_published",
+    "slug": "mornsun",
+    "seo_title": "",
+    "seo_description": "",
+    "seo_keywords": ""
+  },
+  {
+    "id": "lib_1778130743412_3t872z",
+    "name": "费思漫科技",
+    "description": "",
+    "templateId": "default_document_library_published",
+    "slug": "feisman",
+    "seo_title": "",
+    "seo_description": "",
+    "seo_keywords": "",
+    "sortOrder": 1,
+    "createdAt": "2026-05-07T05:12:23.412Z"
+  }
+]

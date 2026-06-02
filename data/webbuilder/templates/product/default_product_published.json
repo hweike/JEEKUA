@@ -1,0 +1,27 @@
+{
+  "id": "default_product_published",
+  "name": "默认产品详情模板",
+  "category": "product",
+  "data": {
+    "root": {
+      "props": {
+        "title": "默认产品详情模板"
+      }
+    },
+    "content": [
+      {
+        "type": "ProductDetailsBlock",
+        "props": {
+          "layout": "left-right",
+          "imageSize": "medium",
+          "id": "ProductDetailsBlock-94dc1eae-02a4-4d25-9ffb-18c73e4c5823"
+        }
+      }
+    ],
+    "zones": {}
+  },
+  "isSystem": true,
+  "version": "published",
+  "createdAt": "2026-05-04T11:15:56.975Z",
+  "updatedAt": "2026-05-20T03:38:44.386Z"
+}

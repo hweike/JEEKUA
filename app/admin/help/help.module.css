@@ -1,0 +1,129 @@
+/* 帮助中心布局样式 - 其余部分不变，仅修改 .content table */
+.layout {
+  display: flex;
+  min-height: 100vh;
+}
+
+.sidebar {
+  width: 280px;
+  background: #f9f9f9;
+  border-right: 1px solid #e5e5e5;
+  padding: 1.5rem;
+  overflow-y: auto;
+  position: sticky;
+  top: 0;
+  height: 100vh;
+}
+
+.sidebar h2 {
+  font-size: 1.25rem;
+  margin-bottom: 1.5rem;
+  font-weight: 600;
+  color: #111;
+}
+
+.sidebar ul {
+  list-style: none;
+  padding-left: 0;
+  margin: 0;
+}
+
+.sidebar li {
+  margin: 0.5rem 0;
+}
+
+.sidebar a {
+  text-decoration: none;
+  color: #0066cc;
+  font-size: 0.9rem;
+}
+
+.sidebar a:hover {
+  text-decoration: underline;
+}
+
+.sidebar strong {
+  font-weight: 600;
+  color: #333;
+  display: block;
+  margin: 0.75rem 0 0.25rem;
+}
+
+/* 内容区域：滚动容器 */
+.content {
+  flex: 1;
+  padding: 2rem;
+  max-width: 900px;
+  margin: 0 auto;
+  overflow-x: auto;   /* 表格超宽时滚动条出现于此 */
+}
+
+.content h1 {
+  font-size: 2rem;
+  margin-top: 0;
+  margin-bottom: 1rem;
+  border-bottom: 1px solid #eaeaea;
+  padding-bottom: 0.5rem;
+}
+
+.content h2 {
+  font-size: 1.5rem;
+  margin: 1.5rem 0 0.75rem;
+}
+
+.content p {
+  line-height: 2.0;
+  margin: 1rem 0;
+}
+
+.content ul,
+.content ol {
+  margin: 1rem 0;
+  padding-left: 1.5rem;
+}
+
+/* ✅ 关键修改：表格宽度由内容决定，超出父容器时触发滚动 */
+.content table {
+  display: block;               /* 使表格成为可滚动的块级元素 */
+  overflow-x: auto;            /* 横向滚动条 */
+  white-space: nowrap;         /* 强制表格内容不换行，宽度由内容撑开 */
+  width: auto;                 /* 让宽度由内容决定，不使用100% */
+  max-width: 100%;             /* 限制最大宽度不超过父容器（可选） */
+  border-collapse: collapse;
+  font-size: 0.875rem;
+  line-height: 1.6;
+  margin: 1.5em 0;
+  border-radius: 0.75rem;
+  box-shadow: 0 1px 2px 0 rgba(0, 0, 0, 0.05);
+}
+
+.content thead th {
+  padding: 0.5rem 0.75rem;
+  background-color: #f8fafc;
+  font-weight: 600;
+  border-bottom: 1px solid #e2e8f0;
+}
+
+.content td {
+  padding: 0.5rem 0.75rem;
+  vertical-align: top;
+  border-bottom: 1px solid #f1f5f9;
+  background-color: #ffffff;
+}
+
+.content td ul {
+  margin: 0;
+  padding-left: 1.2rem;
+  list-style-type: disc;
+}
+.content td li {
+  margin: 0.15rem 0;
+  line-height: 1.6;
+}
+.content td br {
+  display: inline;
+  line-height: 1.6;
+}
+.content tr:last-child td {
+  border-bottom: none;
+}

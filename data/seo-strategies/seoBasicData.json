@@ -1,0 +1,9 @@
+{
+  "site_name": "FEISMAN POWER",
+  "brand_name": "FEISMAN",
+  "site_url": "https://feismanpower.com",
+  "default_locale": "en",
+  "supported_locales": ["en", "zh"],
+  "target_audience": "B2B and B2C customers looking for reliable power solutions",
+  "core_values": ["quality", "innovation", "customer-first"]
+}

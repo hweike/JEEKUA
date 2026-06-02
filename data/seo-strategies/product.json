@@ -1,0 +1,26 @@
+{
+  "pageType": "product",
+  "label": "产品",
+  "fields": {
+    "seo_title": {
+      "enabled": true,
+      "required": true,
+      "minLength": 50,
+      "maxLength": 60,
+      "promptTemplate": "你是一个专业的电商SEO专家。请为以下产品生成一个SEO标题（title）。\n产品名称：{title}\n品牌：{site_name}\n核心关键词：{seo_keywords}\n产品简介：{content_summary}\n要求：标题长度在{minLength}-{maxLength}字符之间，必须包含核心关键词，结构参考：{title} | {site_name}。只输出标题，不要有任何额外解释。"
+    },
+    "seo_description": {
+      "enabled": true,
+      "required": true,
+      "minLength": 150,
+      "maxLength": 160,
+      "promptTemplate": "请为同一产品生成一条SEO描述（meta description）。\n产品名称：{title}\n卖点：{content_summary}\n目标客户：根据产品自行判断\n要求：长度{minLength}-{maxLength}字符，突出1-2个核心卖点，结尾加入行动号召（如“立即购买”、“了解更多”）。只输出描述，不要有其他内容。"
+    },
+    "seo_keywords": {
+      "enabled": true,
+      "required": false,
+      "promptTemplate": "请为以下产品提取5-8个核心SEO关键词（英文逗号分隔）。\n产品名称：{title}\n产品描述：{content_summary}\n品牌：{site_name}\n要求：关键词应包含主要产品词、长尾词、场景词。只输出关键词列表，不要序号和额外文字。"
+    }
+  },
+  "useGlobalContext": true
+}

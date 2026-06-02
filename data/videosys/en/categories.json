@@ -1,0 +1,13 @@
+{
+  "product-video": {
+    "name": "产品视频",
+    "slug": "product-video",
+    "order": 0,
+    "commentStatus": "allowed",
+    "isSystem": true,
+    "template": "",
+    "seo_keywords": "",
+    "seo_title": "",
+    "seo_description": ""
+  }
+}

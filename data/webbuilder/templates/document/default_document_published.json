@@ -1,0 +1,18 @@
+{
+  "id": "default_document_published",
+  "name": "默认文档详情模板",
+  "category": "document",
+  "data": {
+    "root": {
+      "props": {
+        "title": "默认文档详情模板"
+      }
+    },
+    "content": [],
+    "zones": {}
+  },
+  "isSystem": true,
+  "version": "published",
+  "createdAt": "2026-05-04T11:16:50.512Z",
+  "updatedAt": "2026-05-17T06:56:05.815Z"
+}

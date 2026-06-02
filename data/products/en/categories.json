@@ -1,0 +1,79 @@
+{
+  "productLines": [
+    {
+      "id": "1777552920876",
+      "name": "金升阳电源",
+      "order": 0,
+      "templateId": "default_product_line_published",
+      "slug": "",
+      "seoTitle": "",
+      "seoDescription": "",
+      "seoKeywords": ""
+    },
+    {
+      "id": "1779864128281",
+      "name": "工业胶布",
+      "order": 1,
+      "templateId": "default_product_line_published",
+      "slug": "",
+      "seoTitle": "",
+      "seoDescription": "",
+      "seoKeywords": ""
+    }
+  ],
+  "categories": [
+    {
+      "id": "1780121785975-j8h26jh9",
+      "name": "AC DC Power Supply",
+      "slug": "ac-dc-power-supply",
+      "order": 0,
+      "productLineId": "1777552920876",
+      "templateId": "default_product_category_published",
+      "image": "/uploads/1780226899999-uzx5b44b.jpg",
+      "description": "",
+      "seoTitle": "SEO标题1",
+      "seoDescription": "SEO描述1",
+      "seoKeywords": "SEO关键词1",
+      "attributeTemplateId": "94565720",
+      "series": [
+        {
+          "id": "1780121785975-mg9rksxq",
+          "name": "AC DC Power Supply12",
+          "slug": "ac-dc-power-supply-1-2",
+          "order": 0,
+          "image": "/uploads/1780226930292-7k3nlp4u.jpg",
+          "description": "AC DC Power Supplydasfas",
+          "seoTitle": "SEO标题2",
+          "seoDescription": "SEO描述2",
+          "seoKeywords": "SEO关键词2"
+        },
+        {
+          "id": "1780121785975-hgyjg9ht",
+          "name": "AC DC Power Supply13",
+          "slug": "ac-dc-power-supply-1-3",
+          "order": 1,
+          "image": "/uploads/imported/en/import_1780121786057_b3f12650.png",
+          "description": "阿斯顿法师法",
+          "seoTitle": "SEO标题3",
+          "seoDescription": "SEO描述3",
+          "seoKeywords": "SEO关键词3"
+        }
+      ]
+    },
+    {
+      "id": "1780121785975-as634uj1",
+      "name": "Din Rai power supply",
+      "slug": "din-rai-power-supply",
+      "order": 1,
+      "productLineId": "1777552920876",
+      "templateId": "default_product_category_published",
+      "image": "",
+      "description": "",
+      "seoTitle": "",
+      "seoDescription": "",
+      "seoKeywords": "",
+      "attributeTemplateId": "94565720",
+      "series": []
+    }
+  ]
+}
