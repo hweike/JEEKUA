@@ -4,7 +4,7 @@ import { useState } from 'react';
 import { Edit, Trash2, Plus } from 'lucide-react';
 import ImageUpload from '@/components/ImageUpload';
 import SeoFields from '@/components/common/SeoFields';
-import {getFieldHint,getFieldPlaceholder,HINT_PATHS,InfoTooltip} from '@/config/fieldHints';
+import { getFieldHint, getFieldPlaceholder, HINT_PATHS, InfoTooltip } from '@/config/fieldHints';
 
 interface Series {
   id: string;
@@ -125,7 +125,7 @@ export default function SeriesManager({ category, attributeTemplates, onUpdate }
                 series={series}
                 attributeTemplates={attributeTemplates}
                 category={category}
-                onSave={(updated) => updateSeries(idx, updated)}
+                onSave={(updated: Series) => updateSeries(idx, updated)}
                 onCancel={() => setEditingSeries(null)}
               />
             ) : (
@@ -174,11 +174,28 @@ export default function SeriesManager({ category, attributeTemplates, onUpdate }
   );
 }
 
+// SeriesForm 组件 Props 类型定义
+interface SeriesFormProps {
+  series: Series;
+  attributeTemplates: Array<{ id: string; name: string }>;
+  category: {
+    id: string;
+    name: string;
+    series: Series[];
+    attributeTemplateId?: string;
+    pageTemplate?: string;
+    productLineId?: string;
+  };
+  onSave: (series: Series) => void;
+  onCancel: () => void;
+  isNew?: boolean;
+}
+
 // 二级分类表单（使用公共 SEO 组件，继承字段只读）
-function SeriesForm({ series, attributeTemplates, category, onSave, onCancel, isNew }: any) {
+function SeriesForm({ series, attributeTemplates, category, onSave, onCancel, isNew }: SeriesFormProps) {
   const [form, setForm] = useState<Series>(() => ({ ...series }));
 
-  const inheritedAttributeTemplate = attributeTemplates.find((t: any) => t.id === category.attributeTemplateId);
+  const inheritedAttributeTemplate = attributeTemplates.find((t) => t.id === category.attributeTemplateId);
   const inheritedPageTemplate = category.pageTemplate === 'default' ? '默认模板' : '全宽模板';
 
   const handleSubmit = () => {
@@ -198,7 +215,7 @@ function SeriesForm({ series, attributeTemplates, category, onSave, onCancel, is
             <h3 className="font-medium text-lg mb-3">基本信息</h3>
             <div className="space-y-3">
               <div>
-                <label className="block font-medium mb-1">二级分类名称 *<InfoTooltip hintKey={HINT_PATHS.productCategory.basic.name} /></label>
+                <label className="block font-medium mb-1">二级分类名称 *<InfoTooltip hintKey={HINT_PATHS.productCategory.basic.name as any} /></label>
                 <input
                   type="text"
                   value={form.name}
@@ -209,7 +226,7 @@ function SeriesForm({ series, attributeTemplates, category, onSave, onCancel, is
                 />
               </div>
               <div>
-                <label className="block font-medium mb-1">描述<InfoTooltip hintKey={HINT_PATHS.productCategory.basic.description} /></label>
+                <label className="block font-medium mb-1">描述<InfoTooltip hintKey={HINT_PATHS.productCategory.basic.description as any} /></label>
                 <textarea
                   value={form.description}
                   onChange={e => setForm({ ...form, description: e.target.value })}
@@ -254,7 +271,7 @@ function SeriesForm({ series, attributeTemplates, category, onSave, onCancel, is
           <h3 className="font-medium text-lg mb-3">显示设置</h3>
           <div className="space-y-4">
             <div>
-              <label className="block font-medium mb-1">排序序号<InfoTooltip hintKey={HINT_PATHS.productCategory.basic.order} /></label>
+              <label className="block font-medium mb-1">排序序号<InfoTooltip hintKey={HINT_PATHS.productCategory.basic.order as any} /></label>
               <input
                 type="number"
                 value={form.order}
@@ -264,16 +281,15 @@ function SeriesForm({ series, attributeTemplates, category, onSave, onCancel, is
               />
             </div>
             <div>
-              <label className="block font-medium mb-1">图片<InfoTooltip hintKey={HINT_PATHS.productCategory.basic.image} /></label>
+              <label className="block font-medium mb-1">图片<InfoTooltip hintKey={HINT_PATHS.productCategory.basic.image as any} /></label>
               <ImageUpload
                 value={form.image}
-                onChange={(url) => setForm({ ...form, image: url })}
+                onChange={(url) => setForm({ ...form, image: typeof url === 'string' ? url : url[0] || '' })}
                 maxCount={1}
                 label=""
                 hint={getFieldPlaceholder('productCategory.basic.image')}
               />
             </div>
-            
           </div>
         </div>
       </div>

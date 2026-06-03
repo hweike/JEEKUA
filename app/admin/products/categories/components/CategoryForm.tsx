@@ -3,11 +3,10 @@
 import { useState } from 'react';
 import ImageUpload from '@/components/ImageUpload';
 import SeoFields from '@/components/common/SeoFields';
-import { TemplateSelector } from '@/components/webbuilder/TemplateSelector'; // 新增导入
-import {getFieldHint,getFieldPlaceholder,HINT_PATHS,InfoTooltip} from '@/config/fieldHints';
+import { TemplateSelector } from '@/components/webbuilder/TemplateSelector';
+import { getFieldHint, getFieldPlaceholder, HINT_PATHS, InfoTooltip } from '@/config/fieldHints';
 
 export default function CategoryForm({ category, onSave, onCancel, attributeTemplates }: any) {
-  // 初始化时合并 templateId 字段（若不存在则设为空字符串）
   const [form, setForm] = useState(() => ({ ...category, templateId: category.templateId || '' }));
 
   return (
@@ -19,33 +18,41 @@ export default function CategoryForm({ category, onSave, onCancel, attributeTemp
             <h3 className="font-medium text-lg mb-3">基本信息</h3>
             <div className="space-y-3">
               <div>
-                <label className="block font-medium mb-1">分类名称 *<InfoTooltip hintKey={HINT_PATHS.productCategory.basic.name} /></label>
+                <label className="block font-medium mb-1">
+                  分类名称 *
+                  <InfoTooltip hintKey={HINT_PATHS.productCategory.basic.name as any} />
+                </label>
                 <input
                   type="text"
                   value={form.name}
                   onChange={e => setForm({ ...form, name: e.target.value })}
                   className="border rounded p-2 w-full"
                   required
-                   placeholder={getFieldPlaceholder('productCategory.basic.name')}
+                  placeholder={getFieldPlaceholder('productCategory.basic.name')}
                 />
               </div>
               <div>
-                <label className="block font-medium mb-1">描述<InfoTooltip hintKey={HINT_PATHS.productCategory.basic.description} /></label>
+                <label className="block font-medium mb-1">
+                  描述
+                  <InfoTooltip hintKey={HINT_PATHS.productCategory.basic.description as any} />
+                </label>
                 <textarea
                   value={form.description}
                   onChange={e => setForm({ ...form, description: e.target.value })}
                   rows={3}
                   className="border rounded p-2 w-full"
-                   placeholder={getFieldPlaceholder('productCategory.basic.description')}
+                  placeholder={getFieldPlaceholder('productCategory.basic.description')}
                 />
               </div>
               <div>
-                <label className="block font-medium mb-1">产品自定义属性模板<InfoTooltip hintKey={HINT_PATHS.productCategory.basic.attributeTemplateId} /></label>
+                <label className="block font-medium mb-1">
+                  产品自定义属性模板
+                  <InfoTooltip hintKey={HINT_PATHS.productCategory.basic.attributeTemplateId as any} />
+                </label>
                 <select
                   value={form.attributeTemplateId || ''}
                   onChange={e => setForm({ ...form, attributeTemplateId: e.target.value })}
                   className="border rounded p-2 w-full"
-                  placeholder={getFieldPlaceholder('productCategory.basic.attributeTemplateId')}
                 >
                   <option value="">无</option>
                   {attributeTemplates.map((tpl: any) => (
@@ -57,7 +64,7 @@ export default function CategoryForm({ category, onSave, onCancel, attributeTemp
             </div>
           </div>
 
-          {/* SEO 区块 - 使用公共组件 */}
+          {/* SEO 区块 */}
           <div className="border rounded-lg p-4 shadow-sm">
             <h3 className="font-medium text-lg mb-3">搜索引擎优化</h3>
             <SeoFields
@@ -80,7 +87,10 @@ export default function CategoryForm({ category, onSave, onCancel, attributeTemp
           <h3 className="font-medium text-lg mb-3">显示设置</h3>
           <div className="space-y-4">
             <div>
-              <label className="block font-medium mb-1">排序序号<InfoTooltip hintKey={HINT_PATHS.productCategory.basic.order} /></label>
+              <label className="block font-medium mb-1">
+                排序序号
+                <InfoTooltip hintKey={HINT_PATHS.productCategory.basic.order as any} />
+              </label>
               <input
                 type="number"
                 value={form.order}
@@ -90,7 +100,10 @@ export default function CategoryForm({ category, onSave, onCancel, attributeTemp
               />
             </div>
             <div>
-              <label className="block font-medium mb-1">封面图片<InfoTooltip hintKey={HINT_PATHS.productCategory.basic.image} /></label>
+              <label className="block font-medium mb-1">
+                封面图片
+                <InfoTooltip hintKey={HINT_PATHS.productCategory.basic.image as any} />
+              </label>
               <ImageUpload
                 value={form.image}
                 onChange={(url) => setForm({ ...form, image: url })}
@@ -99,11 +112,13 @@ export default function CategoryForm({ category, onSave, onCancel, attributeTemp
                 hint={getFieldPlaceholder('productCategory.basic.image')}
               />
             </div>
-            {/* 替换原“模板样式”下拉为 TemplateSelector */}
             <div>
-              <label className="block font-medium mb-1">关联模板*<InfoTooltip hintKey={HINT_PATHS.productCategory.basic.templateId} /></label>
+              <label className="block font-medium mb-1">
+                关联模板*
+                <InfoTooltip hintKey={HINT_PATHS.productCategory.basic.templateId as any} />
+              </label>
               <TemplateSelector
-                category="product_category"      // 集合页模板
+                category="product_category"
                 value={form.templateId}
                 onChange={(val) => setForm({ ...form, templateId: val })}
                 placeholder={getFieldPlaceholder('productCategory.basic.templateId')}

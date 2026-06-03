@@ -10,7 +10,7 @@ interface Theme {
   displayName: string;
   type: 'builtin' | 'custom';
   cssVariables: Record<string, string>;
-  darkCssVariables?: Record<string, string>; // 暗色模式变量
+  darkCssVariables?: Record<string, string>;
   previewImage?: string | null;
   category?: string;
 }
@@ -47,7 +47,6 @@ export default function ThemesPage() {
     try {
       const res = await fetch('/api/themes');
       const data = await res.json();
-      // 为内置主题添加 category，并确保 darkCssVariables 存在
       const themesWithCategory = data.themes.map((theme: Theme) => {
         if (theme.type === 'builtin') {
           const category = theme.id.split('_')[0];
@@ -57,9 +56,14 @@ export default function ThemesPage() {
       });
       setThemes(themesWithCategory);
       setActiveTheme(data.activeTheme);
-      const builtinCategories = Array.from(new Set(themesWithCategory.filter((t: Theme) => t.type === 'builtin').map((t: Theme) => t.category!)));
+      
+      // 明确类型为 string[]
+      const builtinCategories: string[] = Array.from(
+        new Set(themesWithCategory.filter((t: Theme) => t.type === 'builtin').map((t: Theme) => t.category!))
+      );
       if (builtinCategories.length > 0 && !selectedCategory) {
-        setSelectedCategory(builtinCategories[0]);
+        // 使用非空断言，因为 length>0 保证索引0存在
+        setSelectedCategory(builtinCategories[0]!);
       } else if (builtinCategories.length === 0 && themesWithCategory.some((t: Theme) => t.type === 'custom') && !selectedCategory) {
         setSelectedCategory('自定义');
       }
@@ -77,7 +81,6 @@ export default function ThemesPage() {
   const applyTheme = async (theme: Theme) => {
     setApplying(theme.id);
     try {
-      // 1. 激活主题（记录当前激活的主题名称）
       const res = await fetch('/api/themes', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
@@ -85,7 +88,6 @@ export default function ThemesPage() {
       });
       if (!res.ok) throw new Error('激活失败');
 
-      // 2. 将主题的完整 CSS 变量（亮色+暗色）保存到 active-theme.json
       const activateRes = await fetch('/api/theme-activate', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
@@ -97,11 +99,10 @@ export default function ThemesPage() {
           borderRadius: {},
           shadows: {},
           animation: {},
-          darkMode: 'system', // 可以后续扩展
+          darkMode: 'system',
         }),
       });
       if (activateRes.ok) {
-        // 动态更新当前页面的亮色 CSS 变量
         for (const [key, value] of Object.entries(theme.cssVariables)) {
           document.documentElement.style.setProperty(key, value);
         }
@@ -138,7 +139,7 @@ export default function ThemesPage() {
 
   const builtinThemes = themes.filter(t => t.type === 'builtin');
   const customThemes = themes.filter(t => t.type === 'custom');
-  const builtinCategories = Array.from(new Set(builtinThemes.map(t => t.category!)));
+  const builtinCategories: string[] = Array.from(new Set(builtinThemes.map(t => t.category!)));
   const allCategories = [...builtinCategories, '自定义'];
 
   const activeThemeObj = themes.find(t => t.id === activeTheme);

@@ -73,6 +73,9 @@ export default function ClassicNavbar({ headerConfig, menuTree, siteSettings }: 
   const minHeight = 70;
   const maxHeight = 100;
 
+  // 由于 MenuItems 组件的 menuType 类型定义不包含 'inline'，使用类型断言绕过检查
+  const menuType = menuConfig.menuType as any;
+
   // 计算行高
   useEffect(() => {
     if (!logoConfig.imageUrl) {
@@ -176,11 +179,11 @@ export default function ClassicNavbar({ headerConfig, menuTree, siteSettings }: 
           </div>
         </div>
       </div>
-            {/* 取消分割线 */}
+      {/* 取消分割线 */}
       {/* <div className="border-t border-[rgba(255,255,255,0.15)] w-full" /> */}
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         <div className="flex justify-center mt-2">
-          <MenuItems items={menuTree} pathname={pathname} menuType={menuConfig.menuType} />
+          <MenuItems items={menuTree} pathname={pathname} menuType={menuType} />
         </div>
       </div>
     </>
@@ -255,7 +258,7 @@ export default function ClassicNavbar({ headerConfig, menuTree, siteSettings }: 
         {/* 移动端菜单 */}
         {mobileMenuOpen && (
           <div className="py-2 border-t border-[rgba(255,255,255,0.15)]">
-            <MenuItems items={menuTree} pathname={pathname} mobile onClickItem={() => setMobileMenuOpen(false)} menuType={menuConfig.menuType} />
+            <MenuItems items={menuTree} pathname={pathname} mobile onClickItem={() => setMobileMenuOpen(false)} menuType={menuType} />
           </div>
         )}
       </div>

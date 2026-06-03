@@ -35,6 +35,18 @@ interface Category {
   series: Series[];
 }
 
+// 新增 ProductLine 接口，用于 sort 回调类型标注
+interface ProductLine {
+  id: string;
+  name: string;
+  order: number;
+  templateId: string;
+  slug: string;
+  seoTitle: string;
+  seoDescription: string;
+  seoKeywords: string;
+}
+
 function normalizeSeries(raw: any): Series {
   return {
     id: String(raw.id || ''),
@@ -67,7 +79,7 @@ function normalizeCategory(raw: any): Category {
   };
 }
 
-function normalizeProductLine(raw: any) {
+function normalizeProductLine(raw: any): ProductLine {
   return {
     id: String(raw.id || ''),
     name: String(raw.name || ''),
@@ -93,10 +105,11 @@ export async function GET(request: NextRequest) {
     }
     const productLines = (rawData.productLines || []).map(normalizeProductLine);
     const categories = (rawData.categories || []).map(normalizeCategory);
-    productLines.sort((a, b) => a.order - b.order);
-    categories.sort((a, b) => a.order - b.order);
+    // 为 sort 回调参数添加显式类型
+    productLines.sort((a: ProductLine, b: ProductLine) => a.order - b.order);
+    categories.sort((a: Category, b: Category) => a.order - b.order);
     for (const cat of categories) {
-      cat.series.sort((a, b) => a.order - b.order);
+      cat.series.sort((a: Series, b: Series) => a.order - b.order);
     }
     return NextResponse.json({ productLines, categories });
   } catch (error) {

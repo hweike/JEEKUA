@@ -4,7 +4,6 @@ import type { Components } from '../types';
 
 export const config: ComponentConfig<Components['VideoCategoryBlock']> = {
   label: '视频分类展示',
-  category: 'Video',
   defaultProps: {
     showSidebar: true,
     videosPerRow: 3,
@@ -23,8 +22,7 @@ export const config: ComponentConfig<Components['VideoCategoryBlock']> = {
       type: 'number',
       min: 1,
       max: 4,
-      suffix: '列',
     },
   },
-  render: ({ puck, ...props }) => <VideoCategoryBlock puck={puck} {...props} />,
+  render: ({ puck, ...props }) => <VideoCategoryBlock puck={puck as any} {...props as any} />,
 };

@@ -50,7 +50,7 @@ export function Section({
   const backgroundImageUrl =
     typeof backgroundImageValue === 'string'
       ? backgroundImageValue
-      : backgroundImageValue?.url || '';
+      : (backgroundImageValue as any)?.url || '';  // 修复类型 never 错误
 
   const borderStyle = borderGroup?.borderStyle ?? 'none';
   const borderTopLeftRadius = borderGroup?.borderTopLeftRadius ?? 0;
@@ -68,7 +68,7 @@ export function Section({
       ? '100%'
       : containerWidth === 'custom' && typeof customContainerWidth === 'number'
       ? `${customContainerWidth}px`
-      : '100%';   // 模式为 'auto' 或缺失定制值时，保持全宽
+      : '100%';
   const containerHeightStyle =
     containerHeight === 'full'
       ? '100vh'
@@ -118,7 +118,7 @@ export function Section({
     '--section-height': containerHeight === 'full' || containerHeight === 'custom' ? '100%' : undefined,
   } as React.CSSProperties;
 
-  const innerDivStyle: React.CSSProperties = {
+  const innerDivStyle = {
     display: 'flex',
     flexDirection: 'var(--section-direction)',
     flexWrap: 'var(--section-wrap)',
@@ -135,7 +135,7 @@ export function Section({
     paddingLeft: 'var(--section-padding-left)',
     minHeight: 'var(--section-min-height)',
     height: 'var(--section-height)',
-  };
+  } as React.CSSProperties;
 
   return (
     <section ref={puck?.dragRef} className="relative" style={sectionStyle}>

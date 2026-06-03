@@ -16,6 +16,19 @@ interface AttributeTemplate {
   attributes: Array<{ name: string; rule: string }>;
 }
 
+interface VariantForm {
+  product_name: string;
+  sku: string;
+  short_description: string;
+  main_image_url: string;
+  additional_images: string[];
+  attributes: Record<string, string>;
+  seo_title: string;
+  seo_description: string;
+  seo_keywords: string;
+  slug: string;
+}
+
 function generateSlugForProduct(text: string): string {
   if (!text) return '';
   const pinyinText = toPinyin(text);
@@ -29,7 +42,7 @@ export default function VariantEditPage() {
   const parentId = searchParams.get('parentId');
   const locale = searchParams.get('locale') || 'zh';
 
-  const [form, setForm] = useState({
+  const [form, setForm] = useState<VariantForm>({
     product_name: '',
     sku: '',
     short_description: '',

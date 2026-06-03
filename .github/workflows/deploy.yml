@@ -1,0 +1,52 @@
+name: Deploy to AWS Lightsail
+
+on:
+  push:
+    branches: [ main ]   # 当你推送到 main 分支时触发
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+
+      - name: 设置 Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'   # 使用 Node.js 20
+
+      - name: 安装依赖并构建
+        run: |
+          npm install
+          npm run build
+
+      - name: 打包构建产物（.next, public, package.json 等）
+        run: |
+          mkdir -p deploy_artifact
+          cp -r .next deploy_artifact/
+          cp -r public deploy_artifact/
+          cp package.json package-lock.json deploy_artifact/
+          tar -czf deploy.tar.gz -C deploy_artifact .
+
+      - name: 通过 SCP 上传到服务器
+        uses: appleboy/scp-action@v0.1.4
+        with:
+          host: ${{ secrets.SERVER_IP }}
+          username: ${{ secrets.SERVER_USER }}
+          key: ${{ secrets.SERVER_SSH_KEY }}
+          source: "deploy.tar.gz"
+          target: "/home/ubuntu/"
+          overwrite: true
+
+      - name: 在服务器上解压并执行部署脚本
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.SERVER_IP }}
+          username: ${{ secrets.SERVER_USER }}
+          key: ${{ secrets.SERVER_SSH_KEY }}
+          script: |
+            cd /home/ubuntu
+            tar -xzf deploy.tar.gz -C /www/wwwroot/feisman-power
+            rm -f deploy.tar.gz
+            bash /home/ubuntu/deploy.sh

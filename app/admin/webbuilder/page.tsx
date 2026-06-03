@@ -34,6 +34,7 @@ interface Template {
   category: Category;
   updatedAt: string;
   isSystem?: boolean;
+  data?: any; // 添加 data 字段，用于存储模板的 Puck 数据
 }
 
 export default function AdminWebBuilderPage() {
@@ -312,7 +313,7 @@ export default function AdminWebBuilderPage() {
               data={editingTemplate.data}
               initialTitle={editingTemplate.name}
               initialCategory={editingTemplate.category}
-              onSave={async (puckData) => {
+              onSave={async (puckData: any) => {
                 const pageTitle = puckData?.root?.props?.title || editingTemplate.name;
                 const res = await fetch('/api/webbuilder', {
                   method: 'POST',
@@ -328,7 +329,7 @@ export default function AdminWebBuilderPage() {
                 const result = await res.json();
                 refreshTemplates();
               }}
-              onPublish={async (puckData) => {
+              onPublish={async (puckData: any) => {
                 const pageTitle = puckData?.root?.props?.title || editingTemplate.name;
                 const res = await fetch('/api/webbuilder', {
                   method: 'POST',

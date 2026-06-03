@@ -303,12 +303,20 @@ db.exec(`
 db.exec(`CREATE INDEX IF NOT EXISTS idx_sync_logs_site ON sync_logs(site_id);`);
 
 
-  // 在初始化数据库的其他地方执行一次（确保不重复执行）
-try {
-  db.exec(`ALTER TABLE videos ADD COLUMN tags TEXT;`);
-} catch (e) {
-  // 如果列已存在，忽略错误
-}
+
+// 自动迁移：为 videos 表添加 tags 列（如果不存在）
+  try {
+    db.exec(`ALTER TABLE videos ADD COLUMN tags TEXT;`);
+  } catch (e) {
+    // 列已存在，忽略错误
+  }
+
+  // 自动迁移：为 products 表添加 templateId 列（如果不存在）
+  try {
+    db.exec(`ALTER TABLE products ADD COLUMN templateId TEXT DEFAULT ''`);
+  } catch (e) {
+    // 列已存在，忽略错误
+  }
 
   console.log('✅ 数据库表初始化完成');
 }

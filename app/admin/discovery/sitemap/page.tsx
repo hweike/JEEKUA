@@ -21,9 +21,9 @@ export default function SitemapAdmin() {
     fetch('/api/languages/enabled')
       .then(res => res.json())
       .then(data => {
-        const langs = data.map((l: any) => ({ code: l.code, name: l.zhName }));
+        const langs: Language[] = data.map((l: any) => ({ code: l.code, name: l.zhName }));
         setLanguages(langs);
-        setSelected(langs.map(l => l.code)); // 默认全选
+        setSelected(langs.map((l: Language) => l.code)); // 默认全选
       })
       .catch(err => {
         console.error(err);
@@ -33,7 +33,7 @@ export default function SitemapAdmin() {
 
   const toggleAll = () => {
     if (selected.length === languages.length) setSelected([]);
-    else setSelected(languages.map(l => l.code));
+    else setSelected(languages.map((l: Language) => l.code));
   };
 
   const toggleLocale = (code: string) => {

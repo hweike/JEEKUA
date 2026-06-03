@@ -4,6 +4,16 @@ import Link from 'next/link';
 import { useState, useEffect } from 'react';
 import { ChevronRight, ChevronDown } from 'lucide-react';
 
+// 定义组件 Props 类型
+interface CategoryTreeProps {
+  productLineNameEncoded: string;
+  categories: any[]; // 可根据实际业务定义更具体的类型
+  seriesMap: Record<string, any[]>; // key: 一级分类 slug, value: 二级分类数组
+  currentSlug?: string;
+  locale: string;
+  basePath?: string;
+}
+
 export default function CategoryTree({
   productLineNameEncoded,
   categories,
@@ -11,23 +21,23 @@ export default function CategoryTree({
   currentSlug,
   locale,
   basePath = 'products',
-}) {
-  const [expandedCatSlug, setExpandedCatSlug] = useState(null);
+}: CategoryTreeProps) {
+  const [expandedCatSlug, setExpandedCatSlug] = useState<string | null>(null);
   const baseHref = `/${locale}/${basePath}/${productLineNameEncoded}`;
 
   useEffect(() => {
     if (currentSlug) {
       // 先检查 currentSlug 是否是二级分类，找到父级
-      let parentSlug = null;
+      let parentSlug: string | null = null;
       for (const cat of categories) {
-        if (seriesMap[cat.slug]?.some(s => s.slug === currentSlug)) {
+        if (seriesMap[cat.slug]?.some((s: any) => s.slug === currentSlug)) {
           parentSlug = cat.slug;
           break;
         }
       }
       // 如果没找到父级，再检查是否是某个一级分类的 slug
       if (!parentSlug) {
-        const matchedCategory = categories.find(cat => cat.slug === currentSlug);
+        const matchedCategory = categories.find((cat: any) => cat.slug === currentSlug);
         if (matchedCategory) parentSlug = matchedCategory.slug;
       }
       setExpandedCatSlug(parentSlug);
@@ -35,11 +45,11 @@ export default function CategoryTree({
       // 如果是产品线首页（无选中分类），默认展开第一个一级分类
       setExpandedCatSlug(categories[0].slug);
     }
-  }, [currentSlug, categories, seriesMap]);
+  }, [currentSlug, categories, seriesMap, expandedCatSlug]);
 
-  const toggleCategory = (slug) => setExpandedCatSlug(prev => (prev === slug ? null : slug));
-  const isCategoryActive = (slug) => currentSlug === slug;
-  const isSeriesActive = (slug) => currentSlug === slug;
+  const toggleCategory = (slug: string) => setExpandedCatSlug(prev => (prev === slug ? null : slug));
+  const isCategoryActive = (slug: string) => currentSlug === slug;
+  const isSeriesActive = (slug: string) => currentSlug === slug;
 
   // 纯 CSS 变量，无硬编码颜色值
   const textColor = 'var(--navbar-text, var(--foreground))';
@@ -52,7 +62,7 @@ export default function CategoryTree({
     <aside className="w-full md:w-64 flex-shrink-0">
       <div className="sticky top-16 pb-8">
         <div className="space-y-1">
-          {categories.map((cat) => {
+          {categories.map((cat: any) => {
             const series = seriesMap[cat.slug] || [];
             const hasSeries = series.length > 0;
             const isExpanded = expandedCatSlug === cat.slug;
@@ -114,7 +124,7 @@ export default function CategoryTree({
                 {/* 二级分类列表 */}
                 {isExpanded && hasSeries && (
                   <ul className="ml-4 mt-1 space-y-1 border-l border-gray-100 pl-2">
-                    {series.map((s) => {
+                    {series.map((s: any) => {
                       const active = isSeriesActive(s.slug);
                       return (
                         <li key={s.slug}>
@@ -130,12 +140,13 @@ export default function CategoryTree({
                             onMouseEnter={(e) => {
                               if (active) return;
                               e.currentTarget.style.color = hoverTextColor;
-                              if (hoverBgColor !== 'transparent') e.currentTarget.style.backgroundColor = hoverBgColor;
+                              // 直接应用背景色，无需判断透明（CSS 变量会正确处理）
+                              e.currentTarget.style.backgroundColor = hoverBgColor;
                             }}
                             onMouseLeave={(e) => {
                               if (active) return;
                               e.currentTarget.style.color = textColor;
-                              if (hoverBgColor !== 'transparent') e.currentTarget.style.backgroundColor = 'transparent';
+                              e.currentTarget.style.backgroundColor = 'transparent';
                             }}
                           >
                             {s.name}

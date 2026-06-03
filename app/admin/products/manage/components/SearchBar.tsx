@@ -1,15 +1,60 @@
-// 修改 SearchBar.tsx
+// SearchBar.tsx
 'use client';
 
 import { useState, useEffect, useRef } from 'react';
 import { ChevronDown, ChevronRight, X, Check } from 'lucide-react';
 
+// 定义数据类型接口
+interface ProductLine {
+  id: string;
+  name: string;
+  order?: number;
+  templateId?: string;
+  slug?: string;
+  seoTitle?: string;
+  seoDescription?: string;
+  seoKeywords?: string;
+}
+
+interface Series {
+  id: string;
+  name: string;
+  slug?: string;
+  order?: number;
+  image?: string;
+  description?: string;
+  seoTitle?: string;
+  seoDescription?: string;
+  seoKeywords?: string;
+}
+
+interface Category {
+  id: string;
+  name: string;
+  productLineId: string;
+  slug?: string;
+  order?: number;
+  image?: string;
+  description?: string;
+  attributeTemplateId?: string;
+  pageTemplate?: string;
+  series?: Series[];
+  seoTitle?: string;
+  seoDescription?: string;
+  seoKeywords?: string;
+}
+
+interface ApiResponse {
+  productLines: ProductLine[];
+  categories: Category[];
+}
+
 interface CategoryNode {
   id: string;
   name: string;
   isProductLine?: boolean;
-  parentId?: string;   // 新增：记录父分类ID（产品线或一级分类）
-  categoryId?: string; // 如果是二级分类，记录所属的一级分类ID
+  parentId?: string;
+  categoryId?: string;   // 如果是二级分类，记录所属的一级分类ID
   children?: CategoryNode[];
 }
 
@@ -22,8 +67,8 @@ interface SearchBarProps {
 
 export function SearchBar({ onSearch, initialKeyword, initialCategoryId, initialSeriesId = '' }: SearchBarProps) {
   const [keyword, setKeyword] = useState(initialKeyword);
-  const [categoryId, setCategoryId] = useState(initialCategoryId);     // 一级分类ID
-  const [seriesId, setSeriesId] = useState(initialSeriesId);           // 二级分类ID
+  const [categoryId, setCategoryId] = useState(initialCategoryId);
+  const [seriesId, setSeriesId] = useState(initialSeriesId);
   const [displayName, setDisplayName] = useState('');
   const [categoryTree, setCategoryTree] = useState<CategoryNode[]>([]);
   const [treeOpen, setTreeOpen] = useState(false);
@@ -35,17 +80,22 @@ export function SearchBar({ onSearch, initialKeyword, initialCategoryId, initial
     const fetchTree = async () => {
       try {
         const res = await fetch('/api/admin/products/categories?locale=zh');
-        const data = await res.json();
+        const data: ApiResponse = await res.json();
         const lines = data.productLines || [];
         const categories = data.categories || [];
-        const tree: CategoryNode[] = lines.map((line: any) => ({
+
+        // 构建产品线节点
+        const tree: CategoryNode[] = lines.map((line: ProductLine) => ({
           id: line.id,
           name: line.name,
           isProductLine: true,
           children: [],
         }));
+
         const lineMap = new Map(tree.map(node => [node.id, node]));
-        categories.forEach((cat: any) => {
+
+        // 递归构建分类树
+        categories.forEach((cat: Category) => {
           const parentLine = lineMap.get(cat.productLineId);
           if (parentLine) {
             const node: CategoryNode = {
@@ -53,7 +103,7 @@ export function SearchBar({ onSearch, initialKeyword, initialCategoryId, initial
               name: cat.name,
               isProductLine: false,
               parentId: parentLine.id,
-              children: cat.series?.map((s: any) => ({
+              children: cat.series?.map((s: Series) => ({
                 id: s.id,
                 name: s.name,
                 isProductLine: false,
@@ -64,8 +114,9 @@ export function SearchBar({ onSearch, initialKeyword, initialCategoryId, initial
             parentLine.children!.push(node);
           }
         });
+
         setCategoryTree(tree);
-        setExpandedNodes(new Set(lines.map(line => line.id)));
+        setExpandedNodes(new Set(lines.map((line: ProductLine) => line.id)));
       } catch (err) {
         console.error(err);
       }
@@ -75,14 +126,16 @@ export function SearchBar({ onSearch, initialKeyword, initialCategoryId, initial
 
   // 根据当前选中的分类ID查找显示名称和实际存储的ID
   useEffect(() => {
-    const findNode = (nodes: CategoryNode[], targetId: string, parentCatId?: string): { node: CategoryNode | null, catId: string, seriesId: string } => {
+    const findNode = (
+      nodes: CategoryNode[],
+      targetId: string,
+      parentCatId?: string
+    ): { node: CategoryNode | null; catId: string; seriesId: string } => {
       for (const node of nodes) {
         if (node.id === targetId) {
           if (node.isProductLine) {
-            // 产品线不可选，实际上不会发生
             return { node: null, catId: '', seriesId: '' };
           }
-          // 判断是二级分类还是一级分类
           if (node.categoryId) {
             // 二级分类
             return { node, catId: node.categoryId, seriesId: node.id };
@@ -121,8 +174,12 @@ export function SearchBar({ onSearch, initialKeyword, initialCategoryId, initial
 
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
-      if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node) &&
-          buttonRef.current && !buttonRef.current.contains(event.target as Node)) {
+      if (
+        dropdownRef.current &&
+        !dropdownRef.current.contains(event.target as Node) &&
+        buttonRef.current &&
+        !buttonRef.current.contains(event.target as Node)
+      ) {
         setTreeOpen(false);
       }
     };
@@ -183,21 +240,23 @@ export function SearchBar({ onSearch, initialKeyword, initialCategoryId, initial
   const renderTree = (nodes: CategoryNode[], level = 0) => {
     return nodes.map(node => {
       const hasChildren = node.children && node.children.length > 0;
-      const isSelected = (node.categoryId ? node.id === seriesId : node.id === categoryId);
+      const isSelected = node.categoryId ? node.id === seriesId : node.id === categoryId;
       const isProductLine = node.isProductLine === true;
       const paddingLeft = level === 0 ? 0 : 16;
 
       return (
         <div key={node.id}>
           <div
-            className={`flex items-center justify-between py-1.5 hover:bg-gray-100 cursor-pointer ${isProductLine ? 'text-gray-500' : ''}`}
+            className={`flex items-center justify-between py-1.5 hover:bg-gray-100 cursor-pointer ${
+              isProductLine ? 'text-gray-500' : ''
+            }`}
             style={{ paddingLeft: `${paddingLeft}px` }}
           >
             <div className="flex items-center flex-1">
               {hasChildren && (
                 <button
                   type="button"
-                  onClick={(e) => {
+                  onClick={e => {
                     e.stopPropagation();
                     toggleNode(node.id);
                   }}
@@ -209,16 +268,20 @@ export function SearchBar({ onSearch, initialKeyword, initialCategoryId, initial
               {!hasChildren && <span className="w-4 mr-1" />}
               <span
                 onClick={() => !isProductLine && selectCategory(node)}
-                className={`text-sm ${isProductLine ? 'cursor-default' : 'cursor-pointer'} ${
-                  isSelected && !isProductLine ? 'text-blue-600 font-medium' : isProductLine ? '' : 'text-gray-900'
+                className={`text-sm ${
+                  isProductLine ? 'cursor-default' : 'cursor-pointer'
+                } ${
+                  isSelected && !isProductLine
+                    ? 'text-blue-600 font-medium'
+                    : isProductLine
+                    ? ''
+                    : 'text-gray-900'
                 }`}
               >
                 {node.name}
               </span>
             </div>
-            {isSelected && !isProductLine && (
-              <Check size={14} className="text-blue-600 mr-1" />
-            )}
+            {isSelected && !isProductLine && <Check size={14} className="text-blue-600 mr-1" />}
           </div>
           {hasChildren && expandedNodes.has(node.id) && (
             <div>{renderTree(node.children!, level + 1)}</div>
@@ -274,13 +337,13 @@ export function SearchBar({ onSearch, initialKeyword, initialCategoryId, initial
                 清空分类
               </button>
             </div>
-            <div className="p-1">
-              {renderTree(categoryTree)}
-            </div>
+            <div className="p-1">{renderTree(categoryTree)}</div>
           </div>
         )}
       </div>
-      <button type="submit" className="bg-blue-600 text-white px-4 py-2 rounded">搜索</button>
+      <button type="submit" className="bg-blue-600 text-white px-4 py-2 rounded">
+        搜索
+      </button>
     </form>
   );
 }

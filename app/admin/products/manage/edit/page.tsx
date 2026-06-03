@@ -143,7 +143,7 @@ export default function ProductEditPage() {
           const data = await res.json();
           if (Array.isArray(data) && data.length > 0) {
             const firstTemplateId = data[0].id;
-            setForm(prev => ({ ...prev, templateId: firstTemplateId }));
+            setForm((prev: any) => ({ ...prev, templateId: firstTemplateId }));
           }
           setTemplateList(data);
         } catch (err) {
@@ -232,7 +232,7 @@ export default function ProductEditPage() {
         setTitleLength(`${data.product_name} (变体)`.length);
       } else {
         const defaults = productSettings.defaultSettings || {};
-        setForm(prev => ({
+        setForm((prev: any) => ({
           ...prev,
           brand: defaults.default_brand || 'Neutral',
           availability: defaults.default_availability || 'in_stock',
@@ -249,19 +249,19 @@ export default function ProductEditPage() {
   }, [productId, parentId, locale, productSettings, settingsLoaded, urlCategoryId, urlSeriesId]);
 
   const handleChange = (field: string, value: any) => {
-    setForm(prev => ({ ...prev, [field]: value }));
+    setForm((prev: any) => ({ ...prev, [field]: value }));
     if (field === 'product_name') setTitleLength(value?.length || 0);
   };
 
   const handleAttributeChange = (key: string, value: string) => {
-    setForm(prev => ({
+    setForm((prev: any) => ({
       ...prev,
       attributes: { ...prev.attributes, [key]: value },
     }));
   };
 
   const handleSeoChange = (seoData: { slug: string; seoKeywords: string; seoTitle: string; seoDescription: string }) => {
-    setForm(prev => ({
+    setForm((prev: any) => ({
       ...prev,
       slug: seoData.slug,
       seo_keywords: seoData.seoKeywords,
@@ -284,7 +284,7 @@ export default function ProductEditPage() {
     let finalSlug = form.slug;
     if (!finalSlug || finalSlug.trim() === '') {
       finalSlug = generateSlugForProduct(form.product_name);
-      setForm(prev => ({ ...prev, slug: finalSlug }));
+      setForm((prev: any) => ({ ...prev, slug: finalSlug }));
     }
 
     const finalCategoryId = form.categoryId || urlCategoryId;

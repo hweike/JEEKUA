@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import * as XLSX from 'xlsx';
 import fs from 'fs/promises';
+import { readFileSync } from 'fs';
 import path from 'path';
 import { getProductSettings } from '@/lib/products/productSettings';
 import { generateUniqueProductId } from '@/lib/utils/idGenerator';
@@ -44,7 +45,7 @@ function getProductType(locale: string, categoryId: string, seriesId?: string): 
   if (!categoryId || categoryId === '__UNCATEGORIZED__') return '';
   const categoriesPath = path.join(process.cwd(), 'data', 'products', locale, 'categories.json');
   try {
-    const data = JSON.parse(fs.readFileSync(categoriesPath, 'utf-8'));
+    const data = JSON.parse(readFileSync(categoriesPath, 'utf-8'));
     const categories = data.categories || [];
     const cat = categories.find((c: any) => c.id === categoryId);
     if (!cat) return '';
@@ -64,9 +65,7 @@ function processMpn(defaultMpn: string, sku: string): string {
   return defaultMpn.replace(/\{SKU\}/g, sku);
 }
 
-// 根据基本设置中的规则生成 SKU（与 manage 路由保持一致）
 function generateSkuFromRule(rule: string): string {
-  // 生成8位随机数字（范围 10000000 到 99999999）
   const randomNum = Math.floor(10000000 + Math.random() * 90000000);
   return rule.replace(/\{timestamp\}/g, randomNum.toString());
 }
@@ -94,9 +93,9 @@ export async function POST(req: NextRequest) {
     }
 
     const productSettings = await getProductSettings(locale);
-    const defaultSettings = productSettings.defaultSettings || {};
+    const defaultSettings = (productSettings as any).defaultSettings || {};
     const siteName = await getSiteName();
-    const skuRule = defaultSettings.sku_rule || 'P-{timestamp}';  // 获取规则
+    const skuRule = defaultSettings.sku_rule || 'P-{timestamp}';
 
     const categoriesPath = path.join(process.cwd(), 'data', 'products', locale, 'categories.json');
     let categoriesData;
@@ -121,7 +120,6 @@ export async function POST(req: NextRequest) {
         }
 
         if (productType === 'parent') {
-          // ---------- 父产品创建 ----------
           let categoryId = '__UNCATEGORIZED__';
           let seriesId = '';
           let productLineId = '';
@@ -153,7 +151,6 @@ export async function POST(req: NextRequest) {
             console.warn(`行 ${rowNum}: 未填写一级分类，产品将归类到"未分类"`);
           }
 
-          // 价格阶梯
           const priceTiers: PriceTier[] = [];
           for (let i = 1; i <= 3; i++) {
             const minQty = row[`最小起订量${i}`];
@@ -181,11 +178,9 @@ export async function POST(req: NextRequest) {
             }
           }
 
-          // 生成产品ID
           const existingIds = await getAllProductIds(locale);
-          const productId = await generateUniqueProductId(() => existingIds);
+          const productId = await generateUniqueProductId(async () => existingIds);
 
-          // SKU：若未填则根据规则生成
           let sku = row['SKU']?.trim();
           if (!sku) {
             sku = generateSkuFromRule(skuRule);
@@ -215,8 +210,8 @@ export async function POST(req: NextRequest) {
           if (description && !description.includes('<')) {
             description = description
               .split(/\r?\n/)
-              .filter(p => p.trim())
-              .map(p => `<p>${p.trim()}</p>`)
+              .filter((p: string) => p.trim())   // 修复隐式 any
+              .map((p: string) => `<p>${p.trim()}</p>`) // 修复隐式 any
               .join('');
           }
 
@@ -300,9 +295,9 @@ export async function POST(req: NextRequest) {
           upsertProductIndex({
             productId,
             locale,
-            productLineId: productLineId || null,
+            productLineId: productLineId || '',
             categoryId,
-            seriesId: seriesId || null,
+            seriesId: seriesId || '',
             parent_product_id: null,
             sku,
             product_name: productName,
@@ -323,7 +318,6 @@ export async function POST(req: NextRequest) {
           results.push({ row: rowNum, sku, success: true });
         } 
         else if (productType === 'variant') {
-          // ---------- 变体创建 ----------
           if (!parentProductId) {
             throw new Error('变体前面没有父产品，请确保变体行紧跟在父产品之后');
           }
@@ -333,7 +327,6 @@ export async function POST(req: NextRequest) {
 
           let sku = row['SKU']?.trim();
           if (!sku) {
-            // 变体也使用相同的规则生成 SKU
             sku = generateSkuFromRule(skuRule);
           }
 
@@ -401,7 +394,7 @@ export async function POST(req: NextRequest) {
             ...parentIndex,
             variants: updatedVariants,
             updatedAt: now,
-          });
+          } as any);
 
           results.push({ row: rowNum, sku, success: true });
         }

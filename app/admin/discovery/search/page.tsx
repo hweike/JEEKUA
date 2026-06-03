@@ -26,7 +26,7 @@ export default function SearchAdminPage() {
           name: lang.zhName,
         }));
         setLanguages(langs);
-        if (langs.length > 0 && !langs.find(l => l.code === locale)) {
+        if (langs.length > 0 && !langs.find((l: Language) => l.code === locale)) {
           setLocale(langs[0].code);
         }
       })

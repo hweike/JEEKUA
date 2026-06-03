@@ -169,8 +169,8 @@ export async function POST(request: NextRequest) {
 
     // 加载系统设置，用于获取 SKU 生成规则
     const productSettings = await getProductSettings(locale);
-    const defaultSettings = productSettings.defaultSettings || {};
-    const skuRule = defaultSettings.sku_rule || 'P-{timestamp}';
+    const defaultSettings = (productSettings as any).defaultSettings || {};
+    const skuRule = defaultSettings.sku_rule ?? 'P-{timestamp}';
 
     if (isVariant) {
       const parentId = body.parent_product_id;
@@ -183,7 +183,8 @@ export async function POST(request: NextRequest) {
       // 处理 SKU：若前端未传则根据规则生成
       let sku = body.sku?.trim();
       if (!sku) {
-        sku = generateSkuFromRule(skuRule);
+        // 使用非空断言：skuRule 不会为 null/undefined（因为有默认值）
+        sku = generateSkuFromRule(skuRule!);
       }
 
       const variant = {
@@ -225,6 +226,7 @@ export async function POST(request: NextRequest) {
         status: 'published',
         updatedAt: now,
         createdAt: now,
+        templateId: body.templateId || '',
       });
 
       return NextResponse.json({ ...variant, productId: variantId }, { status: 201 });
@@ -246,7 +248,7 @@ export async function POST(request: NextRequest) {
     // 处理 SKU：若前端未传则根据规则生成
     let sku = body.sku?.trim();
     if (!sku) {
-      sku = generateSkuFromRule(skuRule);
+      sku = generateSkuFromRule(skuRule!);
     }
 
     let slug = body.slug;
@@ -363,8 +365,8 @@ export async function PUT(request: NextRequest) {
 
     // 加载系统设置，用于获取 SKU 生成规则（仅在需要生成新 SKU 时使用）
     const productSettings = await getProductSettings(locale);
-    const defaultSettings = productSettings.defaultSettings || {};
-    const skuRule = defaultSettings.sku_rule || 'P-{timestamp}';
+    const defaultSettings = (productSettings as any).defaultSettings || {};
+    const skuRule = defaultSettings.sku_rule ?? 'P-{timestamp}';
 
     if (isVariant) {
       const parentId = existingIndex!.parent_product_id;
@@ -379,7 +381,7 @@ export async function PUT(request: NextRequest) {
       let sku = body.sku?.trim();
       if (!sku) {
         if (!variants[variantIndex].sku) {
-          sku = generateSkuFromRule(skuRule);
+          sku = generateSkuFromRule(skuRule!);
         } else {
           sku = variants[variantIndex].sku;
         }
@@ -439,7 +441,7 @@ export async function PUT(request: NextRequest) {
     let sku = body.sku?.trim();
     if (!sku) {
       if (!final.sku) {
-        sku = generateSkuFromRule(skuRule);
+        sku = generateSkuFromRule(skuRule!);
       } else {
         sku = final.sku;
       }

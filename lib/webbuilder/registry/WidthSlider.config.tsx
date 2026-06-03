@@ -1,10 +1,10 @@
 import { WidthSlider } from '@/components/webbuilder/blocks/media/WidthSlider';
 import type { ComponentConfig } from '@puckeditor/core';
 import type { Components } from '../types';
+import { SlideListField } from '@/components/webbuilder/fields/SlideListField';
 
 export const config: ComponentConfig<Components['WidthSlider']> = {
   label: '宽度限定幻灯片',
-  category: 'Media/Slider',
   defaultProps: {
     height: '550',
     autoplay: 'none',
@@ -30,7 +30,10 @@ export const config: ComponentConfig<Components['WidthSlider']> = {
     },
     images: {
       label: '幻灯片',
-      type: 'slide-list',   // 复用已有的 SlideListField
+      type: 'custom',
+      render: ({ value, onChange }: { value: any; onChange: any }) => (
+        <SlideListField value={value} onChange={onChange} />
+      ),
     },
   },
   render: ({ puck, ...props }) => <WidthSlider puck={puck} {...props} />,

@@ -12,11 +12,11 @@ interface PaginationProps {
 export function Pagination({ currentPage, totalPages, onPageChange, className = '' }: PaginationProps) {
   if (totalPages <= 1) return null;
 
-  const getPageNumbers = () => {
+  const getPageNumbers = (): (number | string)[] => {
     const delta = 2;
-    const range = [];
-    const rangeWithDots = [];
-    let l;
+    const range: number[] = [];
+    const rangeWithDots: (number | string)[] = [];
+    let l: number | undefined;
 
     for (let i = 1; i <= totalPages; i++) {
       if (i === 1 || i === totalPages || (i >= currentPage - delta && i <= currentPage + delta)) {
@@ -25,7 +25,7 @@ export function Pagination({ currentPage, totalPages, onPageChange, className = 
     }
 
     range.forEach((i) => {
-      if (l) {
+      if (l !== undefined) {
         if (i - l === 2) {
           rangeWithDots.push(l + 1);
         } else if (i - l !== 1) {

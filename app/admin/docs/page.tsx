@@ -115,7 +115,6 @@ export default function DocsAdmin() {
     else setDocData(null);
   }, [selectedId]);
 
-  // 处理 SEO 字段变化（从 SeoFields 组件接收驼峰对象）
   const handleSeoChange = (seoData: any) => {
     setDocData((prev: any) => ({
       ...prev,
@@ -127,7 +126,6 @@ export default function DocsAdmin() {
     if (seoData.slug !== undefined) setIsSlugAuto(false);
   };
 
-  // 标题变化时自动生成 slug（仅在自动模式下）
   const handleTitleChange = (title: string) => {
     if (!docData) return;
     let newSlug = docData.slug;
@@ -137,7 +135,6 @@ export default function DocsAdmin() {
     setDocData({ ...docData, title, slug: newSlug });
   };
 
-  // 自动生成 SEO
   const handleAutoGenerate = () => {
     if (!docData) return;
     const title = docData.title || '';
@@ -153,8 +150,13 @@ export default function DocsAdmin() {
     }
     let seoDescription = docData.seo_description;
     if (!seoDescription) {
-      seoDescription = generateSeoDescription(docData.content || [], '', '', '', '');
-      handleSeoChange({ seoDescription });
+      // 调用 generateSeoDescription，传入文档内容（字符串）、空价格阶梯、空规格、模板和货币
+      // 注意：generateSeoDescription 的第一个参数是 descriptionHtml: string | undefined
+      const generatedDesc = generateSeoDescription(docData.content, [], undefined, '', '');
+      if (generatedDesc) {
+        seoDescription = generatedDesc;
+        handleSeoChange({ seoDescription });
+      }
     }
     showToast('已自动生成 SEO 信息', 'info');
   };
@@ -373,7 +375,7 @@ export default function DocsAdmin() {
                 )}
               </div>
 
-              {/* SEO 设置卡片（使用 SeoFields 组件） */}
+              {/* SEO 设置卡片 */}
               <div className="border rounded-lg p-4 shadow-sm bg-white">
                 <div className="flex justify-between items-center mb-3">
                   <h2 className="text-lg font-semibold">搜索引擎优化</h2>

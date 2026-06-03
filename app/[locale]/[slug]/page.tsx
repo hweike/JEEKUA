@@ -1,4 +1,3 @@
-// app/[locale]/[slug]/page.tsx
 import { notFound } from 'next/navigation';
 import { generatePageMetadata } from '@/lib/seo';
 import { getSeoInput } from '@/lib/seo/getSeoInput';
@@ -42,9 +41,6 @@ export default async function Page({ params }: PageProps) {
     template = await getTemplateById(page.template);
   }
 
-  // 如果模板不存在，回退到 Markdown 渲染
-  const hasTemplate = template && template.data;
-
   return (
     <>
       {jsonLdScripts.map((script, idx) => (
@@ -56,7 +52,7 @@ export default async function Page({ params }: PageProps) {
       ))}
       <main className="flex-grow">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 w-full">
-          {hasTemplate ? (
+          {template && template.data ? (
             // 使用 webbuilder 模板渲染
             <TemplateRenderer data={template.data} />
           ) : (

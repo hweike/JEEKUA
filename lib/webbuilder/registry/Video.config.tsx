@@ -18,6 +18,7 @@ export const config: ComponentConfig<VideoProps> = {
     titleAlign: 'center',
     videoUrl: '',
     videoThumbnail: '',
+    videoDuration: 0,
     loop: false,
     paddingTop: 32,
     paddingBottom: 32,
@@ -34,18 +35,29 @@ export const config: ComponentConfig<VideoProps> = {
     backgroundColor: {
       label: '背景色',
       type: 'custom',
-      render: ({ value, onChange }) => <ColorPickerField field={{}} value={value || '#ffffff'} onChange={onChange} />,
+      render: ({ value, onChange }: { value: any; onChange: any }) => (
+        <ColorPickerField field={{}} value={value || '#ffffff'} onChange={onChange} />
+      ),
     },
     languageSwitcher: {
       label: '',
-      type: 'language-switcher',
+      type: 'custom',
+      render: () => <LanguageSwitcherField />,
     },
-    title: { label: '标题', type: 'video-title' },
+    title: {
+      label: '标题',
+      type: 'custom',
+      render: ({ value, onChange }: { value: any; onChange: any }) => (
+        <VideoTextField value={value} onChange={onChange} label="标题" />
+      ),
+    },
     titleFontSize: { label: '标题大小 (px)', type: 'number', min: 20, max: 120, step: 1 },
     titleColor: {
       label: '标题颜色',
       type: 'custom',
-      render: ({ value, onChange }) => <ColorPickerField field={{}} value={value || '#000000'} onChange={onChange} />,
+      render: ({ value, onChange }: { value: any; onChange: any }) => (
+        <ColorPickerField field={{}} value={value || '#000000'} onChange={onChange} />
+      ),
     },
     titleAlign: {
       label: '标题位置',
@@ -60,10 +72,10 @@ export const config: ComponentConfig<VideoProps> = {
     videoThumbnail: {
       label: '视频封面',
       type: 'custom',
-      render: ({ value, onChange }) => (
+      render: ({ value, onChange }: { value: any; onChange: any }) => (
         <ImageUpload
           value={value || ''}
-          onChange={onChange}
+          onChange={(url: string | string[]) => onChange(typeof url === 'string' ? url : url[0])}
           maxCount={1}
           label=""
           hint="支持上传本地图片或输入网络图片地址，将作为视频占位图"

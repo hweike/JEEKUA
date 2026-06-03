@@ -1,0 +1,84 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9"
+        xmlns:xhtml="http://www.w3.org/1999/xhtml">
+  
+    <url>
+      <loc>http://localhost:3000/home</loc>
+      <lastmod>2026-05-19T11:43:13.252Z</lastmod>
+      <priority>0.5</priority>
+      <changefreq>weekly</changefreq>
+      <xhtml:link rel="alternate" hreflang="en" href="http://localhost:3000/home" />
+<xhtml:link rel="alternate" hreflang="zh" href="http://localhost:3000/home" />
+<xhtml:link rel="alternate" hreflang="x-default" href="http://localhost:3000/home" />
+    </url>
+    <url>
+      <loc>http://localhost:3000/tui-huo-he-tui-kuan-zheng-ce</loc>
+      <lastmod>2026-05-15T04:19:06.604Z</lastmod>
+      <priority>0.5</priority>
+      <changefreq>weekly</changefreq>
+      <xhtml:link rel="alternate" hreflang="en" href="http://localhost:3000/refund-policy" />
+<xhtml:link rel="alternate" hreflang="zh" href="http://localhost:3000/tui-huo-he-tui-kuan-zheng-ce" />
+<xhtml:link rel="alternate" hreflang="x-default" href="http://localhost:3000/tui-huo-he-tui-kuan-zheng-ce" />
+    </url>
+    <url>
+      <loc>http://localhost:3000/yin-si-zheng-ce</loc>
+      <lastmod>2026-05-15T02:50:38.750Z</lastmod>
+      <priority>0.5</priority>
+      <changefreq>weekly</changefreq>
+      <xhtml:link rel="alternate" hreflang="en" href="http://localhost:3000/privacy-policy" />
+<xhtml:link rel="alternate" hreflang="zh" href="http://localhost:3000/yin-si-zheng-ce" />
+<xhtml:link rel="alternate" hreflang="x-default" href="http://localhost:3000/yin-si-zheng-ce" />
+    </url>
+    <url>
+      <loc>http://localhost:3000/fu-wu-tiao-kuan</loc>
+      <lastmod>2026-05-15T02:50:38.750Z</lastmod>
+      <priority>0.5</priority>
+      <changefreq>weekly</changefreq>
+      <xhtml:link rel="alternate" hreflang="en" href="http://localhost:3000/terms-of-service" />
+<xhtml:link rel="alternate" hreflang="zh" href="http://localhost:3000/fu-wu-tiao-kuan" />
+<xhtml:link rel="alternate" hreflang="x-default" href="http://localhost:3000/fu-wu-tiao-kuan" />
+    </url>
+    <url>
+      <loc>http://localhost:3000/wu-liu-zheng-ce</loc>
+      <lastmod>2026-05-15T02:50:38.750Z</lastmod>
+      <priority>0.5</priority>
+      <changefreq>weekly</changefreq>
+      <xhtml:link rel="alternate" hreflang="en" href="http://localhost:3000/shipping-policy" />
+<xhtml:link rel="alternate" hreflang="zh" href="http://localhost:3000/wu-liu-zheng-ce" />
+<xhtml:link rel="alternate" hreflang="x-default" href="http://localhost:3000/wu-liu-zheng-ce" />
+    </url>
+    <url>
+      <loc>http://localhost:3000/lian-xi-fang-shi</loc>
+      <lastmod>2026-05-15T02:50:38.750Z</lastmod>
+      <priority>0.5</priority>
+      <changefreq>weekly</changefreq>
+      <xhtml:link rel="alternate" hreflang="en" href="http://localhost:3000/contact" />
+<xhtml:link rel="alternate" hreflang="zh" href="http://localhost:3000/lian-xi-fang-shi" />
+<xhtml:link rel="alternate" hreflang="x-default" href="http://localhost:3000/lian-xi-fang-shi" />
+    </url>
+    <url>
+      <loc>http://localhost:3000/fa-lv-sheng-ming</loc>
+      <lastmod>2026-05-15T02:50:38.750Z</lastmod>
+      <priority>0.5</priority>
+      <changefreq>weekly</changefreq>
+      <xhtml:link rel="alternate" hreflang="en" href="http://localhost:3000/legal-notice" />
+<xhtml:link rel="alternate" hreflang="zh" href="http://localhost:3000/fa-lv-sheng-ming" />
+<xhtml:link rel="alternate" hreflang="x-default" href="http://localhost:3000/fa-lv-sheng-ming" />
+    </url>
+    <url>
+      <loc>http://localhost:3000/Contact</loc>
+      <lastmod>2026-05-18T14:01:04.626Z</lastmod>
+      <priority>0.5</priority>
+      <changefreq>weekly</changefreq>
+      <xhtml:link rel="alternate" hreflang="zh" href="http://localhost:3000/Contact" />
+<xhtml:link rel="alternate" hreflang="x-default" href="http://localhost:3000/Contact" />
+    </url>
+    <url>
+      <loc>http://localhost:3000/about</loc>
+      <lastmod>2026-05-18T16:25:55.851Z</lastmod>
+      <priority>0.5</priority>
+      <changefreq>weekly</changefreq>
+      <xhtml:link rel="alternate" hreflang="zh" href="http://localhost:3000/about" />
+<xhtml:link rel="alternate" hreflang="x-default" href="http://localhost:3000/about" />
+    </url>
+</urlset>

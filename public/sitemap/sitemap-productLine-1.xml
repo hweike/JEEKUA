@@ -3,19 +3,29 @@
         xmlns:xhtml="http://www.w3.org/1999/xhtml">
   
     <url>
+      <loc>http://localhost:3000/products/1777552920876</loc>
+      <lastmod>2026-06-02T14:13:52.504Z</lastmod>
+      <priority>0.5</priority>
+      <changefreq>weekly</changefreq>
+      <xhtml:link rel="alternate" hreflang="en" href="http://localhost:3000/products/1777552920876" />
+<xhtml:link rel="alternate" hreflang="zh" href="http://localhost:3000/products/1777552920876" />
+<xhtml:link rel="alternate" hreflang="x-default" href="http://localhost:3000/products/1777552920876" />
+    </url>
+    <url>
       <loc>http://localhost:3000/products/1777778528724</loc>
-      <lastmod>2026-05-15T16:09:00.963Z</lastmod>
+      <lastmod>2026-05-20T03:35:44.227Z</lastmod>
       <priority>0.5</priority>
       <changefreq>weekly</changefreq>
       <xhtml:link rel="alternate" hreflang="zh" href="http://localhost:3000/products/1777778528724" />
 <xhtml:link rel="alternate" hreflang="x-default" href="http://localhost:3000/products/1777778528724" />
     </url>
     <url>
-      <loc>http://localhost:3000/products/mornsun</loc>
-      <lastmod>2026-05-15T16:09:00.962Z</lastmod>
+      <loc>http://localhost:3000/products/1779864128281</loc>
+      <lastmod>2026-06-02T14:13:52.507Z</lastmod>
       <priority>0.5</priority>
       <changefreq>weekly</changefreq>
-      <xhtml:link rel="alternate" hreflang="zh" href="http://localhost:3000/products/mornsun" />
-<xhtml:link rel="alternate" hreflang="x-default" href="http://localhost:3000/products/mornsun" />
+      <xhtml:link rel="alternate" hreflang="en" href="http://localhost:3000/products/1779864128281" />
+<xhtml:link rel="alternate" hreflang="zh" href="http://localhost:3000/products/1779864128281" />
+<xhtml:link rel="alternate" hreflang="x-default" href="http://localhost:3000/products/1779864128281" />
     </url>
 </urlset>

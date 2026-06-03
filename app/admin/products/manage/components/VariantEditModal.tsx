@@ -5,8 +5,21 @@ import ImageGridUpload from '@/components/ImageGridUpload';
 import { PriceTiersInput } from './PriceTiersInput';
 import { AttributesInput } from './AttributesInput';
 
+// 定义变体表单数据类型
+interface VariantFormData {
+  productId?: string;
+  product_name?: string;
+  sku?: string;
+  main_image_url?: string;
+  additional_images?: string[];
+  price_tiers?: any[];          // 根据实际业务定义具体类型
+  attributes?: Record<string, any>;
+  currency?: string;
+  [key: string]: any;           // 允许其他字段，保持灵活性
+}
+
 interface VariantEditModalProps {
-  variant: any;
+  variant: VariantFormData;
   parentId: string;
   locale: string;
   onSave: () => void;
@@ -14,7 +27,7 @@ interface VariantEditModalProps {
 }
 
 export function VariantEditModal({ variant, parentId, locale, onSave, onClose }: VariantEditModalProps) {
-  const [form, setForm] = useState(() => ({
+  const [form, setForm] = useState<VariantFormData>(() => ({
     ...variant,
     price_tiers: variant.price_tiers || [],  // 确保是数组
     attributes: variant.attributes || {},
@@ -23,7 +36,7 @@ export function VariantEditModal({ variant, parentId, locale, onSave, onClose }:
   const [saving, setSaving] = useState(false);
 
   const handleChange = (field: string, value: any) => {
-    setForm(prev => ({ ...prev, [field]: value }));
+    setForm((prev: VariantFormData) => ({ ...prev, [field]: value }));
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -72,7 +85,7 @@ export function VariantEditModal({ variant, parentId, locale, onSave, onClose }:
               <PriceTiersInput value={form.price_tiers} onChange={v => handleChange('price_tiers', v)} currency={form.currency || 'USD'} />
             </div>
             <div className="col-span-2">
-              <label class="block font-medium mb-1">自定义属性</label>
+              <label className="block font-medium mb-1">自定义属性</label>
               <AttributesInput value={form.attributes || {}} onChange={v => handleChange('attributes', v)} />
             </div>
           </div>

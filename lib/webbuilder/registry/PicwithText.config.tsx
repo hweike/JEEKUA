@@ -34,7 +34,6 @@ export const config: ComponentConfig<PicwithTextProps> = {
     paddingBottom: 32,
   },
   fields: {
-    // 通栏类型
     bannerType: {
       label: '通栏类型',
       type: 'radio',
@@ -46,17 +45,30 @@ export const config: ComponentConfig<PicwithTextProps> = {
     backgroundColor: {
       label: '通栏背景色',
       type: 'custom',
-      render: ({ value, onChange }) => <ColorPickerField field={{}} value={value || '#ffffff'} onChange={onChange} />,
+      render: ({ value, onChange }: { value: any; onChange: any }) => (
+        <ColorPickerField field={{}} value={value || '#ffffff'} onChange={onChange} />
+      ),
     },
+    // 语言切换器：改为 custom 类型
     languageSwitcher: {
       label: '',
-      type: 'language-switcher',
+      type: 'custom',
+      render: () => <LanguageSwitcherField />,
     },
-    // 图片设置（无分组）
+    // 图片设置
     imageUrl: {
       label: '图片',
       type: 'custom',
-      render: ({ value, onChange }) => <ImageUpload value={value || ''} onChange={onChange} maxCount={1} label="" hint="支持上传本地图片或输入网络图片地址" previewAspectRatio="16:9" />,
+      render: ({ value, onChange }: { value: any; onChange: any }) => (
+        <ImageUpload
+          value={value || ''}
+          onChange={(url: string | string[]) => onChange(typeof url === 'string' ? url : url[0])}
+          maxCount={1}
+          label=""
+          hint="支持上传本地图片或输入网络图片地址"
+          previewAspectRatio="16:9"
+        />
+      ),
     },
     imageHeight: {
       label: '图片高度',
@@ -94,32 +106,55 @@ export const config: ComponentConfig<PicwithTextProps> = {
         { label: '滚动时放大', value: 'zoom' },
       ],
     },
-    // 标题设置（无分组）
-    title: { label: '标题', type: 'picwithtext-title' },
+    // 标题设置：改为 custom 类型
+    title: {
+      label: '标题',
+      type: 'custom',
+      render: ({ value, onChange }: { value: any; onChange: any }) => (
+        <PicwithTextTextField value={value} onChange={onChange} label="标题" />
+      ),
+    },
     titleFontSize: { label: '标题大小 (px)', type: 'number', min: 20, max: 120, step: 1 },
     titleColor: {
       label: '标题颜色',
       type: 'custom',
-      render: ({ value, onChange }) => <ColorPickerField field={{}} value={value || '#000000'} onChange={onChange} />,
+      render: ({ value, onChange }: { value: any; onChange: any }) => (
+        <ColorPickerField field={{}} value={value || '#000000'} onChange={onChange} />
+      ),
     },
-    // 文本设置（无分组）
-    text: { label: '文本', type: 'picwithtext-text' },
+    // 文本设置：改为 custom 类型
+    text: {
+      label: '文本',
+      type: 'custom',
+      render: ({ value, onChange }: { value: any; onChange: any }) => (
+        <PicwithTextTextField value={value} onChange={onChange} label="文本" />
+      ),
+    },
     textFontSize: { label: '文本大小 (px)', type: 'number', min: 20, max: 120, step: 1 },
     textColor: {
       label: '文本颜色',
       type: 'custom',
-      render: ({ value, onChange }) => <ColorPickerField field={{}} value={value || '#000000'} onChange={onChange} />,
+      render: ({ value, onChange }: { value: any; onChange: any }) => (
+        <ColorPickerField field={{}} value={value || '#000000'} onChange={onChange} />
+      ),
     },
-    // 按钮设置（无分组）
-    buttonText: { label: '按钮文字', type: 'picwithtext-button' },
+    // 按钮设置：改为 custom 类型
+    buttonText: {
+      label: '按钮文字',
+      type: 'custom',
+      render: ({ value, onChange }: { value: any; onChange: any }) => (
+        <PicwithTextTextField value={value} onChange={onChange} label="按钮文字" />
+      ),
+    },
     buttonFontSize: { label: '按钮文字大小 (px)', type: 'number', min: 20, max: 120, step: 1 },
     buttonColor: {
       label: '按钮颜色',
       type: 'custom',
-      render: ({ value, onChange }) => <ColorPickerField field={{}} value={value || '#000000'} onChange={onChange} />,
+      render: ({ value, onChange }: { value: any; onChange: any }) => (
+        <ColorPickerField field={{}} value={value || '#000000'} onChange={onChange} />
+      ),
     },
     buttonLink: { label: '按钮链接', type: 'text' },
-    // 布局与样式（无分组）
     contentVertical: {
       label: '内容位置',
       type: 'select',
@@ -141,22 +176,12 @@ export const config: ComponentConfig<PicwithTextProps> = {
     textAreaBackgroundColor: {
       label: '文本区背景色',
       type: 'custom',
-      render: ({ value, onChange }) => <ColorPickerField field={{}} value={value || 'transparent'} onChange={onChange} />,
+      render: ({ value, onChange }: { value: any; onChange: any }) => (
+        <ColorPickerField field={{}} value={value || 'transparent'} onChange={onChange} />
+      ),
     },
-    paddingTop: {
-      label: '顶部填充 (px)',
-      type: 'number',
-      min: 0,
-      max: 100,
-      step: 1,
-    },
-    paddingBottom: {
-      label: '底部填充 (px)',
-      type: 'number',
-      min: 0,
-      max: 100,
-      step: 1,
-    },
+    paddingTop: { label: '顶部填充 (px)', type: 'number', min: 0, max: 100, step: 1 },
+    paddingBottom: { label: '底部填充 (px)', type: 'number', min: 0, max: 100, step: 1 },
   },
   render: ({ puck, ...props }) => <PicwithText puck={puck} {...props} />,
 };

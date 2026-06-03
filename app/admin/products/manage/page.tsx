@@ -166,11 +166,11 @@ export default function ProductManagePage() {
     return () => controller.abort();
   }, [fetchProducts]);
 
-  // 更新 URL 参数
-  const updateParams = useCallback((updates: Record<string, string | number>) => {
+  // 更新 URL 参数（允许 undefined 值，内部会删除参数）
+  const updateParams = useCallback((updates: Record<string, string | number | undefined>) => {
     const params = new URLSearchParams(searchParams);
     Object.entries(updates).forEach(([key, val]) => {
-      if (val === undefined || val === '' || val === 'all') params.delete(key);
+      if (val === undefined || val === null || val === '' || val === 'all') params.delete(key);
       else params.set(key, String(val));
     });
     if (updates.locale) {
@@ -353,7 +353,11 @@ export default function ProductManagePage() {
     <div className="p-6">
       <div className="flex justify-between items-center mb-6">
         <h1 className="text-2xl font-bold">产品管理</h1>
-        <LanguageSelector currentLocale={locale} onLocaleChange={(val) => updateParams({ locale: val })} displayMode="zh"/>
+        <LanguageSelector
+          currentLocale={locale}
+          onLocaleChange={(val: string) => updateParams({ locale: val })}
+          displayMode="zh"
+        />
       </div>
 
       <div className="flex gap-4 border-b mb-4">
@@ -568,7 +572,7 @@ export default function ProductManagePage() {
               <TemplateSelector
                 category="product"
                 value={selectedTemplateId}
-                onChange={setSelectedTemplateId}
+                onChange={(val: string) => setSelectedTemplateId(val)}
                 placeholder="选择产品详情页模板"
               />
               <p className="text-xs text-gray-500 mt-2">选择后，所有选中的产品将应用此模板。</p>

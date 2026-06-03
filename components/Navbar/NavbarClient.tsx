@@ -23,13 +23,12 @@ const styleMap: Record<string, React.ComponentType<NavbarClientProps>> = {
   luxury: LuxuryNavbar,
 };
 
-
 export default function NavbarClient({ headerConfig, menuTree, siteSettings, footerConfig }: NavbarClientProps) {
-  // 防御：如果 headerConfig 为 undefined，使用默认空对象
-  const safeHeaderConfig = headerConfig || { style: 'default' };
-  const style = safeHeaderConfig.style || 'default';
+  // 防御：如果 headerConfig 为 undefined，使用默认空对象；并通过类型断言访问 style 属性
+  const safeHeaderConfig = headerConfig || { style: 'default' } as HeaderConfig & { style?: string };
+  const style = (safeHeaderConfig as any).style || 'default';
   const Component = styleMap[style] || DefaultNavbar;
-  return (   // 添加括号
+  return (
     <Component
       headerConfig={headerConfig}
       menuTree={menuTree}

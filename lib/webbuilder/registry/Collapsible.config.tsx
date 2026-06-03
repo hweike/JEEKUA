@@ -3,13 +3,14 @@ import { Collapsible } from '@/components/webbuilder/blocks/Advanced/Collapsible
 import { ColorPickerField } from '@/components/webbuilder/fields/ColorPickerField';
 import { CollapsibleListField } from '@/components/webbuilder/fields/CollapsibleListField';
 import { LanguageSwitcherField } from '@/components/webbuilder/fields/LanguageSwitcherField';
-import ImageUpload from '@/components/ImageUpload';  // ✅ 补充导入
+import ImageUpload from '@/components/ImageUpload';
 import type { CollapsibleProps } from '@/lib/webbuilder/types';
 
 export const config: ComponentConfig<CollapsibleProps> = {
   label: '可折叠',
   category: 'Media/Banner',
   defaultProps: {
+    languageSwitcher: { label: '', type: 'language-switcher' },
     bannerType: 'standard',
     backgroundColor: '#ffffff',
     globalTitle: { zh: '常见问题', en: 'FAQ', textId: '' },
@@ -47,7 +48,7 @@ export const config: ComponentConfig<CollapsibleProps> = {
         backgroundColor: {
           label: '通栏背景色',
           type: 'custom',
-          render: ({ value, onChange }) => <ColorPickerField field={{}} value={value || '#ffffff'} onChange={onChange} />,
+          render: ({ value, onChange }: { value: any; onChange: any }) => <ColorPickerField field={{}} value={value || '#ffffff'} onChange={onChange} />,
         },
       },
     },
@@ -61,7 +62,7 @@ export const config: ComponentConfig<CollapsibleProps> = {
         globalTitleColor: {
           label: '标题颜色',
           type: 'custom',
-          render: ({ value, onChange }) => <ColorPickerField field={{}} value={value || '#000000'} onChange={onChange} />,
+          render: ({ value, onChange }: { value: any; onChange: any }) => <ColorPickerField field={{}} value={value || '#000000'} onChange={onChange} />,
         },
         globalTitleAlign: {
           label: '标题对齐方式',
@@ -82,7 +83,7 @@ export const config: ComponentConfig<CollapsibleProps> = {
         imageUrl: {
           label: '图片',
           type: 'custom',
-          render: ({ value, onChange }) => <ImageUpload value={value || ''} onChange={onChange} maxCount={1} label="" hint="支持上传本地图片或输入网络图片地址" previewAspectRatio="16:9" />,
+          render: ({ value, onChange }: { value: any; onChange: any }) => <ImageUpload value={value || ''} onChange={onChange} maxCount={1} label="" hint="支持上传本地图片或输入网络图片地址" previewAspectRatio="16:9" />,
         },
         imageRatio: {
           label: '图片比例',
@@ -111,13 +112,13 @@ export const config: ComponentConfig<CollapsibleProps> = {
         rowTitleColor: {
           label: '标题颜色',
           type: 'custom',
-          render: ({ value, onChange }) => <ColorPickerField field={{}} value={value || '#000000'} onChange={onChange} />,
+          render: ({ value, onChange }: { value: any; onChange: any }) => <ColorPickerField field={{}} value={value || '#000000'} onChange={onChange} />,
         },
         rowTitleFontSize: { label: '标题大小 (px)', type: 'number', min: 20, max: 120, step: 1 },
         rowContentColor: {
           label: '行内容颜色',
           type: 'custom',
-          render: ({ value, onChange }) => <ColorPickerField field={{}} value={value || '#666666'} onChange={onChange} />,
+          render: ({ value, onChange }: { value: any; onChange: any }) => <ColorPickerField field={{}} value={value || '#666666'} onChange={onChange} />,
         },
         rowContentFontSize: { label: '内容文本大小 (px)', type: 'number', min: 20, max: 120, step: 1 },
       },
@@ -139,7 +140,7 @@ export const config: ComponentConfig<CollapsibleProps> = {
         containerBgColor: {
           label: '容器背景色',
           type: 'custom',
-          render: ({ value, onChange }) => <ColorPickerField field={{}} value={value || 'transparent'} onChange={onChange} />,
+          render: ({ value, onChange }: { value: any; onChange: any }) => <ColorPickerField field={{}} value={value || 'transparent'} onChange={onChange} />,
         },
       },
     },
@@ -156,7 +157,7 @@ export const config: ComponentConfig<CollapsibleProps> = {
     items: {
       label: '可折叠行管理',
       type: 'custom',
-      render: ({ value, onChange }) => <CollapsibleListField value={value} onChange={onChange} />,
+      render: ({ value, onChange }: { value: any; onChange: any }) => <CollapsibleListField value={value} onChange={onChange} />,
     },
   },
   render: ({ puck, ...props }) => <Collapsible puck={puck} {...props} />,

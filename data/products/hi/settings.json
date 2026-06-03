@@ -1,11 +1,11 @@
 {
   "defaultSettings": {
-    "default_min_order_qty": 10,
-    "default_availability": "out_of_stock",
-    "default_brand": "MORNSUN",
+    "default_min_order_qty": 1,
+    "default_availability": "in_stock",
+    "default_brand": "Generic",
     "sku_rule": "P-{timestamp}",
-    "default_currency": "EUR",
-    "default_shipping_cost": 10,
+    "default_currency": "USD",
+    "default_shipping_cost": 0,
     "default_return_days": 30,
     "default_mpn": ""
   },

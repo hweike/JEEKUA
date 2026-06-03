@@ -21,41 +21,34 @@ export default function CategoryList({
   const [moveMenuOpen, setMoveMenuOpen] = useState(false);
   const moveMenuRef = useRef<HTMLDivElement>(null);
   
-  // 更多操作下拉菜单状态
   const [moreMenuOpen, setMoreMenuOpen] = useState(false);
   const moreMenuRef = useRef<HTMLDivElement>(null);
-  // 子菜单：属性模板选择
   const [attrTemplateSubOpen, setAttrTemplateSubOpen] = useState(false);
   const attrTemplateSubRef = useRef<HTMLDivElement>(null);
-  // 子菜单：网页模板选择（页面模板）
   const [webTemplateSubOpen, setWebTemplateSubOpen] = useState(false);
   const webTemplateSubRef = useRef<HTMLDivElement>(null);
   
-  // 页面模板列表（用于批量变更页面模板，category=product_category）
   const [webTemplates, setWebTemplates] = useState<any[]>([]);
   
- 
-  // 加载页面模板列表（与 TemplateSelector 组件保持一致）
-    useEffect(() => {
-      const fetchWebTemplates = async () => {
-        try {
-          const res = await fetch(`/api/webbuilder?category=product_category`);
-          if (!res.ok) {
-            console.warn(`加载页面模板失败: ${res.status}`);
-            setWebTemplates([]);
-            return;
-          }
-          const data = await res.json();
-          // TemplateSelector 返回的是数组 [{ id, name }]
-          const templates = Array.isArray(data) ? data : [];
-          setWebTemplates(templates);
-        } catch (err) {
-          console.error('加载页面模板失败', err);
+  useEffect(() => {
+    const fetchWebTemplates = async () => {
+      try {
+        const res = await fetch(`/api/webbuilder?category=product_category`);
+        if (!res.ok) {
+          console.warn(`加载页面模板失败: ${res.status}`);
           setWebTemplates([]);
+          return;
         }
-      };
-      fetchWebTemplates();
-    }, []);
+        const data = await res.json();
+        const templates = Array.isArray(data) ? data : [];
+        setWebTemplates(templates);
+      } catch (err) {
+        console.error('加载页面模板失败', err);
+        setWebTemplates([]);
+      }
+    };
+    fetchWebTemplates();
+  }, []);
 
   const resetNewCat = () => {
     setNewCat({
@@ -81,7 +74,6 @@ export default function CategoryList({
     }
   }, [addingCat, currentProductLineId, categories.length]);
 
-  // 点击外部关闭菜单
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
       if (moveMenuRef.current && !moveMenuRef.current.contains(event.target as Node)) {
@@ -154,7 +146,7 @@ export default function CategoryList({
     }
   };
 
-  const toggleSelect = (catId: string, e: React.MouseEvent) => {
+  const toggleSelect = (catId: string, e: React.ChangeEvent<HTMLInputElement>) => {
     e.stopPropagation();
     const newSet = new Set(selectedCatIds);
     if (newSet.has(catId)) newSet.delete(catId);
@@ -174,7 +166,6 @@ export default function CategoryList({
     setMoveMenuOpen(false);
   };
 
-  // 批量更新属性模板
   const batchUpdateAttributeTemplate = (templateId: string) => {
     if (selectedCatIds.size === 0) return;
     const newCategories = categories.map((cat: any) =>
@@ -188,7 +179,6 @@ export default function CategoryList({
     setMoreMenuOpen(false);
   };
 
-  // 批量更新页面模板
   const batchUpdateWebTemplate = (templateId: string) => {
     if (selectedCatIds.size === 0) return;
     const newCategories = categories.map((cat: any) =>
@@ -202,7 +192,6 @@ export default function CategoryList({
     setMoreMenuOpen(false);
   };
 
-  // 批量删除分类
   const batchDeleteCategories = () => {
     if (selectedCatIds.size === 0) return;
     if (!confirm(`确定删除选中的 ${selectedCatIds.size} 个一级分类及其所有二级分类吗？此操作不可恢复。`)) return;
@@ -219,7 +208,7 @@ export default function CategoryList({
           <h3 className="text-lg font-semibold mb-4">新建一级分类</h3>
           <CategoryForm
             category={newCat}
-            onSave={(cat) => saveCategory(cat, true)}
+            onSave={(cat: any) => saveCategory(cat, true)}
             onCancel={cancelAdd}
             productLines={productLines}
             attributeTemplates={attributeTemplates}
@@ -227,7 +216,6 @@ export default function CategoryList({
         </div>
       )}
 
-      {/* 批量操作栏 */}
       {categories.length > 0 && (
         <div className="flex items-center justify-between bg-gray-50 p-3 rounded-md">
           <div className="flex items-center gap-3">
@@ -242,7 +230,6 @@ export default function CategoryList({
           {selectedCatIds.size > 0 && (
             <div className="flex items-center gap-2">
               <span className="text-sm text-gray-600">已选 {selectedCatIds.size} 项</span>
-              {/* 移动到产品线 */}
               <div className="relative" ref={moveMenuRef}>
                 <button
                   onClick={() => setMoveMenuOpen(!moveMenuOpen)}
@@ -265,7 +252,6 @@ export default function CategoryList({
                 )}
               </div>
 
-              {/* 更多操作 */}
               <div className="relative" ref={moreMenuRef}>
                 <button
                   onClick={() => setMoreMenuOpen(!moreMenuOpen)}
@@ -275,7 +261,6 @@ export default function CategoryList({
                 </button>
                 {moreMenuOpen && (
                   <div className="absolute right-0 mt-1 w-56 bg-white border rounded shadow-lg z-20">
-                    {/* 变更产品自定义属性模板 */}
                     <div className="relative" ref={attrTemplateSubRef}>
                       <button
                         onClick={() => setAttrTemplateSubOpen(!attrTemplateSubOpen)}
@@ -305,7 +290,6 @@ export default function CategoryList({
                       )}
                     </div>
 
-                    {/* 页面模板 */}
                     <div className="relative" ref={webTemplateSubRef}>
                       <button
                         onClick={() => setWebTemplateSubOpen(!webTemplateSubOpen)}
@@ -339,7 +323,6 @@ export default function CategoryList({
                       )}
                     </div>
 
-                    {/* 删除 */}
                     <button
                       onClick={batchDeleteCategories}
                       className="block w-full text-left px-4 py-2 text-sm hover:bg-gray-100 text-red-600"
@@ -360,7 +343,7 @@ export default function CategoryList({
             <div className="p-4">
               <CategoryForm
                 category={editingCat}
-                onSave={(updated) => saveCategory(updated, false)}
+                onSave={(updated: any) => saveCategory(updated, false)}
                 onCancel={() => setEditingCat(null)}
                 productLines={productLines}
                 attributeTemplates={attributeTemplates}
@@ -376,7 +359,7 @@ export default function CategoryList({
                   <input
                     type="checkbox"
                     checked={selectedCatIds.has(cat.id)}
-                    onChange={(e) => toggleSelect(cat.id, e as any)}
+                    onChange={(e: React.ChangeEvent<HTMLInputElement>) => toggleSelect(cat.id, e)}
                     onClick={(e) => e.stopPropagation()}
                     className="w-4 h-4"
                   />

@@ -3,33 +3,91 @@ import { PageType } from './types';
 import { getPageIdBySlug, readPage } from '@/lib/pages/storage';
 import { getSiteSettings } from '@/lib/getSiteSettings';
 import { getHeaderConfig, getFooterConfig } from '@/lib/config-loader';
-// import { getProductLineBySlug } from '@/lib/productLines/storage';
-// import { getCategoryBySlug } from '@/lib/products/categories';
-// import { getProductBySlug } from '@/lib/products/storage';
-// import { getBlogIndex, getBlogPostBySlug } from '@/lib/blog/storage';
-// import { getDocBySlug } from '@/lib/docs/storage';
-// import { getVideoBySlug } from '@/lib/videos/storage';
-// 
-// 注意：以下模块暂时不存在于项目中，需要根据实际业务创建
-// 为保持结构完整，暂时提供空实现，并在运行时抛出错误或返回 null
-// 如果不需要这些功能，可以注释或删除对应的注册条目
 
-// 博客分类功能（暂不可用）
-async function getBlogCategoryBySlug(locale: string, slug: string) {
-  console.warn(`[SEO] getBlogCategoryBySlug not implemented for slug: ${slug}`);
+// ============ 临时占位实现（当实际业务模块不存在时使用） ============
+// 这些函数会在实际调用时打印警告并返回 null
+// 如果您已经实现了对应的业务模块，请取消下面的注释并删除占位实现
+
+async function getProductLineBySlug(locale: string, slug: string): Promise<any> {
+  console.warn(`[SEO] getProductLineBySlug not implemented for slug: ${slug}`);
   return null;
 }
 
-// 文档库功能（暂不可用）
-async function getDocLibraryBySlug(locale: string, slug: string) {
+async function getCategoryBySlug(locale: string, slug: string): Promise<any> {
+  console.warn(`[SEO] getCategoryBySlug not implemented for slug: ${slug}`);
+  return null;
+}
+
+async function getProductBySlug(locale: string, slug: string): Promise<any> {
+  console.warn(`[SEO] getProductBySlug not implemented for slug: ${slug}`);
+  return null;
+}
+
+async function getBlogIndex(locale: string, slug: string): Promise<any> {
+  console.warn(`[SEO] getBlogIndex not implemented for slug: ${slug}`);
+  return null;
+}
+
+async function getBlogPostBySlug(locale: string, slug: string): Promise<any> {
+  console.warn(`[SEO] getBlogPostBySlug not implemented for slug: ${slug}`);
+  return null;
+}
+
+async function getDocBySlug(locale: string, slug: string): Promise<any> {
+  console.warn(`[SEO] getDocBySlug not implemented for slug: ${slug}`);
+  return null;
+}
+
+async function getDocLibraryBySlug(locale: string, slug: string): Promise<any> {
   console.warn(`[SEO] getDocLibraryBySlug not implemented for slug: ${slug}`);
   return null;
 }
 
-// 视频合集功能（暂不可用）
-async function getVideoCollectionBySlug(locale: string, slug: string) {
+async function getVideoBySlug(locale: string, slug: string): Promise<any> {
+  console.warn(`[SEO] getVideoBySlug not implemented for slug: ${slug}`);
+  return null;
+}
+
+async function getVideoCollectionBySlug(locale: string, slug: string): Promise<any> {
   console.warn(`[SEO] getVideoCollectionBySlug not implemented for slug: ${slug}`);
   return null;
+}
+
+// 博客分类（博客合集）临时实现
+async function getBlogCategoryBySlug(locale: string, slug: string): Promise<any> {
+  console.warn(`[SEO] getBlogCategoryBySlug not implemented for slug: ${slug}`);
+  return null;
+}
+
+// 扩展 SiteSettings 类型，添加可能缺失的字段（通过索引访问，避免类型错误）
+// 如果您的 SiteSettings 类型已包含这些字段，可以忽略
+interface ExtendedSiteSettings {
+  siteName?: string;
+  websiteUrl?: string;
+  contactPhone?: string;
+  companyName?: string;
+  country?: string;
+  registeredAddress?: string;
+  city?: string;
+  province?: string;
+  postalCode?: string;
+  brand?: any[];
+  homeSeoTitle?: string;
+  homeSeoDescription?: string;
+  homeSeoKeywords?: string;
+  [key: string]: any;
+}
+
+// 扩展 PageData 类型，添加可能缺失的字段
+interface ExtendedPageData {
+  title?: string;
+  seo_title?: string;
+  seo_description?: string;
+  seo_keywords?: string;
+  visible?: string;
+  canonical_url?: string;
+  image?: string;
+  [key: string]: any;
 }
 
 export type PageDataFetcher<T = any> = (slug: string, locale: string) => Promise<T | null>;
@@ -46,10 +104,20 @@ export interface PageTypeConfig<T = any> {
 }
 
 // 辅助函数：从 pages 存储中获取页面数据（包含 SEO 字段）
-async function getPageDataFromStorage(locale: string, slug: string) {
+async function getPageDataFromStorage(locale: string, slug: string): Promise<ExtendedPageData | null> {
   const pageId = await getPageIdBySlug(locale, slug);
   if (!pageId) return null;
-  return await readPage(locale, pageId);
+  const page = await readPage(locale, pageId);
+  if (!page) return null;
+  return {
+    title: page.title,
+    seo_title: page.seo_title,
+    seo_description: page.seo_description,
+    seo_keywords: page.seo_keywords,
+    visible: page.visible,
+    canonical_url: (page as any).canonical_url,
+    image: (page as any).image,
+  };
 }
 
 export const pageTypeRegistry: Record<string, PageTypeConfig> = {
@@ -58,12 +126,12 @@ export const pageTypeRegistry: Record<string, PageTypeConfig> = {
     type: 'home',
     getDataFetcher: () => async (slug, locale) => {
       const pageData = await getPageDataFromStorage(locale, 'home');
-      const settings = await getSiteSettings();
+      const settings = (await getSiteSettings()) as ExtendedSiteSettings;
       const header = await getHeaderConfig(locale);
       const footer = await getFooterConfig(locale);
 
-      const seoTitle = pageData?.seo_title || settings.homeSeoTitle || settings.siteName;
-      const seoDescription = pageData?.seo_description || settings.homeSeoDescription || `${settings.siteName} - 官方网站`;
+      const seoTitle = pageData?.seo_title || settings.homeSeoTitle || settings.siteName || '';
+      const seoDescription = pageData?.seo_description || settings.homeSeoDescription || `${settings.siteName || ''} - 官方网站`;
       const seoKeywords = pageData?.seo_keywords || settings.homeSeoKeywords || '';
 
       return {
@@ -158,44 +226,39 @@ export const pageTypeRegistry: Record<string, PageTypeConfig> = {
   // ==================== 产品线落地页 ====================
   productLine: {
     type: 'productLine',
-    getDataFetcher: () => async (slug, locale) => {
-      return getProductLineBySlug(locale, slug);
-    },
+    getDataFetcher: () => async (slug, locale) => getProductLineBySlug(locale, slug),
     mapToStructuredData: (productLine) => ({
-      name: productLine.name,
-      description: productLine.description,
-      numberOfItems: productLine.productCount,
-      itemList: productLine.products?.map((p: any) => ({ url: p.url })) || [],
+      name: productLine?.name || '',
+      description: productLine?.description || '',
+      numberOfItems: productLine?.productCount,
+      itemList: productLine?.products?.map((p: any) => ({ url: p.url })) || [],
     }),
-    getTitle: (productLine) => productLine.seo_title || productLine.name,
-    getDescription: (productLine) => productLine.seo_description || productLine.description,
-    getImage: (productLine) => productLine.image,
+    getTitle: (productLine) => productLine?.seo_title || productLine?.name || '',
+    getDescription: (productLine) => productLine?.seo_description || productLine?.description || '',
+    getImage: (productLine) => productLine?.image,
   },
 
   // ==================== 产品合集（分类页） ====================
   productCollection: {
     type: 'productCollection',
-    getDataFetcher: () => async (slug, locale) => {
-      return getCategoryBySlug(locale, slug);
-    },
+    getDataFetcher: () => async (slug, locale) => getCategoryBySlug(locale, slug),
     mapToStructuredData: (category) => ({
-      name: category.name,
-      description: category.description,
-      numberOfItems: category.productCount,
-      itemList: category.products?.map((p: any) => ({ url: p.url })) || [],
+      name: category?.name || '',
+      description: category?.description || '',
+      numberOfItems: category?.productCount,
+      itemList: category?.products?.map((p: any) => ({ url: p.url })) || [],
     }),
-    getTitle: (category) => category.seo_title || category.name,
-    getDescription: (category) => category.seo_description || category.description,
-    getImage: (category) => category.image,
+    getTitle: (category) => category?.seo_title || category?.name || '',
+    getDescription: (category) => category?.seo_description || category?.description || '',
+    getImage: (category) => category?.image,
   },
 
   // ==================== 产品详情页 ====================
   product: {
     type: 'product',
-    getDataFetcher: () => async (slug, locale) => {
-      return getProductBySlug(locale, slug);
-    },
+    getDataFetcher: () => async (slug, locale) => getProductBySlug(locale, slug),
     mapToStructuredData: (product) => {
+      if (!product) return {};
       const structured: any = {
         name: product.product_name,
         image: product.main_image_url,
@@ -218,152 +281,135 @@ export const pageTypeRegistry: Record<string, PageTypeConfig> = {
       };
       return structured;
     },
-    getTitle: (product) => product.seo_title || product.product_name,
-    getDescription: (product) => product.seo_description || product.short_description,
-    getImage: (product) => product.main_image_url,
-    getNoindex: (product) => product.noindex,
-    getCanonical: (product) => product.canonical_url,
+    getTitle: (product) => product?.seo_title || product?.product_name || '',
+    getDescription: (product) => product?.seo_description || product?.short_description || '',
+    getImage: (product) => product?.main_image_url,
+    getNoindex: (product) => product?.noindex,
+    getCanonical: (product) => product?.canonical_url,
   },
 
   // ==================== 博客落地页（博客首页） ====================
   blogList: {
     type: 'blogList',
-    getDataFetcher: () => async (slug, locale) => {
-      return getBlogIndex(locale, slug);
-    },
+    getDataFetcher: () => async (slug, locale) => getBlogIndex(locale, slug),
     mapToStructuredData: (blogIndex) => ({
-      name: blogIndex.name,
-      description: blogIndex.description,
-      itemList: blogIndex.posts?.map((post: any) => ({ url: post.url })) || [],
+      name: blogIndex?.name || '',
+      description: blogIndex?.description || '',
+      itemList: blogIndex?.posts?.map((post: any) => ({ url: post.url })) || [],
     }),
-    getTitle: (blogIndex) => blogIndex.seo_title || blogIndex.name,
-    getDescription: (blogIndex) => blogIndex.seo_description || blogIndex.description,
-    getImage: (blogIndex) => blogIndex.image,
+    getTitle: (blogIndex) => blogIndex?.seo_title || blogIndex?.name || '',
+    getDescription: (blogIndex) => blogIndex?.seo_description || blogIndex?.description || '',
+    getImage: (blogIndex) => blogIndex?.image,
   },
 
   // ==================== 博客合集（分类/标签页） ====================
-  // 注意：getBlogCategoryBySlug 为临时空实现，请根据实际业务替换
   blogCollection: {
     type: 'blogCollection',
-    getDataFetcher: () => async (slug, locale) => {
-      const category = await getBlogCategoryBySlug(locale, slug);
-      if (!category) return null;
-      return category;
-    },
+    getDataFetcher: () => async (slug, locale) => getBlogCategoryBySlug(locale, slug),
     mapToStructuredData: (category) => ({
-      name: category.name,
-      description: category.description,
-      itemList: category.posts?.map((post: any) => ({ url: post.url })) || [],
+      name: category?.name || '',
+      description: category?.description || '',
+      itemList: category?.posts?.map((post: any) => ({ url: post.url })) || [],
     }),
-    getTitle: (category) => category.seo_title || category.name,
-    getDescription: (category) => category.seo_description || category.description,
-    getImage: (category) => category.image,
+    getTitle: (category) => category?.seo_title || category?.name || '',
+    getDescription: (category) => category?.seo_description || category?.description || '',
+    getImage: (category) => category?.image,
   },
 
   // ==================== 博客文章 ====================
   blogPost: {
     type: 'blogPost',
-    getDataFetcher: () => async (slug, locale) => {
-      return getBlogPostBySlug(locale, slug);
-    },
+    getDataFetcher: () => async (slug, locale) => getBlogPostBySlug(locale, slug),
     mapToStructuredData: (post) => ({
-      headline: post.title,
-      image: post.featured_image,
-      author: post.author,
-      datePublished: post.created_at,
-      dateModified: post.updated_at,
-      publisher: post.publisher,
+      headline: post?.title || '',
+      image: post?.featured_image,
+      author: post?.author,
+      datePublished: post?.created_at,
+      dateModified: post?.updated_at,
+      publisher: post?.publisher,
     }),
-    getTitle: (post) => post.seo_title || post.title,
-    getDescription: (post) => post.seo_description || post.excerpt,
-    getImage: (post) => post.featured_image,
-    getNoindex: (post) => post.noindex,
-    getCanonical: (post) => post.canonical_url,
+    getTitle: (post) => post?.seo_title || post?.title || '',
+    getDescription: (post) => post?.seo_description || post?.excerpt || '',
+    getImage: (post) => post?.featured_image,
+    getNoindex: (post) => post?.noindex,
+    getCanonical: (post) => post?.canonical_url,
   },
 
   // ==================== 文档库 ====================
   docLibrary: {
     type: 'docLibrary',
-    getDataFetcher: () => async (slug, locale) => {
-      return getDocLibraryBySlug(locale, slug);
-    },
+    getDataFetcher: () => async (slug, locale) => getDocLibraryBySlug(locale, slug),
     mapToStructuredData: (library) => ({
-      name: library.name,
-      description: library.description,
-      itemList: library.docs?.map((doc: any) => ({ url: doc.url })) || [],
+      name: library?.name || '',
+      description: library?.description || '',
+      itemList: library?.docs?.map((doc: any) => ({ url: doc.url })) || [],
     }),
-    getTitle: (library) => library.seo_title || library.name,
-    getDescription: (library) => library.seo_description || library.description,
-    getImage: (library) => library.image,
+    getTitle: (library) => library?.seo_title || library?.name || '',
+    getDescription: (library) => library?.seo_description || library?.description || '',
+    getImage: (library) => library?.image,
   },
 
   // ==================== 文档页面（技术文章） ====================
   doc: {
     type: 'doc',
-    getDataFetcher: () => async (slug, locale) => {
-      return getDocBySlug(locale, slug);
-    },
+    getDataFetcher: () => async (slug, locale) => getDocBySlug(locale, slug),
     mapToStructuredData: (doc) => ({
-      headline: doc.title,
-      description: doc.description,
-      author: doc.author,
-      datePublished: doc.published_at,
-      dateModified: doc.updated_at,
+      headline: doc?.title || '',
+      description: doc?.description || '',
+      author: doc?.author,
+      datePublished: doc?.published_at,
+      dateModified: doc?.updated_at,
     }),
-    getTitle: (doc) => doc.seo_title || doc.title,
-    getDescription: (doc) => doc.seo_description || doc.description,
-    getImage: (doc) => doc.image,
-    getNoindex: (doc) => doc.noindex,
-    getCanonical: (doc) => doc.canonical_url,
+    getTitle: (doc) => doc?.seo_title || doc?.title || '',
+    getDescription: (doc) => doc?.seo_description || doc?.description || '',
+    getImage: (doc) => doc?.image,
+    getNoindex: (doc) => doc?.noindex,
+    getCanonical: (doc) => doc?.canonical_url,
   },
 
   // ==================== 视频合集 ====================
   videoCollection: {
     type: 'videoCollection',
-    getDataFetcher: () => async (slug, locale) => {
-      return getVideoCollectionBySlug(locale, slug);
-    },
+    getDataFetcher: () => async (slug, locale) => getVideoCollectionBySlug(locale, slug),
     mapToStructuredData: (collection) => ({
-      name: collection.name,
-      description: collection.description,
-      itemList: collection.videos?.map((video: any) => ({ url: video.url })) || [],
+      name: collection?.name || '',
+      description: collection?.description || '',
+      itemList: collection?.videos?.map((video: any) => ({ url: video.url })) || [],
     }),
-    getTitle: (collection) => collection.seo_title || collection.name,
-    getDescription: (collection) => collection.seo_description || collection.description,
-    getImage: (collection) => collection.thumbnail,
+    getTitle: (collection) => collection?.seo_title || collection?.name || '',
+    getDescription: (collection) => collection?.seo_description || collection?.description || '',
+    getImage: (collection) => collection?.thumbnail,
   },
 
   // ==================== 视频页面 ====================
   video: {
     type: 'video',
-    getDataFetcher: () => async (slug, locale) => {
-      return getVideoBySlug(locale, slug);
-    },
+    getDataFetcher: () => async (slug, locale) => getVideoBySlug(locale, slug),
     mapToStructuredData: (video) => ({
-      name: video.title,
-      description: video.description,
-      thumbnailUrl: video.thumbnail,
-      uploadDate: video.upload_date,
-      duration: video.duration,
-      contentUrl: video.content_url,
-      embedUrl: video.embed_url,
+      name: video?.title || '',
+      description: video?.description || '',
+      thumbnailUrl: video?.thumbnail,
+      uploadDate: video?.upload_date,
+      duration: video?.duration,
+      contentUrl: video?.content_url,
+      embedUrl: video?.embed_url,
     }),
-    getTitle: (video) => video.seo_title || video.title,
-    getDescription: (video) => video.seo_description || video.description,
-    getImage: (video) => video.thumbnail,
-    getNoindex: (video) => video.noindex,
-    getCanonical: (video) => video.canonical_url,
+    getTitle: (video) => video?.seo_title || video?.title || '',
+    getDescription: (video) => video?.seo_description || video?.description || '',
+    getImage: (video) => video?.thumbnail,
+    getNoindex: (video) => video?.noindex,
+    getCanonical: (video) => video?.canonical_url,
   },
 
   // ==================== 询盘表单页 ====================
   inquiry: {
     type: 'inquiry',
     getDataFetcher: () => async (_slug, locale) => {
-      const settings = await getSiteSettings();
+      const settings = (await getSiteSettings()) as ExtendedSiteSettings;
       return {
         name: '联系我们',
         description: '填写表单获取产品报价与技术支持',
-        actionUrl: `${settings.websiteUrl}/api/inquiry`,
+        actionUrl: `${settings.websiteUrl || ''}/api/inquiry`,
       };
     },
     mapToStructuredData: (data) => ({

@@ -2,7 +2,7 @@
   "defaultSettings": {
     "default_min_order_qty": 1,
     "default_availability": "in_stock",
-    "default_brand": "Neutral",
+    "default_brand": "Generic",
     "sku_rule": "P-{timestamp}",
     "default_currency": "USD",
     "default_shipping_cost": 0,

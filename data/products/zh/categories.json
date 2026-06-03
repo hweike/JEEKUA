@@ -4,70 +4,24 @@
       "id": "1777552920876",
       "name": "金升阳电源",
       "order": 0,
-      "templateId": "default_product_line_published"
+      "templateId": "default_product_line_published",
+      "slug": "jin-sheng-yang-dian-yuan",
+      "seoTitle": "",
+      "seoDescription": "",
+      "seoKeywords": ""
     },
     {
       "id": "1779864128281",
       "name": "工业胶布",
       "order": 1,
-      "templateId": "default_product_line_published"
+      "templateId": "default_product_line_published",
+      "slug": "gong-ye-jiao-bu",
+      "seoTitle": "",
+      "seoDescription": "",
+      "seoKeywords": ""
     }
   ],
   "categories": [
-    {
-      "id": "1777795326547",
-      "name": "tape 一级分类",
-      "slug": "tape-yi-ji-fen-lei",
-      "order": 0,
-      "productLineId": "1779864128281",
-      "templateId": "default_product_category_published",
-      "image": "",
-      "description": "",
-      "seoTitle": "",
-      "seoDescription": "",
-      "seoKeywords": "",
-      "attributeTemplateId": "",
-      "series": [
-        {
-          "id": "1777795571178",
-          "name": "二级分类",
-          "slug": "er-ji-fen-lei",
-          "order": 0,
-          "image": "",
-          "description": "",
-          "seoTitle": "",
-          "seoDescription": "",
-          "seoKeywords": ""
-        }
-      ]
-    },
-    {
-      "id": "1777795597324",
-      "name": "tape 一级分类2",
-      "slug": "tape-yi-ji-fen-lei-2",
-      "order": 0,
-      "productLineId": "1779864128281",
-      "templateId": "default_product_category_published",
-      "image": "",
-      "description": "",
-      "seoTitle": "",
-      "seoDescription": "",
-      "seoKeywords": "",
-      "attributeTemplateId": "",
-      "series": [
-        {
-          "id": "1777800570898",
-          "name": "tape 一级分类21",
-          "slug": "t-a-p-e-yi-ji-fen-lei-2-1",
-          "order": 0,
-          "image": "",
-          "description": "",
-          "seoTitle": "",
-          "seoDescription": "",
-          "seoKeywords": ""
-        }
-      ]
-    },
     {
       "id": "1780304812504-gz7dvojz",
       "name": "AC/DC机壳开关电源(15-5000W)",
@@ -1612,6 +1566,60 @@
       "seoKeywords": "",
       "attributeTemplateId": "",
       "series": []
+    },
+    {
+      "id": "1777795326547",
+      "name": "tape 一级分类",
+      "slug": "tape-yi-ji-fen-lei",
+      "order": 0,
+      "productLineId": "1779864128281",
+      "templateId": "default_product_category_published",
+      "image": "",
+      "description": "",
+      "seoTitle": "",
+      "seoDescription": "",
+      "seoKeywords": "",
+      "attributeTemplateId": "",
+      "series": [
+        {
+          "id": "1777795571178",
+          "name": "二级分类",
+          "slug": "er-ji-fen-lei",
+          "order": 0,
+          "image": "",
+          "description": "",
+          "seoTitle": "",
+          "seoDescription": "",
+          "seoKeywords": ""
+        }
+      ]
+    },
+    {
+      "id": "1777795597324",
+      "name": "tape 一级分类2",
+      "slug": "tape-yi-ji-fen-lei-2",
+      "order": 0,
+      "productLineId": "1779864128281",
+      "templateId": "default_product_category_published",
+      "image": "",
+      "description": "",
+      "seoTitle": "",
+      "seoDescription": "",
+      "seoKeywords": "",
+      "attributeTemplateId": "",
+      "series": [
+        {
+          "id": "1777800570898",
+          "name": "tape 一级分类21",
+          "slug": "t-a-p-e-yi-ji-fen-lei-2-1",
+          "order": 0,
+          "image": "",
+          "description": "",
+          "seoTitle": "",
+          "seoDescription": "",
+          "seoKeywords": ""
+        }
+      ]
     }
   ]
 }

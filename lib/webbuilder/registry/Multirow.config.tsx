@@ -27,8 +27,12 @@ export const config: ComponentConfig<MultirowProps> = {
     items: [],
   },
   fields: {
-    // 语言切换器（置顶）
-    languageSwitcher: { label: '', type: 'language-switcher' },
+    // 语言切换器（置顶） - 改为 custom 类型以避免类型错误
+    languageSwitcher: {
+      label: '',
+      type: 'custom',
+      render: () => <LanguageSwitcherField />,
+    },
 
     // 通栏设置
     bannerGroup: {
@@ -46,12 +50,14 @@ export const config: ComponentConfig<MultirowProps> = {
         backgroundColor: {
           label: '通栏背景色',
           type: 'custom',
-          render: ({ value, onChange }) => <ColorPickerField field={{}} value={value || '#ffffff'} onChange={onChange} />,
+          render: ({ value, onChange }: { value: any; onChange: any }) => (
+            <ColorPickerField field={{}} value={value || '#ffffff'} onChange={onChange} />
+          ),
         },
       },
     },
 
-    // 图片设置（属于全局）
+    // 图片设置
     imageGroup: {
       label: '图片设置',
       type: 'object',
@@ -96,18 +102,24 @@ export const config: ComponentConfig<MultirowProps> = {
         columnBgColor: {
           label: '列背景色',
           type: 'custom',
-          render: ({ value, onChange }) => <ColorPickerField field={{}} value={value || '#f9fafb'} onChange={onChange} />,
+          render: ({ value, onChange }: { value: any; onChange: any }) => (
+            <ColorPickerField field={{}} value={value || '#f9fafb'} onChange={onChange} />
+          ),
         },
         columnTitleColor: {
           label: '标题颜色',
           type: 'custom',
-          render: ({ value, onChange }) => <ColorPickerField field={{}} value={value || '#000000'} onChange={onChange} />,
+          render: ({ value, onChange }: { value: any; onChange: any }) => (
+            <ColorPickerField field={{}} value={value || '#000000'} onChange={onChange} />
+          ),
         },
         columnTitleFontSize: { label: '标题大小 (px)', type: 'number', min: 20, max: 120, step: 1 },
         columnDescColor: {
           label: '描述颜色',
           type: 'custom',
-          render: ({ value, onChange }) => <ColorPickerField field={{}} value={value || '#666666'} onChange={onChange} />,
+          render: ({ value, onChange }: { value: any; onChange: any }) => (
+            <ColorPickerField field={{}} value={value || '#666666'} onChange={onChange} />
+          ),
         },
         columnDescFontSize: { label: '描述文本大小 (px)', type: 'number', min: 20, max: 120, step: 1 },
         contentVertical: {
@@ -154,7 +166,9 @@ export const config: ComponentConfig<MultirowProps> = {
     items: {
       label: '内容行管理',
       type: 'custom',
-      render: ({ value, onChange }) => <MultirowListField value={value} onChange={onChange} />,
+      render: ({ value, onChange }: { value: any; onChange: any }) => (
+        <MultirowListField value={value} onChange={onChange} />
+      ),
     },
   },
   render: ({ puck, ...props }) => <Multirow puck={puck} {...props} />,

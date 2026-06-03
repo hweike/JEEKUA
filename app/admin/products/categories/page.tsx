@@ -6,7 +6,7 @@ import dynamic from 'next/dynamic';
 import LanguageSelector from '@/components/common/LanguageSelector';
 import Toast from '@/components/Toast';
 import { Settings } from 'lucide-react';
-import { LANGUAGES } from '@/lib/languages/config';   // 新增：导入语言配置
+import { LANGUAGES } from '@/lib/languages/config';
 
 const CategoryList = dynamic(() => import('./components/CategoryList'), {
   ssr: false,
@@ -15,11 +15,16 @@ const CategoryList = dynamic(() => import('./components/CategoryList'), {
 const ProductLineManager = dynamic(() => import('./components/ProductLineManager'), { ssr: false });
 const ImportModal = dynamic(() => import('./components/ImportModal'), { ssr: false });
 
+// 产品线类型定义 - 必须与 ProductLineManager 组件中的定义完全一致
 interface ProductLine {
   id: string;
   name: string;
-  order: number;
+  order?: number;               // 可选，与组件定义一致
   templateId?: string;
+  slug?: string;
+  seoTitle?: string;
+  seoDescription?: string;
+  seoKeywords?: string;
 }
 
 interface AttributeTemplate {
@@ -39,7 +44,6 @@ function debounce<T extends (...args: any[]) => any>(fn: T, delay: number): T {
   }) as T;
 }
 
-// 动态获取所有支持的语言代码（支持任意多种语言）
 const validLocaleCodes = LANGUAGES.map(lang => lang.code);
 const getInitialLocale = (): string => {
   if (typeof window === 'undefined') return validLocaleCodes[0] || 'zh';
@@ -52,9 +56,7 @@ export default function CategoriesPage() {
   const searchParams = useSearchParams();
   const router = useRouter();
 
-  // 修改：从 localStorage 初始化 locale，不再依赖 URL 参数
   const [locale, setLocale] = useState(getInitialLocale);
-
   const [productLines, setProductLines] = useState<ProductLine[]>([]);
   const [categories, setCategories] = useState<any[]>([]);
   const [initialized, setInitialized] = useState(false);
@@ -72,7 +74,6 @@ export default function CategoriesPage() {
   const loadAbortController = useRef<AbortController | null>(null);
   const saveAbortController = useRef<AbortController | null>(null);
 
-  // 初始化 localStorage 中的语言设置（若为空则从后端获取默认语言）
   useEffect(() => {
     const initLocale = async () => {
       const stored = localStorage.getItem('admin_selected_language');
@@ -97,7 +98,6 @@ export default function CategoriesPage() {
     initLocale();
   }, []);
 
-  // 保存到服务器
   const saveToServer = useCallback(async (lines: ProductLine[], cats: any[]) => {
     if (saveAbortController.current) {
       saveAbortController.current.abort();
@@ -127,7 +127,6 @@ export default function CategoriesPage() {
 
   const debouncedSave = useMemo(() => debounce(saveToServer, 500), [saveToServer]);
 
-  // 加载数据
   const loadData = useCallback(async (ignoreCache = false) => {
     if (loadAbortController.current) {
       loadAbortController.current.abort();
@@ -161,7 +160,6 @@ export default function CategoriesPage() {
     }
   }, [locale]);
 
-  // 检查另一语言站是否有产品线
   useEffect(() => {
     if (!initialized) return;
     const checkOtherLocale = async () => {
@@ -189,7 +187,6 @@ export default function CategoriesPage() {
     checkOtherLocale();
   }, [initialized, productLines.length, locale]);
 
-  // 加载属性模板
   useEffect(() => {
     const controller = new AbortController();
     fetch(`/api/admin/products/settings?locale=${locale}`, { signal: controller.signal })
@@ -199,7 +196,6 @@ export default function CategoriesPage() {
     return () => controller.abort();
   }, [locale]);
 
-  // 初始加载
   useEffect(() => {
     loadData();
     return () => {
@@ -208,18 +204,10 @@ export default function CategoriesPage() {
     };
   }, [loadData]);
 
-  // 处理语言切换（仅更新 localStorage 和 state，LanguageSelector 会刷新页面）
   const handleLocaleChange = (newLocale: string) => {
     if (newLocale === locale) return;
     localStorage.setItem('admin_selected_language', newLocale);
-    // 注意：LanguageSelector 组件仍然会调用 window.location.reload()，
-    // 因此这里不需要手动刷新页面或更新 URL 参数。
-    // 刷新后，locale 会通过 useState(getInitialLocale) 重新读取 localStorage，
-    // 从而得到正确的初始值，不会闪烁。
-    // 但为了在刷新前让父组件知道语言变化（可能影响其他状态），可以调用 setLocale，
-    // 实际上刷新后页面重建，所以 setLocale 可选。
     setLocale(newLocale);
-    // 由于即将刷新，不需要再调用其他逻辑。
   };
 
   const currentProductLineId = searchParams.get('productLineId') || productLines[0]?.id || '';
@@ -317,7 +305,6 @@ export default function CategoriesPage() {
     }
   };
 
-  // 加载中
   if (!initialized) {
     return (
       <div className="flex items-center justify-center h-screen">
@@ -326,7 +313,6 @@ export default function CategoriesPage() {
     );
   }
 
-  // 无产品线状态
   if (productLines.length === 0) {
     let showCopyBtn = false;
     let copySourceLocale = '';
@@ -378,7 +364,6 @@ export default function CategoriesPage() {
     );
   }
 
-  // 正常显示界面
   return (
     <div className="p-6">
       <div className="flex justify-between items-center mb-4">

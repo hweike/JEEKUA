@@ -26,7 +26,12 @@ export const config: ComponentConfig<AccordionProps> = {
     items: [],
   },
   fields: {
-    languageSwitcher: { label: '', type: 'language-switcher' },
+    // 语言切换器：改为 custom 类型
+    languageSwitcher: {
+      label: '',
+      type: 'custom',
+      render: () => <LanguageSwitcherField />,
+    },
 
     bannerGroup: {
       label: '通栏设置',
@@ -43,7 +48,9 @@ export const config: ComponentConfig<AccordionProps> = {
         backgroundColor: {
           label: '通栏背景色',
           type: 'custom',
-          render: ({ value, onChange }) => <ColorPickerField field={{}} value={value || '#ffffff'} onChange={onChange} />,
+          render: ({ value, onChange }: { value: any; onChange: any }) => (
+            <ColorPickerField field={{}} value={value || '#ffffff'} onChange={onChange} />
+          ),
         },
       },
     },
@@ -55,7 +62,9 @@ export const config: ComponentConfig<AccordionProps> = {
         rowTitleColor: {
           label: '标题颜色',
           type: 'custom',
-          render: ({ value, onChange }) => <ColorPickerField field={{}} value={value || '#000000'} onChange={onChange} />,
+          render: ({ value, onChange }: { value: any; onChange: any }) => (
+            <ColorPickerField field={{}} value={value || '#000000'} onChange={onChange} />
+          ),
         },
         rowTitleFontSize: { label: '标题大小 (px)', type: 'number', min: 20, max: 120, step: 1 },
         rowTitleAlign: {
@@ -70,7 +79,9 @@ export const config: ComponentConfig<AccordionProps> = {
         rowHeaderBgColor: {
           label: '页眉背景',
           type: 'custom',
-          render: ({ value, onChange }) => <ColorPickerField field={{}} value={value || '#f3f4f6'} onChange={onChange} />,
+          render: ({ value, onChange }: { value: any; onChange: any }) => (
+            <ColorPickerField field={{}} value={value || '#f3f4f6'} onChange={onChange} />
+          ),
         },
         itemsPerRow: { label: '每行内容项 (2-4)', type: 'number', min: 2, max: 4, step: 1 },
         itemsGap: { label: '每行内容项间距 (px)', type: 'number', min: 10, max: 50, step: 1 },
@@ -116,7 +127,9 @@ export const config: ComponentConfig<AccordionProps> = {
     items: {
       label: '手风琴项目管理',
       type: 'custom',
-      render: ({ value, onChange }) => <AccordionListField value={value} onChange={onChange} />,
+      render: ({ value, onChange }: { value: any; onChange: any }) => (
+        <AccordionListField value={value} onChange={onChange} />
+      ),
     },
   },
   render: ({ puck, ...props }) => <Accordion puck={puck} {...props} />,

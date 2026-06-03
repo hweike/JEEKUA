@@ -57,7 +57,6 @@ interface RichTextEditorProps {
 }
 
 export default function RichTextEditor({ value, onChange, placeholder = '开始编写...' }: RichTextEditorProps) {
-  // 所有 Hooks 保持不变（与用户提供代码完全一致）
   const [uploading, setUploading] = useState(false);
   const [headingMenuOpen, setHeadingMenuOpen] = useState(false);
   const [listMenuOpen, setListMenuOpen] = useState(false);
@@ -82,7 +81,8 @@ export default function RichTextEditor({ value, onChange, placeholder = '开始�
   const { showToast } = useToast();
 
   const extensions = useMemo(() => [
-    StarterKit.configure({ codeBlock: false, html: true }),
+    // ✅ 修复：移除 html: true（StarterKit 不支持该配置）
+    StarterKit.configure({ codeBlock: false }),
     Underline,
     TextAlign.configure({ types: ['heading', 'paragraph'] }),
     Link.configure({
@@ -279,31 +279,35 @@ export default function RichTextEditor({ value, onChange, placeholder = '开始�
       return;
     }
 
-    const platforms = [
+    // 为 embed 函数添加类型标注
+    const platforms: Array<{
+      pattern: RegExp;
+      embed: (url: string, width: number, height: number) => string;
+    }> = [
       {
         pattern: /vimeo\.com\/(\d+)/,
-        embed: (url, width, height) => {
+        embed: (url: string, width: number, height: number) => {
           const id = url.match(/vimeo\.com\/(\d+)/)?.[1];
           return `<iframe width="${width}" height="${height}" src="https://player.vimeo.com/video/${id}" frameborder="0" allowfullscreen></iframe>`;
         },
       },
       {
         pattern: /bilibili\.com\/video\/(BV[\w]+)/,
-        embed: (url, width, height) => {
+        embed: (url: string, width: number, height: number) => {
           const id = url.match(/bilibili\.com\/video\/(BV[\w]+)/)?.[1];
           return `<iframe width="${width}" height="${height}" src="https://player.bilibili.com/player.html?bvid=${id}&page=1" scrolling="no" border="0" frameborder="no" framespacing="0" allowfullscreen="true"></iframe>`;
         },
       },
       {
         pattern: /v\.qq\.com\/x\/page\/(\w+)\.html/,
-        embed: (url, width, height) => {
+        embed: (url: string, width: number, height: number) => {
           const id = url.match(/v\.qq\.com\/x\/page\/(\w+)\.html/)?.[1];
           return `<iframe width="${width}" height="${height}" src="https://v.qq.com/txp/iframe/player.html?vid=${id}" frameborder="0" allowfullscreen></iframe>`;
         },
       },
       {
         pattern: /youku\.com\/v_show\/id_([\w=]+)\.html/,
-        embed: (url, width, height) => {
+        embed: (url: string, width: number, height: number) => {
           const id = url.match(/youku\.com\/v_show\/id_([\w=]+)\.html/)?.[1];
           return `<iframe width="${width}" height="${height}" src="https://player.youku.com/embed/${id}" frameborder="0" allowfullscreen></iframe>`;
         },
@@ -676,7 +680,6 @@ export default function RichTextEditor({ value, onChange, placeholder = '开始�
 
   if (!editor) return null;
 
-  // ========== 关键修改：固定高度 600px，使用 flex 列布局，内容区滚动 ==========
   return (
     <>
       {!isFullscreen && (

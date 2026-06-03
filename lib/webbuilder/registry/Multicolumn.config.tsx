@@ -17,7 +17,6 @@ export const config: ComponentConfig<MulticolumnProps> = {
       paddingTop: 32,
       paddingBottom: 32,
     },
-    // 全局设置字段使用 multicolumn 前缀，与存储数据保持一致
     multicolumnTitle: { zh: '我们的服务', en: 'Our Services', textId: '' },
     multicolumnTitleFontSize: 40,
     multicolumnTitleColor: '#000000',
@@ -58,18 +57,15 @@ export const config: ComponentConfig<MulticolumnProps> = {
         backgroundColor: {
           label: '通栏背景色',
           type: 'custom',
-          render: ({ value, onChange }) => <ColorPickerField field={{}} value={value || '#ffffff'} onChange={onChange} />,
+          render: ({ value, onChange }: { value: any; onChange: any }) => (
+            <ColorPickerField field={{}} value={value || '#ffffff'} onChange={onChange} />
+          ),
         },
         paddingTop: { label: '顶部填充 (px)', type: 'number', min: 0, max: 100, step: 1 },
         paddingBottom: { label: '底部填充 (px)', type: 'number', min: 0, max: 100, step: 1 },
       },
     },
 
-    // 全局设置：使用扁平字段（不嵌套对象），但通过视觉分组
-    // 注意：这些字段直接存储在 props 顶层，而不是在一个 object 里
-    // 为了让属性面板有分组效果，我们使用一个 object 包装，但为了兼容旧数据，需要在 defaultProps 和渲染中同时支持两种方式
-    // 这里我们保持使用 object 包装，但 key 与存储数据一致：globalSettings 对象内包含这些字段
-    // 但根据您的要求，希望字段名统一为 multicolumn*，我们可以在 globalSettings 对象内使用这些名字
     globalSettings: {
       label: '全局设置',
       type: 'object',
@@ -79,7 +75,9 @@ export const config: ComponentConfig<MulticolumnProps> = {
         multicolumnTitleColor: {
           label: '标题颜色',
           type: 'custom',
-          render: ({ value, onChange }) => <ColorPickerField field={{}} value={value || '#000000'} onChange={onChange} />,
+          render: ({ value, onChange }: { value: any; onChange: any }) => (
+            <ColorPickerField field={{}} value={value || '#000000'} onChange={onChange} />
+          ),
         },
         _divider1: { label: '', type: 'custom', render: () => <div className="h-4" /> },
         multicolumnImageWidth: {
@@ -107,7 +105,9 @@ export const config: ComponentConfig<MulticolumnProps> = {
         multicolumnButtonColor: {
           label: '按钮颜色',
           type: 'custom',
-          render: ({ value, onChange }) => <ColorPickerField field={{}} value={value || '#000000'} onChange={onChange} />,
+          render: ({ value, onChange }: { value: any; onChange: any }) => (
+            <ColorPickerField field={{}} value={value || '#000000'} onChange={onChange} />
+          ),
         },
         multicolumnButtonLink: { label: '按钮链接', type: 'text' },
       },
@@ -145,17 +145,23 @@ export const config: ComponentConfig<MulticolumnProps> = {
         columnBgColor: {
           label: '列背景色',
           type: 'custom',
-          render: ({ value, onChange }) => <ColorPickerField field={{}} value={value || '#f9fafb'} onChange={onChange} />,
+          render: ({ value, onChange }: { value: any; onChange: any }) => (
+            <ColorPickerField field={{}} value={value || '#f9fafb'} onChange={onChange} />
+          ),
         },
         columnTitleColor: {
           label: '列标题颜色',
           type: 'custom',
-          render: ({ value, onChange }) => <ColorPickerField field={{}} value={value || '#000000'} onChange={onChange} />,
+          render: ({ value, onChange }: { value: any; onChange: any }) => (
+            <ColorPickerField field={{}} value={value || '#000000'} onChange={onChange} />
+          ),
         },
         columnDescColor: {
           label: '列描述颜色',
           type: 'custom',
-          render: ({ value, onChange }) => <ColorPickerField field={{}} value={value || '#666666'} onChange={onChange} />,
+          render: ({ value, onChange }: { value: any; onChange: any }) => (
+            <ColorPickerField field={{}} value={value || '#666666'} onChange={onChange} />
+          ),
         },
       },
     },
@@ -163,7 +169,9 @@ export const config: ComponentConfig<MulticolumnProps> = {
     items: {
       label: '内容列管理',
       type: 'custom',
-      render: ({ value, onChange }) => <MulticolumnListField value={value} onChange={onChange} />,
+      render: ({ value, onChange }: { value: any; onChange: any }) => (
+        <MulticolumnListField value={value} onChange={onChange} />
+      ),
     },
   },
   render: ({ puck, ...props }) => <Multicolumn puck={puck} {...props} />,

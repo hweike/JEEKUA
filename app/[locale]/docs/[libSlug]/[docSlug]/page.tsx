@@ -11,8 +11,8 @@ export default async function DocPage({ params }: { params: { locale: string; li
   const library = await getDocsLibBySlug(locale, libSlug);
   if (!library) notFound();
 
-  // 2. 获取当前文档及内容（注意第二个参数是 library.slug，不是 id）
-  const docData = await getDocBySlug(locale, library.slug, docSlug);
+  // 2. 获取当前文档及内容（使用 URL 中的 libSlug，与 library.slug 相同但确保非空）
+  const docData = await getDocBySlug(locale, libSlug, docSlug);
   if (!docData) notFound();
   const { doc, content } = docData;
 

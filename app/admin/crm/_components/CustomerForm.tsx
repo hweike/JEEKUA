@@ -3,7 +3,7 @@ import { useState, useRef, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { Star } from 'lucide-react';
 import { STAGES, SCALES, COUNTRIES } from '@/lib/CRM/types';
-import type { CustomerStage, CustomerScale } from '@/lib/CRM/types';
+import type { CustomerStage, CustomerScale, Customer } from '@/lib/CRM/types';
 
 // 可搜索国家选择组件（保持不变）
 function CountrySelect({ value, onChange }: { value: string; onChange: (val: string) => void }) {

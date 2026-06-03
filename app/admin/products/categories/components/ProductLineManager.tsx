@@ -5,12 +5,31 @@ import { Edit, Trash2, Plus } from 'lucide-react';
 import { TemplateSelector } from '@/components/webbuilder/TemplateSelector';
 import SeoFields from '@/components/common/SeoFields';
 import { getTemplateDisplayName, preloadTemplateNames } from '@/lib/webbuilder/template-utils';
-import {getFieldHint,getFieldPlaceholder,HINT_PATHS,InfoTooltip} from '@/config/fieldHints';
+import { getFieldHint, getFieldPlaceholder, HINT_PATHS, InfoTooltip } from '@/config/fieldHints';
 
-export default function ProductLineManager({ productLines = [], onSave, onClose }: any) {
-  const [lines, setLines] = useState(productLines);
+// 产品线数据类型定义
+interface ProductLine {
+  id: string;
+  name: string;
+  order?: number;
+  templateId?: string;
+  slug?: string;
+  seoTitle?: string;
+  seoDescription?: string;
+  seoKeywords?: string;
+}
+
+// 组件 Props 类型定义
+interface ProductLineManagerProps {
+  productLines?: ProductLine[];
+  onSave: (lines: ProductLine[]) => void;
+  onClose: () => void;
+}
+
+export default function ProductLineManager({ productLines = [], onSave, onClose }: ProductLineManagerProps) {
+  const [lines, setLines] = useState<ProductLine[]>(productLines);
   const [editingId, setEditingId] = useState<string | null>(null);
-  const [editingData, setEditingData] = useState<any>({
+  const [editingData, setEditingData] = useState<Omit<ProductLine, 'id' | 'order'>>({
     name: '',
     templateId: '',
     slug: '',
@@ -19,7 +38,7 @@ export default function ProductLineManager({ productLines = [], onSave, onClose 
     seoKeywords: '',
   });
   const [addingNew, setAddingNew] = useState(false);
-  const [newData, setNewData] = useState<any>({
+  const [newData, setNewData] = useState<Omit<ProductLine, 'id' | 'order'>>({
     name: '',
     templateId: '',
     slug: '',
@@ -32,7 +51,7 @@ export default function ProductLineManager({ productLines = [], onSave, onClose 
   // 预加载所有产品线的模板名称（仅用于显示）
   useEffect(() => {
     const loadTemplateNames = async () => {
-      const ids = lines.map(line => line.templateId).filter(Boolean);
+      const ids = lines.map((line: ProductLine) => line.templateId).filter(Boolean) as string[];
       if (ids.length === 0) return;
       await preloadTemplateNames(ids);
       const names: Record<string, string> = {};
@@ -46,7 +65,7 @@ export default function ProductLineManager({ productLines = [], onSave, onClose 
 
   const getDisplayName = (id: string) => templateNames[id] || id?.slice(-8) || '';
 
-  const startEdit = (id: string, line: any) => {
+  const startEdit = (id: string, line: ProductLine) => {
     setEditingId(id);
     setEditingData({
       name: line.name || '',
@@ -65,7 +84,7 @@ export default function ProductLineManager({ productLines = [], onSave, onClose 
 
   const saveEdit = (id: string) => {
     if (!editingData.name.trim()) return;
-    setLines(lines.map(line =>
+    setLines(lines.map((line: ProductLine) =>
       line.id === id ? { ...line, ...editingData } : line
     ));
     setEditingId(null);
@@ -109,7 +128,7 @@ export default function ProductLineManager({ productLines = [], onSave, onClose 
       return;
     }
     if (!confirm('确定删除该产品线？所有关联的分类将被移到第一个产品线？')) return;
-    setLines(lines.filter(line => line.id !== id));
+    setLines(lines.filter((line: ProductLine) => line.id !== id));
   };
 
   // 修改后的保存函数：自动提交未确认的编辑
@@ -121,7 +140,7 @@ export default function ProductLineManager({ productLines = [], onSave, onClose 
         return;
       }
       // 同步生成新的 lines 数组（不依赖 setState 的异步）
-      const updatedLines = lines.map(line =>
+      const updatedLines = lines.map((line: ProductLine) =>
         line.id === editingId ? { ...line, ...editingData } : line
       );
       // 更新状态（用于后续显示）
@@ -166,12 +185,12 @@ export default function ProductLineManager({ productLines = [], onSave, onClose 
   };
 
   // 辅助函数：更新编辑数据
-  const updateEditing = (field: string, value: any) => {
-    setEditingData(prev => ({ ...prev, [field]: value }));
+  const updateEditing = (field: keyof Omit<ProductLine, 'id' | 'order'>, value: string) => {
+    setEditingData((prev: Omit<ProductLine, 'id' | 'order'>) => ({ ...prev, [field]: value }));
   };
 
-  const updateNew = (field: string, value: any) => {
-    setNewData(prev => ({ ...prev, [field]: value }));
+  const updateNew = (field: keyof Omit<ProductLine, 'id' | 'order'>, value: string) => {
+    setNewData((prev: Omit<ProductLine, 'id' | 'order'>) => ({ ...prev, [field]: value }));
   };
 
   return (
@@ -179,13 +198,13 @@ export default function ProductLineManager({ productLines = [], onSave, onClose 
       <div className="bg-white p-6 rounded-lg w-[800px] max-h-[85vh] flex flex-col">
         <h2 className="text-xl font-bold mb-4">管理产品线</h2>
         <div className="flex-1 overflow-y-auto space-y-4 mb-4">
-          {lines.map(line => (
+          {lines.map((line: ProductLine) => (
             <div key={line.id} className="border rounded-lg p-4 bg-gray-50">
               {editingId === line.id ? (
                 <div className="space-y-4">
                   <div className="flex gap-3">
                     <div className="flex-1">
-                      <label className="block text-sm font-medium mb-1">产品线名称*<InfoTooltip hintKey={HINT_PATHS.productLine.name} /></label>
+                      <label className="block text-sm font-medium mb-1">产品线名称*<InfoTooltip hintKey={HINT_PATHS.productLine.name as any} /></label>
 
                       <input
                         type="text"
@@ -197,7 +216,7 @@ export default function ProductLineManager({ productLines = [], onSave, onClose 
               
                     </div>
                     <div className="w-[50%]">
-                      <label className="block text-sm font-medium mb-1">关联模板*<InfoTooltip hintKey={HINT_PATHS.productLine.templateId} /></label>
+                      <label className="block text-sm font-medium mb-1">关联模板*<InfoTooltip hintKey={HINT_PATHS.productLine.templateId as any} /></label>
                       <TemplateSelector
                         category="product_line"
                         value={editingData.templateId}
@@ -280,7 +299,7 @@ export default function ProductLineManager({ productLines = [], onSave, onClose 
             <div className="border rounded-lg p-4 bg-blue-50 space-y-4">
               <div className="flex gap-3">
                 <div className="flex-1">
-                  <label className="block text-sm font-medium mb-1">产品线名称*<InfoTooltip hintKey={HINT_PATHS.productLine.name} /></label>
+                  <label className="block text-sm font-medium mb-1">产品线名称*<InfoTooltip hintKey={HINT_PATHS.productLine.name as any} /></label>
                   <input
                     type="text"
                     value={newData.name}
@@ -290,7 +309,7 @@ export default function ProductLineManager({ productLines = [], onSave, onClose 
                   />
                 </div>
                 <div className="w-[50%]">
-                  <label className="block text-sm font-medium mb-1">关联模板*<InfoTooltip hintKey={HINT_PATHS.productLine.templateId} /></label>
+                  <label className="block text-sm font-medium mb-1">关联模板*<InfoTooltip hintKey={HINT_PATHS.productLine.templateId as any} /></label>
                   <TemplateSelector
                     category="product_line"
                     value={newData.templateId}

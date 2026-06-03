@@ -5,6 +5,11 @@ import { getBlogCategories, getBlogPosts } from '@/lib/blog';
 import { getSiteSettings } from '@/lib/getSiteSettings';
 import WebBuilderClientWrapper from '@/components/webbuilder/WebBuilderClientWrapper';
 
+// 扩展 SiteSettings 类型以包含博客模板 ID（避免修改全局类型定义）
+interface ExtendedSiteSettings {
+  blogTemplateId?: string;
+}
+
 export default async function BlogIndexPage({
   params,
   searchParams,
@@ -22,11 +27,10 @@ export default async function BlogIndexPage({
     ? allPosts.filter((p) => p.category === selectedCategory)
     : allPosts;
 
-  // 2. 获取博客模板 ID（可从站点设置读取，或使用默认值）
-  const siteSettings = await getSiteSettings();
+  // 2. 获取博客模板 ID（从站点设置读取，并使用扩展类型断言）
+  const siteSettings = (await getSiteSettings()) as ExtendedSiteSettings;
   const templateId = siteSettings.blogTemplateId || 'default_blog_published';
   const template = await getTemplateById(templateId);
-
 
   if (!template) {
     return <div className="p-8 text-center">博客模板不存在，请联系管理员</div>;

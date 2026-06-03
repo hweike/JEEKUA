@@ -97,26 +97,30 @@ function findProductLineId(productLines: any[], name: string): string | null {
   return line ? line.id : null;
 }
 
-function findAttributeTemplateId(templates: any[], input: string): string | null {
+function findAttributeTemplateId(templates: any[], input: string | null): string | null {
   if (!input) return null;
   const tpl = templates.find(t => t.id === input || t.name === input);
   return tpl ? tpl.id : null;
 }
 
 // ---------- 缓存 attributeTemplates ----------
-let cachedAttributeTemplates: any[] | null = null;
+let cachedAttributeTemplates: any[] = [];  // 修改：初始化为空数组，避免 null
 let cacheTimestamp = 0;
 const CACHE_TTL = 60 * 1000; // 60秒
 
-async function getAttributeTemplates(locale: string) {
+async function getAttributeTemplates(locale: string): Promise<any[]> {  // 始终返回数组
   const now = Date.now();
-  if (cachedAttributeTemplates && (now - cacheTimestamp) < CACHE_TTL) {
+  if (cachedAttributeTemplates.length > 0 && (now - cacheTimestamp) < CACHE_TTL) {
     return cachedAttributeTemplates;
   }
-  const productSettings = await fetch(`${process.env.NEXT_PUBLIC_BASE_URL || 'http://localhost:3000'}/api/admin/products/settings?locale=${locale}`)
-    .then(res => res.json())
-    .catch(() => ({}));
-  cachedAttributeTemplates = productSettings.attributeTemplates || [];
+  try {
+    const productSettings = await fetch(`${process.env.NEXT_PUBLIC_BASE_URL || 'http://localhost:3000'}/api/admin/products/settings?locale=${locale}`)
+      .then(res => res.json());
+    cachedAttributeTemplates = productSettings.attributeTemplates || [];
+  } catch (err) {
+    console.error('获取属性模板失败', err);
+    cachedAttributeTemplates = [];
+  }
   cacheTimestamp = now;
   return cachedAttributeTemplates;
 }
@@ -189,7 +193,7 @@ export async function POST(request: NextRequest) {
     // 收集图片下载任务（并发优化）
     type ImageTask = {
       target: any;     // 一级分类对象或二级分类对象
-      field: string;   // 字段名，如 'image' 或 'image'（二级分类也用 image）
+      field: string;   // 字段名，如 'image'
       url: string;
       locale: string;
     };
@@ -233,8 +237,8 @@ export async function POST(request: NextRequest) {
           continue;
         }
 
-        // 暂时不下载图片，只记录任务
-        const attributeTemplateId = findAttributeTemplateId(attributeTemplates, attrTemplateInput);
+        // 修复：确保 attrTemplateInput 为 string | null，函数已支持
+        const attributeTemplateId = findAttributeTemplateId(attributeTemplates, attrTemplateInput || null);
         const order = productLineOrderMap.get(productLineId) || 0;
         productLineOrderMap.set(productLineId, order + 1);
 
@@ -273,7 +277,8 @@ export async function POST(request: NextRequest) {
         let baseSlug = slugRaw || generateSlugFromText(category2Name);
         let finalSlug = ensureUniqueSlug(baseSlug, existingSlugs);
         const existingSeries = currentCategory1.series || [];
-        const seriesExists = existingSeries.some(s => s.slug === finalSlug || s.name === category2Name);
+        // 修复：给回调参数 s 添加类型 any
+        const seriesExists = existingSeries.some((s: any) => s.slug === finalSlug || s.name === category2Name);
         if (seriesExists) {
           errors.push(`第 ${i+1} 行: 二级分类“${category2Name}”已存在，跳过`);
           skipCount++;

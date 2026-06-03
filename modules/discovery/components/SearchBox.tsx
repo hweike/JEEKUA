@@ -3,6 +3,12 @@
 import { useState, useEffect } from 'react';
 import FlexSearch from 'flexsearch';
 
+declare global {
+  interface Window {
+    __searchDocs?: any[];
+  }
+}
+
 export default function SearchBox({ locale }: { locale: string }) {
   const [index, setIndex] = useState<any>(null);
   const [query, setQuery] = useState('');
@@ -25,7 +31,7 @@ export default function SearchBox({ locale }: { locale: string }) {
     setQuery(val);
     if (val && index) {
       const ids = index.search(val);
-      const docs = (window as any).__searchDocs || [];
+      const docs = window.__searchDocs || [];
       setResults(docs.filter((doc: any) => ids.includes(doc.id)));
     } else {
       setResults([]);

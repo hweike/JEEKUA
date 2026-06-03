@@ -8,15 +8,16 @@ import Toast from '@/components/Toast';
 import BasicSettings from './components/BasicSettings';
 import AttributeTemplates from './components/AttributeTemplates';
 
-export interface Attribute {
-  key: string;
-  value: string;
+// 与 AttributeTemplates 组件中的类型完全一致
+export interface AttributePreset {
+  name: string;
+  rule: string; // 改为必选 string，匹配组件预期
 }
 
 export interface AttributeTemplate {
   id: string;
   name: string;
-  attributes: Attribute[];
+  attributes: AttributePreset[];
 }
 
 export interface DefaultSettings {

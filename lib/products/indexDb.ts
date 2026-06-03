@@ -25,6 +25,7 @@ export interface ProductIndexItem {
   status: string;
   updatedAt: string;
   createdAt: string;
+  templateId?: string;  // ✅ 添加产品详情页模板ID（可选，因为旧数据可能没有）
 }
 
 export function upsertProductIndex(item: ProductIndexItem) {
@@ -34,8 +35,8 @@ export function upsertProductIndex(item: ProductIndexItem) {
       productId, locale, productLineId, categoryId, seriesId, parent_product_id,
       sku, product_name, brand, price_tiers, currency, availability,
       min_order_quantity, main_image_url, attributes, slug, status,
-      updatedAt, createdAt
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      updatedAt, createdAt, templateId
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `);
   stmt.run(
     item.productId,
@@ -56,7 +57,8 @@ export function upsertProductIndex(item: ProductIndexItem) {
     item.slug,
     item.status,
     item.updatedAt,
-    item.createdAt
+    item.createdAt,
+    item.templateId || ''   // 默认空字符串
   );
 }
 
@@ -198,6 +200,7 @@ function parseProductRow(row: any): ProductIndexItem {
     status: row.status,
     updatedAt: row.updatedAt,
     createdAt: row.createdAt,
+    templateId: row.templateId || ''
   };
 }
 

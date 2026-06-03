@@ -32,7 +32,8 @@ export function extractAllTextIds(data: any): string[] {
       return;
     }
     for (const [key, value] of Object.entries(obj)) {
-      if (value && typeof value === 'object' && value.textId) {
+      // 修正：使用 'textId' in value 代替 value.textId
+      if (value && typeof value === 'object' && 'textId' in value && value.textId && typeof value.textId === 'string') {
         ids.add(value.textId);
       } else if (typeof value === 'object') {
         traverse(value);

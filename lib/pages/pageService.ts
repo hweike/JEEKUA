@@ -12,6 +12,26 @@ import {
   getAllLocales,
 } from './storage';
 import { toPinyin } from '@/lib/utils/pinyin';
+import fs from 'fs/promises';
+import path from 'path';
+
+// hreflang 索引文件路径
+const HREFLANG_INDEX_PATH = path.join(process.cwd(), 'data', 'pages', 'hreflang.json');
+
+// 读取 hreflang 索引
+async function readHreflangIndex(): Promise<Record<string, Record<string, string>>> {
+  try {
+    const data = await fs.readFile(HREFLANG_INDEX_PATH, 'utf-8');
+    return JSON.parse(data);
+  } catch {
+    return {};
+  }
+}
+
+// 写入 hreflang 索引
+async function writeHreflangIndex(index: Record<string, Record<string, string>>): Promise<void> {
+  await fs.writeFile(HREFLANG_INDEX_PATH, JSON.stringify(index, null, 2), 'utf-8');
+}
 
 // 生成8位数字ID（基于时间戳+随机数）
 export function generatePageId(): string {
@@ -93,9 +113,9 @@ export async function updatePage(
   const existing = await readPage(locale, pageId);
   if (!existing) throw new Error('Page not found');
 
-  // 不可修改 preset 和 type（预设页面）
-  if (existing.preset && (data.type !== undefined || data.preset !== undefined)) {
-    throw new Error('Cannot modify preset page type');
+  // 不可修改预设页面（preset 页面不允许更新）
+  if (existing.preset) {
+    throw new Error('Cannot modify preset page');
   }
 
   const updated: PageData = {
@@ -134,9 +154,8 @@ export async function deletePage(locale: string, pageId: string): Promise<void> 
   }
 }
 
-// 辅助：移除某个页面的特定语言 hreflang 条目
+// 移除某个页面的特定语言 hreflang 条目
 async function removeHreflangLocale(pageId: string, locale: string): Promise<void> {
-  const { readHreflangIndex, writeHreflangIndex } = await import('./storage');
   const index = await readHreflangIndex();
   if (index[pageId]) {
     delete index[pageId][locale];

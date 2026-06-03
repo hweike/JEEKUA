@@ -26,7 +26,6 @@ export async function POST(request: NextRequest) {
     return NextResponse.json(page, { status: 201 });
   } catch (error: any) {
     const message = error.message;
-    // 尝试解析SEO校验错误JSON
     try {
       const errors = JSON.parse(message);
       return NextResponse.json({ errors }, { status: 400 });

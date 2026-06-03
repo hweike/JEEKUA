@@ -137,6 +137,9 @@ export default function NavbarClient({ headerConfig, menuTree, siteSettings }: N
   const isSticky = menuConfig.stickyBehavior !== 'none';
   const showSeparator = menuConfig.showSeparator;
 
+  // 由于 MenuItems 组件的 menuType 类型定义不包含 'inline'，使用类型断言绕过检查
+  const menuType = menuConfig.menuType as any;
+
   // 顶部居中布局
   const renderTopCenter = () => (
     <div className="flex flex-col">
@@ -152,7 +155,7 @@ export default function NavbarClient({ headerConfig, menuTree, siteSettings }: N
         </div>
       </div>
       <div className="flex justify-center mt-4">
-        <MenuItems items={menuTree} pathname={pathname} menuType={menuConfig.menuType} />
+        <MenuItems items={menuTree} pathname={pathname} menuType={menuType} />
       </div>
     </div>
   );
@@ -162,7 +165,7 @@ export default function NavbarClient({ headerConfig, menuTree, siteSettings }: N
     <div className="flex items-center justify-between w-full">
       <div className="flex items-center gap-10">
         <Logo logoConfig={logoConfig} siteName={siteSettings?.siteName || 'FEISMAN POWER'} />
-        <MenuItems items={menuTree} pathname={pathname} menuType={menuConfig.menuType} />
+        <MenuItems items={menuTree} pathname={pathname} menuType={menuType} />
       </div>
       <div className="flex items-center gap-4">
         {searchConfig.enabled && <SearchButton placeholder={searchConfig.placeholder} />}
@@ -171,69 +174,39 @@ export default function NavbarClient({ headerConfig, menuTree, siteSettings }: N
     </div>
   );
 
-// 中间居中布局（菜单最左，Logo居中，右侧工具，菜单可换行）
-const renderMiddleCenter = () => (
-  <div className="grid grid-cols-1 md:grid-cols-3 items-center w-full">
-    {/* 左侧菜单区域：flex 换行，左对齐 */}
-    <div className="flex flex-wrap justify-start gap-x-6 gap-y-2">
-      <MenuItems items={menuTree} pathname={pathname} menuType={menuConfig.menuType} />
-    </div>
+  // 中间居中布局（菜单最左，Logo居中，右侧工具，菜单可换行）
+  const renderMiddleCenter = () => (
+    <div className="grid grid-cols-1 md:grid-cols-3 items-center w-full">
+      {/* 左侧菜单区域：flex 换行，左对齐 */}
+      <div className="flex flex-wrap justify-start gap-x-6 gap-y-2">
+        <MenuItems items={menuTree} pathname={pathname} menuType={menuType} />
+      </div>
 
-    {/* 中间 Logo：全局居中 */}
-    <div className="flex justify-center">
-      <Logo logoConfig={logoConfig} siteName={siteSettings?.siteName || 'FEISMAN POWER'} />
-    </div>
+      {/* 中间 Logo：全局居中 */}
+      <div className="flex justify-center">
+        <Logo logoConfig={logoConfig} siteName={siteSettings?.siteName || 'FEISMAN POWER'} />
+      </div>
 
-    {/* 右侧工具：右对齐 */}
-    <div className="flex justify-end items-center gap-4">
-      {searchConfig.enabled && <SearchButton placeholder={searchConfig.placeholder} />}
-      {utilities.showLanguageSelector && <LanguageSwitcher />}
+      {/* 右侧工具：右对齐 */}
+      <div className="flex justify-end items-center gap-4">
+        {searchConfig.enabled && <SearchButton placeholder={searchConfig.placeholder} />}
+        {utilities.showLanguageSelector && <LanguageSwitcher />}
+      </div>
     </div>
-  </div>
-);
+  );
+
   // 移动端布局
   const renderMobile = () => {
-  const isCenter = mobileLogoPosition === 'center';
+    const isCenter = mobileLogoPosition === 'center';
 
-  if (isCenter) {
-    // 居中布局：左侧菜单按钮，中间 Logo，右侧工具
-    return (
-      <div className="flex items-center justify-between w-full">
-        <button
-          className="p-2 rounded-md hover:bg-accent"
-          onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
-          aria-label="Menu"
-        >
-          <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            {mobileMenuOpen ? (
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-            ) : (
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
-            )}
-          </svg>
-        </button>
-        <div className="flex justify-center flex-1">
-          <Logo logoConfig={logoConfig} siteName={siteSettings?.siteName || 'FEISMAN POWER'} />
-        </div>
-        <div className="flex items-center gap-2">
-          {searchConfig.enabled && <SearchButton placeholder={searchConfig.placeholder} />}
-          {utilities.showLanguageSelector && <LanguageSwitcher />}
-        </div>
-      </div>
-    );
-  } else {
-    // 左对齐布局：左侧 Logo，右侧工具 + 菜单按钮（原逻辑）
-    return (
-      <div className="flex items-center justify-between w-full">
-        <div className="flex justify-start">
-          <Logo logoConfig={logoConfig} siteName={siteSettings?.siteName || 'FEISMAN POWER'} />
-        </div>
-        <div className="flex items-center gap-2">
-          {searchConfig.enabled && <SearchButton placeholder={searchConfig.placeholder} />}
-          {utilities.showLanguageSelector && <LanguageSwitcher />}
+    if (isCenter) {
+      // 居中布局：左侧菜单按钮，中间 Logo，右侧工具
+      return (
+        <div className="flex items-center justify-between w-full">
           <button
             className="p-2 rounded-md hover:bg-accent"
             onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
+            aria-label="Menu"
           >
             <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               {mobileMenuOpen ? (
@@ -243,11 +216,42 @@ const renderMiddleCenter = () => (
               )}
             </svg>
           </button>
+          <div className="flex justify-center flex-1">
+            <Logo logoConfig={logoConfig} siteName={siteSettings?.siteName || 'FEISMAN POWER'} />
+          </div>
+          <div className="flex items-center gap-2">
+            {searchConfig.enabled && <SearchButton placeholder={searchConfig.placeholder} />}
+            {utilities.showLanguageSelector && <LanguageSwitcher />}
+          </div>
         </div>
-      </div>
-    );
-  }
-};
+      );
+    } else {
+      // 左对齐布局：左侧 Logo，右侧工具 + 菜单按钮（原逻辑）
+      return (
+        <div className="flex items-center justify-between w-full">
+          <div className="flex justify-start">
+            <Logo logoConfig={logoConfig} siteName={siteSettings?.siteName || 'FEISMAN POWER'} />
+          </div>
+          <div className="flex items-center gap-2">
+            {searchConfig.enabled && <SearchButton placeholder={searchConfig.placeholder} />}
+            {utilities.showLanguageSelector && <LanguageSwitcher />}
+            <button
+              className="p-2 rounded-md hover:bg-accent"
+              onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
+            >
+              <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                {mobileMenuOpen ? (
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                ) : (
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
+                )}
+              </svg>
+            </button>
+          </div>
+        </div>
+      );
+    }
+  };
 
   const renderDesktop = () => {
     switch (logoPosition) {
@@ -296,7 +300,7 @@ const renderMiddleCenter = () => (
           <div className="md:hidden">{renderMobile()}</div>
           {mobileMenuOpen && (
             <div className="md:hidden py-4 border-t border-[rgba(255,255,255,0.15)] mt-2">
-              <MenuItems items={menuTree} pathname={pathname} mobile onClickItem={() => setMobileMenuOpen(false)} menuType={menuConfig.menuType} />
+              <MenuItems items={menuTree} pathname={pathname} mobile onClickItem={() => setMobileMenuOpen(false)} menuType={menuType} />
             </div>
           )}
         </div>

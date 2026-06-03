@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getDb } from '@/lib/db';
 import { saveMarkdownContent, readMarkdownContent, deleteMarkdownContent } from '@/lib/blog/blogStorage';
 import { generatePostId } from '@/lib/generateId';
-import { deleteResourceAssociations } from '@/lib/products/resourceRelations';   // 新增导入
+import { deleteResourceAssociations } from '@/lib/products/resourceRelations';
 
 const db = getDb();
 
@@ -70,7 +70,7 @@ export async function GET(request: NextRequest) {
   query += ' ORDER BY updated_at DESC LIMIT ? OFFSET ?';
   params.push(limit, offset);
 
-  const posts = db.prepare(query).all(...params);
+  const posts = db.prepare(query).all(...params) as any[];
   const categories = await loadCategories(locale);
   const postsWithCategoryName = posts.map(post => {
     const cat = categories.find((c: any) => c.id === post.category_id);
@@ -100,7 +100,7 @@ export async function POST(request: NextRequest) {
   const hasContent = 'content' in body;
 
   if (id) {
-    const existing = db.prepare('SELECT id FROM blog_posts WHERE id = ? AND locale = ?').get(id, locale);
+    const existing = db.prepare('SELECT id FROM blog_posts WHERE id = ? AND locale = ?').get(id, locale) as any;
     if (!existing) {
       return NextResponse.json({ error: '文章不存在' }, { status: 404 });
     }
@@ -148,16 +148,13 @@ export async function DELETE(request: NextRequest) {
     return NextResponse.json({ error: '缺少参数' }, { status: 400 });
   }
 
-  const post = db.prepare('SELECT id FROM blog_posts WHERE id = ? AND locale = ?').get(id, locale);
+  const post = db.prepare('SELECT id FROM blog_posts WHERE id = ? AND locale = ?').get(id, locale) as any;
   if (!post) {
     return NextResponse.json({ error: '文章不存在' }, { status: 404 });
   }
 
-  // 1. 删除博客文章本身
   db.prepare('DELETE FROM blog_posts WHERE id = ? AND locale = ?').run(id, locale);
   await deleteMarkdownContent(locale, id);
-
-  // 2. 删除该博客与产品的所有关联记录
   await deleteResourceAssociations('blog', id);
 
   return NextResponse.json({ success: true });

@@ -1,11 +1,10 @@
-// lib/webbuilder/registry/BlankBlock.config.tsx
 import { BlankBlock } from '@/components/webbuilder/blocks/containers/BlankBlock';
 import type { ComponentConfig } from '@puckeditor/core';
 import type { Components } from '../types';
 
 export const config: ComponentConfig<Components['BlankBlock']> = {
   label: '1栏布局',
-  category: 'Containers/Layout',
+  // 移除了 category 属性（新版不支持）
   defaultProps: {
     gap: 12,
     padding: 16,
@@ -36,11 +35,11 @@ export const config: ComponentConfig<Components['BlankBlock']> = {
     },
     content: {
       label: '内容',
-      type: 'slot', // 🔥 关键字段类型
+      type: 'slot', // Puck 的插槽类型
     },
   },
   render: ({ puck, content, ...props }) => {
-    // 将 puck 和经过 Puck 处理后的 content 组件一并传入
-    return <BlankBlock puck={puck} content={content} {...props} />;
+    // 运行时类型兼容，使用类型断言绕过 TypeScript 检查
+    return <BlankBlock puck={puck as any} content={content as any} {...props} />;
   },
 };

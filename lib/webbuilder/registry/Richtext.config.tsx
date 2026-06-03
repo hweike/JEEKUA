@@ -22,9 +22,9 @@ export const config: ComponentConfig<RichtextProps> = {
     button2Text: { zh: '按钮', en: 'Button', textId: '' },
     button2Color: '#000000',
     button2Link: '',
-    backgroundColor: '#ffffff',      // 新增背景色默认值
+    backgroundColor: '#ffffff',      // 背景色默认值
     contentPosition: 'center',
-    textAlign: 'center',
+    textAlign: 'center',             // ✅ 已存在于 RichtextProps（需添加）
     containerPaddingTop: 32,
     containerPaddingBottom: 32,
   },
@@ -37,42 +37,81 @@ export const config: ComponentConfig<RichtextProps> = {
         { label: '全屏通栏', value: 'fullwidth' },
       ],
     },
+    // 语言切换器（改为 custom 类型）
     languageSwitcher: {
       label: '',
-      type: 'language-switcher',
+      type: 'custom',
+      render: () => <LanguageSwitcherField />,
     },
-    // 新增背景色字段
     backgroundColor: {
       label: '背景色',
       type: 'custom',
-      render: ({ value, onChange }) => <ColorPickerField field={{}} value={value || '#ffffff'} onChange={onChange} />,
+      render: ({ value, onChange }: { value: any; onChange: any }) => (
+        <ColorPickerField field={{}} value={value || '#ffffff'} onChange={onChange} />
+      ),
     },
-    title: { label: '标题', type: 'richtext-title' },
+    // 标题字段（改为 custom 类型，使用 RichtextTextField）
+    title: {
+      label: '标题',
+      type: 'custom',
+      render: ({ value, onChange }: { value: any; onChange: any }) => (
+        <RichtextTextField value={value} onChange={onChange} label="标题" />
+      ),
+    },
     titleFontSize: { label: '标题大小 (px)', type: 'number', min: 20, max: 120, step: 1 },
     titleColor: {
       label: '标题颜色',
       type: 'custom',
-      render: ({ value, onChange }) => <ColorPickerField field={{}} value={value || '#000000'} onChange={onChange} />,
+      render: ({ value, onChange }: { value: any; onChange: any }) => (
+        <ColorPickerField field={{}} value={value || '#000000'} onChange={onChange} />
+      ),
     },
-    text: { label: '文本', type: 'richtext-text' },
+    // 文本字段
+    text: {
+      label: '文本',
+      type: 'custom',
+      render: ({ value, onChange }: { value: any; onChange: any }) => (
+        <RichtextTextField value={value} onChange={onChange} label="文本" />
+      ),
+    },
     textFontSize: { label: '文本大小 (px)', type: 'number', min: 20, max: 120, step: 1 },
     textColor: {
       label: '文本颜色',
       type: 'custom',
-      render: ({ value, onChange }) => <ColorPickerField field={{}} value={value || '#000000'} onChange={onChange} />,
+      render: ({ value, onChange }: { value: any; onChange: any }) => (
+        <ColorPickerField field={{}} value={value || '#000000'} onChange={onChange} />
+      ),
     },
-    button1Text: { label: '按钮 1 文字', type: 'richtext-button1' },
+    // 按钮1
+    button1Text: {
+      label: '按钮 1 文字',
+      type: 'custom',
+      render: ({ value, onChange }: { value: any; onChange: any }) => (
+        <RichtextTextField value={value} onChange={onChange} label="按钮 1 文字" />
+      ),
+    },
     button1Color: {
       label: '按钮 1 颜色',
       type: 'custom',
-      render: ({ value, onChange }) => <ColorPickerField field={{}} value={value || '#000000'} onChange={onChange} />,
+      render: ({ value, onChange }: { value: any; onChange: any }) => (
+        <ColorPickerField field={{}} value={value || '#000000'} onChange={onChange} />
+      ),
     },
     button1Link: { label: '按钮 1 链接', type: 'text' },
-    button2Text: { label: '按钮 2 文字', type: 'richtext-button2' },
+    // 按钮2
+    button2Text: {
+      label: '按钮 2 文字',
+      type: 'custom',
+      render: ({ value, onChange }: { value: any; onChange: any }) => (
+        <RichtextTextField value={value} onChange={onChange} label="按钮 2 文字" />
+      ),
+    },
     button2Color: {
       label: '按钮 2 颜色',
       type: 'custom',
-      render: ({ value, onChange }) => <ColorPickerField field={{}} value={value || '#000000'} onChange={onChange} />,
+      render: ({ value, onChange }: { value: any; onChange: any }) => (
+        <ColorPickerField field={{}} value={value || '#000000'} onChange={onChange} />
+      ),
     },
     button2Link: { label: '按钮 2 链接', type: 'text' },
     contentPosition: {

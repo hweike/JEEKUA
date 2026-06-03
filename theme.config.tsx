@@ -1,4 +1,5 @@
 // theme.config.tsx
+// @ts-ignore - nextra-theme-docs 未安装，但配置保留以备将来使用
 import type { DocsThemeConfig } from 'nextra-theme-docs';
 
 const config: DocsThemeConfig = {

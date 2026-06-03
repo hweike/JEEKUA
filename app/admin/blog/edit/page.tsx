@@ -142,7 +142,7 @@ export default function BlogEdit() {
           author: formData.author,
           category_id: formData.category_id,
           tags: formData.tags,
-          template: templateValue,           // 保存时使用分类模板
+          template: templateValue,
           seo_keywords: formData.seo_keywords,
           seo_title: formData.seo_title,
           seo_description: formData.seo_description,
@@ -165,7 +165,7 @@ export default function BlogEdit() {
   if (loading) return <div className="p-6">加载中...</div>;
 
   return (
-    <div className="p-6 max-w-7xl mx-auto">
+    <div className="p-6 max-w-7xl mx-auto pb-24">
       <h1 className="text-2xl font-bold mb-6">{id ? '编辑文章' : '新建文章'}</h1>
 
       <form onSubmit={(e) => { e.preventDefault(); handleSave(); }}>
@@ -263,7 +263,11 @@ export default function BlogEdit() {
               <h2 className="text-lg font-semibold mb-4">封面图片</h2>
               <ImageUpload
                 value={formData.featured_image}
-                onChange={(url) => setFormData({ ...formData, featured_image: url })}
+                onChange={(url) => {
+                  // 处理 url 可能是 string 或 string[] 的情况
+                  const imageUrl = Array.isArray(url) ? url[0] : url;
+                  setFormData({ ...formData, featured_image: imageUrl || '' });
+                }}
                 maxCount={1}
                 label=""
                 hint="支持上传本地图片或输入网络图片地址"
@@ -322,34 +326,28 @@ export default function BlogEdit() {
                 </div>
               </div>
             </div>
-
-            {/* 注意：模板样式卡片已完全移除 */}
           </div>
         </div>
-
-        
       </form>
-    
 
-        {/* 悬浮按钮条 - 固定底部 */}
-    <div className="fixed bottom-0 left-0 right-0 bg-white border-t shadow-lg p-4 flex justify-end gap-4 z-50">
-      <button
-        type="button"
-        onClick={() => router.back()}
-        className="bg-gray-200 hover:bg-gray-300 px-6 py-2 rounded transition"
-      >
-        取消
-      </button>
-      <button
-        type="submit"
-        onClick={handleSave}
-        disabled={saving}
-        className="bg-blue-600 hover:bg-blue-700 text-white px-6 py-2 rounded disabled:opacity-50 transition"
-      >
-        {saving ? '保存中...' : '保存'}
-      </button>
+      {/* 悬浮按钮条 - 固定底部 */}
+      <div className="fixed bottom-0 left-0 right-0 bg-white border-t shadow-lg p-4 flex justify-end gap-4 z-50">
+        <button
+          type="button"
+          onClick={() => router.back()}
+          className="bg-gray-200 hover:bg-gray-300 px-6 py-2 rounded transition"
+        >
+          取消
+        </button>
+        <button
+          type="button"
+          onClick={handleSave}
+          disabled={saving}
+          className="bg-blue-600 hover:bg-blue-700 text-white px-6 py-2 rounded disabled:opacity-50 transition"
+        >
+          {saving ? '保存中...' : '保存'}
+        </button>
+      </div>
     </div>
-  </div>
-
   );
 }

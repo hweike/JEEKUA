@@ -34,10 +34,8 @@ export interface TemplateData {
 export interface BlankBlockProps {
   // 控制子项的垂直间距（单位：px）
   gap?: 0 | 4 | 8 | 12 | 16 | 20 | 24;
-  // 控制容器的内边距（单位：px）
   padding?: 0 | 4 | 8 | 12 | 16 | 20 | 24 | 32;
-  // 核心：用于存放嵌套组件的插槽
-  content: any[];
+  content: any; // 接收 Puck 的 slot 内容
 }
 
 export interface HeadingProps {
@@ -108,7 +106,6 @@ export interface TableProps {
 // ==================== 富文本组件 ====================
 export interface RichtextProps {
   bannerType: 'standard' | 'fullwidth';
-  // 多语言文本
   title: { zh: string; en: string; textId: string };
   titleFontSize: number;
   titleColor: string;
@@ -121,11 +118,9 @@ export interface RichtextProps {
   button2Text: { zh: string; en: string; textId: string };
   button2Color: string;
   button2Link: string;
-  // 新增背景色
   backgroundColor: string;
-  // 位置与对齐
   contentPosition: 'left' | 'center' | 'right';
-  // 填充
+  textAlign: 'left' | 'center' | 'right';  // ✅ 必须有
   containerPaddingTop: number;
   containerPaddingBottom: number;
 }
@@ -140,10 +135,11 @@ export interface VideoProps {
   titleAlign: 'left' | 'center' | 'right';
   videoUrl: string;
   videoThumbnail: string;      // 用户自定义封面
-  videoDuration: number;        // 时长（秒），仅供显示
+  videoDuration?: number;  // 改为可选，运行时注入
   loop: boolean;
   paddingTop: number;
   paddingBottom: number;
+  languageSwitcher?: any;  // 新增
 }
 
 // ==================== 带图片文本组件 ====================
@@ -185,30 +181,60 @@ export interface PicwithTextProps {
 // ==================== 图片横幅 ====================
 export interface ImageBannerProps {
   bannerType: 'standard' | 'fullwidth';
-  image1: { url: string };          // 仅保留 url
-  image2: { url: string };
-  overlayOpacity: number;
-  heightPreset: 'auto' | 'small' | 'medium' | 'large';
-  animation: 'none' | 'parallax' | 'fixed' | 'scale';
-  // 多语言文本（不再内嵌语言切换器）
-  title: { zh: string; en: string; textId: string };
-  titleFontSize: number;
-  titleColor: string;
-  text: { zh: string; en: string; textId: string };
-  textFontSize: number;
-  textColor: string;
-  button1Text: { zh: string; en: string; textId: string };
-  button1Color: string;
-  button1Link: string;
-  button2Text: { zh: string; en: string; textId: string };
-  button2Color: string;
-  button2Link: string;
-  contentPosition: 'top-left' | 'top-center' | 'top-right' | 'center-left' | 'center-center' | 'center-right' | 'bottom-left' | 'bottom-center' | 'bottom-right';
-  textAlign: 'left' | 'center' | 'right';
-  containerEnabled: boolean;
-  containerBgColor: string;
-  containerBorderRadius: number;    // 改为数字 (px)
-  containerPadding: number;         // 改为数字 (px)
+  // 原有扁平字段（保留，兼容旧数据）
+  image1Url?: string;
+  image2Url?: string;
+  overlayOpacity?: number;
+  heightPreset?: 'auto' | 'small' | 'medium' | 'large';
+  animation?: 'none' | 'parallax' | 'fixed' | 'scale';
+  title?: { zh: string; en: string; textId: string };
+  titleFontSize?: number;
+  titleColor?: string;
+  text?: { zh: string; en: string; textId: string };
+  textFontSize?: number;
+  textColor?: string;
+  button1Text?: { zh: string; en: string; textId: string };
+  button1Color?: string;
+  button1Link?: string;
+  button2Text?: { zh: string; en: string; textId: string };
+  button2Color?: string;
+  button2Link?: string;
+  contentPosition?: string;
+  textAlign?: 'left' | 'center' | 'right';
+  containerEnabled?: boolean;
+  containerBgColor?: string;
+  containerBorderRadius?: number;
+  containerPadding?: number;
+
+  // 新增：支持嵌套分组（配置文件使用）
+  imageSettings?: {
+    image1Url: string;
+    image2Url: string;
+    overlayOpacity: number;
+    heightPreset: 'auto' | 'small' | 'medium' | 'large';
+    animation: 'none' | 'parallax' | 'fixed' | 'scale';
+  };
+  contentSettings?: {
+    languageSwitcher?: any;
+    title: { zh: string; en: string; textId: string };
+    titleFontSize: number;
+    titleColor: string;
+    text: { zh: string; en: string; textId: string };
+    textFontSize: number;
+    textColor: string;
+    button1Text: { zh: string; en: string; textId: string };
+    button1Color: string;
+    button1Link: string;
+    button2Text: { zh: string; en: string; textId: string };
+    button2Color: string;
+    button2Link: string;
+    contentPosition: string;
+    textAlign: 'left' | 'center' | 'right';
+    containerEnabled: boolean;
+    containerBgColor: string;
+    containerBorderRadius: number;
+    containerPadding: number;
+  };
 }
 
 // ========== Multicolumn 组件类型 ==========
@@ -222,6 +248,7 @@ export interface MulticolumnItem {
 }
 
 export interface MulticolumnProps {
+  languageSwitcher?: any; // ✅ 添加
   // 通栏
   bannerType: 'standard' | 'fullwidth';
   backgroundColor: string;
@@ -262,6 +289,7 @@ export interface MultirowItem {
 }
 
 export interface MultirowProps {
+  languageSwitcher?: any; // ✅ 添加
   bannerType: 'standard' | 'fullwidth';
   backgroundColor: string;
   imageHeight: 'auto' | 'small' | 'medium' | 'large';
@@ -281,7 +309,6 @@ export interface MultirowProps {
 }
 
 // ========== 可折叠组件类型 ==========
-
 export interface CollapsibleItem {
   id: string;
   title: { zh: string; en: string; textId: string };
@@ -290,6 +317,7 @@ export interface CollapsibleItem {
 }
 
 export interface CollapsibleProps {
+  languageSwitcher?: any; // ✅ 添加
   bannerType: 'standard' | 'fullwidth';
   backgroundColor: string;
   globalTitle: { zh: string; en: string; textId: string };
@@ -310,10 +338,7 @@ export interface CollapsibleProps {
   items: CollapsibleItem[];
 }
 
-
 // ========== 手风琴组件类型 ==========
-
-// 内容列表项
 export interface AccordionContentItem {
   id: string;
   imageUrl: string;
@@ -322,7 +347,6 @@ export interface AccordionContentItem {
   link: string;
 }
 
-// 手风琴项目
 export interface AccordionItem {
   id: string;
   title: { zh: string; en: string; textId: string };
@@ -330,28 +354,23 @@ export interface AccordionItem {
 }
 
 export interface AccordionProps {
+  languageSwitcher?: any; // ✅ 添加
   bannerType: 'standard' | 'fullwidth';
   backgroundColor: string;
-  // 手风琴项目设置（全局样式）
   rowTitleColor: string;
   rowTitleFontSize: number;
   rowTitleAlign: 'left' | 'center' | 'right';
   rowHeaderBgColor: string;
   itemsPerRow: number;        // 2-4
   itemsGap: number;           // 10-50px
-  // 内容列表设置
   contentTitleFontSize: number;
   contentTitleAlign: 'left' | 'center' | 'right';
   contentTextFontSize: number;
   contentTextAlign: 'left' | 'center' | 'right';
-  // 填充
   paddingTop: number;
   paddingBottom: number;
-  // 动态手风琴项目列表
   items: AccordionItem[];
 }
-
-
 
 // ==================== Section 组件（分组属性） ====================
 export interface SectionProps {
@@ -452,7 +471,6 @@ export interface DocumentLibraryBlockProps {
   puck?: { dragRef: (el: HTMLElement | null) => void };
 }
 
-
 // ==================== 博客组件 ====================
 export interface BlogBlockProps {
   // 设计者可配置属性
@@ -483,6 +501,7 @@ export interface BlogCollectionBlockProps {
   };
   puck?: { dragRef: (el: HTMLElement | null) => void };
 }
+
 // ==================== 视频分类组件 ====================
 export interface VideoCategoryBlockProps {
   showSidebar?: boolean;

@@ -7,12 +7,17 @@ import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import rehypeRaw from 'rehype-raw';
 
+// 辅助函数：安全获取可能不存在的 description 字段
+function getVideoDescription(video: any): string | null {
+  return video.description ?? null;
+}
+
 export async function generateMetadata({ params }: { params: { locale: string; categorySlug: string; videoSlug: string } }): Promise<Metadata> {
   const video = await getVideoBySlug(params.videoSlug, params.locale);
   if (!video) return {};
   return {
     title: video.seo_title || video.title,
-    description: video.seo_description || video.description,
+    description: video.seo_description || '', // 移除不存在的 video.description
   };
 }
 
@@ -31,6 +36,8 @@ export default async function VideoDetailPage({ params }: { params: { locale: st
 
   // 视频标签（从视频数据中读取 tags 字段，若无则使用分类名称作为默认标签）
   const tags = video.tags ? video.tags.split(',').map((t: string) => t.trim()) : [category?.name];
+
+  const videoDescription = getVideoDescription(video);
 
   return (
     <div className="container mx-auto px-4 py-8">
@@ -68,11 +75,11 @@ export default async function VideoDetailPage({ params }: { params: { locale: st
           )}
 
           {/* 视频描述区域 */}
-          {video.description && (
+          {videoDescription && (
             <div className="mb-8">
               <h2 className="text-lg font-semibold text-foreground mb-3">简介</h2>
               <div className="prose max-w-none text-muted-foreground">
-                <p>{video.description}</p>
+                <p>{videoDescription}</p>
               </div>
             </div>
           )}

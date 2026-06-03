@@ -10,7 +10,15 @@ const SUPPORTED_LOCALES = [
   { value: 'en', label: 'English' },
 ];
 
-const RangeSlider = ({ value, min, max, onChange }) => (
+// 定义 RangeSlider 组件的 Props 类型
+interface RangeSliderProps {
+  value: number;
+  min: number;
+  max: number;
+  onChange: (value: number) => void;
+}
+
+const RangeSlider = ({ value, min, max, onChange }: RangeSliderProps) => (
   <div className="flex items-center gap-2">
     <input
       type="range"
@@ -24,8 +32,13 @@ const RangeSlider = ({ value, min, max, onChange }) => (
   </div>
 );
 
-// 单选按钮组（是/否）
-const RadioGroup = ({ value, onChange }) => (
+// 定义 RadioGroup 组件的 Props 类型
+interface RadioGroupProps {
+  value: boolean;
+  onChange: (value: boolean) => void;
+}
+
+const RadioGroup = ({ value, onChange }: RadioGroupProps) => (
   <div className="flex gap-4">
     <label className="flex items-center gap-1 text-xs">
       <input type="radio" checked={value === true} onChange={() => onChange(true)} /> 是
@@ -36,18 +49,46 @@ const RadioGroup = ({ value, onChange }) => (
   </div>
 );
 
+// 定义列表项的数据结构
+interface ListItem {
+  id: string;
+  text: {
+    zh: string;
+    en: string;
+    textId: string;
+  };
+  textColor: string;
+  fontSize: number;
+  textAlign: 'left' | 'center' | 'right';
+  bold: boolean;
+  italic: boolean;
+  underline: boolean;
+  link: string;
+}
+
+// 定义 ListItemEditor 组件的 Props 类型
+interface ListItemEditorProps {
+  item: ListItem;
+  index: number;
+  isOpen: boolean;
+  onToggle: (index: number) => void;
+  onFieldChange: (index: number, key: string, val: any) => void;
+  onRemove: (index: number) => void;
+  currentLocale: string;
+}
+
 // 单个列表项编辑器
-const ListItemEditor = memo(({ item, index, isOpen, onToggle, onFieldChange, onRemove, currentLocale }: any) => {
-  const [localText, setLocalText] = useState(item.text?.[currentLocale] || '');
+const ListItemEditor = memo(({ item, index, isOpen, onToggle, onFieldChange, onRemove, currentLocale }: ListItemEditorProps) => {
+  const [localText, setLocalText] = useState(item.text?.[currentLocale as keyof typeof item.text] || '');
   const linkInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
-    setLocalText(item.text?.[currentLocale] || '');
+    setLocalText(item.text?.[currentLocale as keyof typeof item.text] || '');
   }, [item.text, currentLocale]);
 
   const syncText = useCallback((text: string) => {
     const newLangObj = { ...(item.text || {}) };
-    newLangObj[currentLocale] = text;
+    newLangObj[currentLocale as keyof typeof newLangObj] = text;
     onFieldChange(index, 'text', newLangObj);
   }, [index, item.text, currentLocale, onFieldChange]);
 
@@ -65,9 +106,9 @@ const ListItemEditor = memo(({ item, index, isOpen, onToggle, onFieldChange, onR
       >
         <div className="flex items-center gap-2">
           <span className="text-sm font-medium">列表项 {index + 1}</span>
-          {item.text?.[currentLocale] && (
+          {item.text?.[currentLocale as keyof typeof item.text] && (
             <span className="text-xs text-muted-foreground truncate max-w-[200px]">
-              ({item.text[currentLocale]})
+              ({item.text[currentLocale as keyof typeof item.text]})
             </span>
           )}
         </div>
@@ -103,7 +144,7 @@ const ListItemEditor = memo(({ item, index, isOpen, onToggle, onFieldChange, onR
             <ColorPickerField
               field={{}}
               value={item.textColor || '#000000'}
-              onChange={(v) => handleFieldChange('textColor', v)}
+              onChange={(v: string) => handleFieldChange('textColor', v)}
             />
           </div>
 
@@ -114,7 +155,7 @@ const ListItemEditor = memo(({ item, index, isOpen, onToggle, onFieldChange, onR
               value={item.fontSize ?? 16}
               min={8}
               max={50}
-              onChange={(v) => handleFieldChange('fontSize', v)}
+              onChange={(v: number) => handleFieldChange('fontSize', v)}
             />
           </div>
 
@@ -123,7 +164,7 @@ const ListItemEditor = memo(({ item, index, isOpen, onToggle, onFieldChange, onR
             <label className="block text-xs font-medium mb-1">文本对齐</label>
             <select
               value={item.textAlign || 'left'}
-              onChange={(e) => handleFieldChange('textAlign', e.target.value)}
+              onChange={(e) => handleFieldChange('textAlign', e.target.value as ListItem['textAlign'])}
               className="w-full px-3 py-2 text-sm border border-input rounded-md bg-background"
             >
               <option value="left">左对齐</option>
@@ -135,15 +176,15 @@ const ListItemEditor = memo(({ item, index, isOpen, onToggle, onFieldChange, onR
           {/* 文本样式：加粗、斜体、下划线 */}
           <div>
             <label className="block text-xs font-medium mb-1">加粗</label>
-            <RadioGroup value={item.bold} onChange={(v) => handleFieldChange('bold', v)} />
+            <RadioGroup value={item.bold} onChange={(v: boolean) => handleFieldChange('bold', v)} />
           </div>
           <div>
             <label className="block text-xs font-medium mb-1">斜体</label>
-            <RadioGroup value={item.italic} onChange={(v) => handleFieldChange('italic', v)} />
+            <RadioGroup value={item.italic} onChange={(v: boolean) => handleFieldChange('italic', v)} />
           </div>
           <div>
             <label className="block text-xs font-medium mb-1">下划线</label>
-            <RadioGroup value={item.underline} onChange={(v) => handleFieldChange('underline', v)} />
+            <RadioGroup value={item.underline} onChange={(v: boolean) => handleFieldChange('underline', v)} />
           </div>
 
           {/* 链接 */}
@@ -165,12 +206,18 @@ const ListItemEditor = memo(({ item, index, isOpen, onToggle, onFieldChange, onR
 });
 ListItemEditor.displayName = 'ListItemEditor';
 
-export function ListField({ value = [], onChange }: any) {
+// 定义 ListField 组件的 Props 类型
+interface ListFieldProps {
+  value?: ListItem[];
+  onChange: (value: ListItem[]) => void;
+}
+
+export function ListField({ value = [], onChange }: ListFieldProps) {
   const [openIndex, setOpenIndex] = useState<number | null>(null);
   const [currentLocale, setCurrentLocale] = useState('zh');
 
   const handleAdd = () => {
-    const newItem = {
+    const newItem: ListItem = {
       id: nanoid(),
       text: { zh: '', en: '', textId: nanoid() },
       textColor: '#000000',
@@ -186,14 +233,14 @@ export function ListField({ value = [], onChange }: any) {
   };
 
   const handleRemove = (index: number) => {
-    const newList = value.filter((_: any, i: number) => i !== index);
+    const newList = value.filter((_, i) => i !== index);
     onChange(newList);
     if (openIndex === index) setOpenIndex(null);
     else if (openIndex !== null && openIndex > index) setOpenIndex(openIndex - 1);
   };
 
   const handleFieldChange = (index: number, key: string, val: any) => {
-    const newList = value.map((item: any, i: number) => i === index ? { ...item, [key]: val } : item);
+    const newList = value.map((item, i) => i === index ? { ...item, [key]: val } : item);
     onChange(newList);
   };
 
@@ -232,7 +279,7 @@ export function ListField({ value = [], onChange }: any) {
       </button>
 
       <div className="max-h-[600px] overflow-y-auto pr-1">
-        {value.map((item: any, index: number) => (
+        {value.map((item, index) => (
           <ListItemEditor
             key={item.id}
             item={item}

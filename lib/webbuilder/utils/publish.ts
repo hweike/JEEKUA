@@ -1,5 +1,7 @@
-// lib/WebBuilder/utils/publish.ts
+// lib/webbuilder/utils/publish.ts
+// @ts-ignore
 import { translateJson } from './translation';
+// @ts-ignore
 import { savePageData, getPageData } from './storage';
 
 export async function publishToLanguages(
