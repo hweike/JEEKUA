@@ -14,10 +14,13 @@ jobs:
       - name: 设置 Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '20'   # 使用 Node.js 20
+          node-version: '24'   # 使用 Node.js 24（匹配 geoip-lite 要求）
 
       - name: 安装依赖并构建
         run: |
+          # 创建临时 .env.production 文件，仅用于构建（真实密钥在服务器上设置）
+          echo "DEEPSEEK_API_KEY=build_dummy_key" >> .env.production
+          echo "DEEPSEEK_BASE_URL=https://api.deepseek.com" >> .env.production
           npm install
           npm run build
 
