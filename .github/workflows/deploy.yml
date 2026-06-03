@@ -2,11 +2,12 @@ name: Deploy to AWS Lightsail
 
 on:
   push:
-    branches: [ main ]   # 当你推送到 main 分支时触发
+    branches: [ main ]
 
 jobs:
   deploy:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - name: 检出代码
         uses: actions/checkout@v4
@@ -14,17 +15,20 @@ jobs:
       - name: 设置 Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '24'   # 使用 Node.js 24（匹配 geoip-lite 要求）
+          node-version: '24'
 
       - name: 安装依赖并构建
+        env:
+          NODE_OPTIONS: "--max_old_space_size=1536"   # 限制 Node.js 最大堆内存为 1.5GB
         run: |
           # 创建临时 .env.production 文件，仅用于构建（真实密钥在服务器上设置）
           echo "DEEPSEEK_API_KEY=build_dummy_key" >> .env.production
           echo "DEEPSEEK_BASE_URL=https://api.deepseek.com" >> .env.production
-          npm install
+          npm config set registry https://registry.npmjs.org/
+          npm install --verbose --fetch-retries=5 --fetch-retry-mintimeout=20000 --fetch-retry-maxtimeout=120000
           npm run build
 
-      - name: 打包构建产物（.next, public, package.json 等）
+      - name: 打包构建产物
         run: |
           mkdir -p deploy_artifact
           cp -r .next deploy_artifact/
@@ -32,7 +36,7 @@ jobs:
           cp package.json package-lock.json deploy_artifact/
           tar -czf deploy.tar.gz -C deploy_artifact .
 
-      - name: 通过 SCP 上传到服务器
+      - name: 通过 SCP 上传
         uses: appleboy/scp-action@v0.1.4
         with:
           host: ${{ secrets.SERVER_IP }}
@@ -42,7 +46,7 @@ jobs:
           target: "/home/ubuntu/"
           overwrite: true
 
-      - name: 在服务器上解压并执行部署脚本
+      - name: 服务器部署脚本
         uses: appleboy/ssh-action@v1.0.3
         with:
           host: ${{ secrets.SERVER_IP }}
@@ -52,4 +56,23 @@ jobs:
             cd /home/ubuntu
             tar -xzf deploy.tar.gz -C /www/wwwroot/feisman-power
             rm -f deploy.tar.gz
+            # 更新服务器上的 deploy.sh 内容（确保使用官方源和增加超时）
+            cat > /home/ubuntu/deploy.sh << 'EOF'
+            #!/bin/bash
+            set -e
+            APP_DIR="/www/wwwroot/feisman-power"
+            cd $APP_DIR
+            if [ -f "package.json" ]; then
+                npm config set registry https://registry.npmjs.org/
+                npm install --omit=dev --fetch-retries=5 --fetch-retry-mintimeout=20000
+            fi
+            if pm2 list | grep -q "feisman-power"; then
+                pm2 restart feisman-power
+            else
+                pm2 start npm --name "feisman-power" -- start
+            fi
+            pm2 save
+            echo "Deploy completed"
+            EOF
+            chmod +x /home/ubuntu/deploy.sh
             bash /home/ubuntu/deploy.sh
