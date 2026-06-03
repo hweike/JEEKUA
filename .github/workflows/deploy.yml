@@ -1,11 +1,11 @@
-name: Build and Package for Manual Deployment
+name: Build, Package and Deploy to AWS Lightsail
 
 on:
   push:
     branches: [ main ]
 
 jobs:
-  build:
+  build-and-deploy:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
@@ -21,30 +21,85 @@ jobs:
         env:
           NODE_OPTIONS: "--max_old_space_size=2048"
         run: |
-          # 创建临时 .env.production，避免构建时缺少环境变量
+          # 临时环境变量，避免构建报错
           echo "DEEPSEEK_API_KEY=build_dummy_key" >> .env.production
           echo "DEEPSEEK_BASE_URL=https://api.deepseek.com" >> .env.production
           npm ci --omit=dev --fetch-retries=5
           npm run build
 
-      - name: 打包构建产物（包含 node_modules）
+      - name: 打包构建产物（含 node_modules）
         run: |
           mkdir -p deploy_artifact
           cp -r .next deploy_artifact/
           cp -r public deploy_artifact/
           cp package.json package-lock.json deploy_artifact/
           cp -r node_modules deploy_artifact/
+          # 注意：不包含 data/ 文件夹
           tar -czf deploy.tar.gz -C deploy_artifact .
 
-      - name: 创建或更新 Release 并上传压缩包
-        uses: softprops/action-gh-release@v2
+      - name: 通过 SCP 上传到服务器
+        uses: appleboy/scp-action@v0.1.4
         with:
-          tag_name: latest-deploy
-          name: "Latest Deploy Build"
-          body: "自动构建产物，提交：${{ github.sha }}"
-          files: deploy.tar.gz
-          prerelease: true
-          make_latest: true
-          overwrite: true   # 覆盖已有的 latest-deploy release 中的同名文件
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          host: ${{ secrets.SERVER_IP }}
+          username: ${{ secrets.SERVER_USER }}
+          key: ${{ secrets.SERVER_SSH_KEY }}
+          source: "deploy.tar.gz"
+          target: "/home/ubuntu/"
+          timeout: 30m
+          command_timeout: 30m
+          overwrite: true
+
+      - name: 远程解压、备份数据、重启 PM2
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.SERVER_IP }}
+          username: ${{ secrets.SERVER_USER }}
+          key: ${{ secrets.SERVER_SSH_KEY }}
+          timeout: 30m
+          command_timeout: 30m
+          script: |
+            set -e
+            APP_DIR="/www/wwwroot/feisman-power"
+            BACKUP_DIR="/tmp/feisman_data_backup_$(date +%Y%m%d_%H%M%S)"
+            
+            # 1. 确保目标目录存在
+            sudo mkdir -p $APP_DIR
+            sudo chown -R ubuntu:ubuntu $APP_DIR
+            
+            # 2. 备份现有的 data 文件夹（如果存在）
+            if [ -d "$APP_DIR/data" ]; then
+              echo "Backing up existing data folder to $BACKUP_DIR"
+              cp -r $APP_DIR/data $BACKUP_DIR
+            else
+              echo "No existing data folder to backup."
+            fi
+            
+            # 3. 解压新代码（覆盖除 data 外的所有文件）
+            cd /home/ubuntu
+            tar -xzf deploy.tar.gz -C $APP_DIR
+            rm -f deploy.tar.gz
+            
+            # 4. 恢复备份的 data 文件夹（如果之前有备份）
+            if [ -d "$BACKUP_DIR" ]; then
+              echo "Restoring data folder from backup"
+              cp -r $BACKUP_DIR/* $APP_DIR/data/
+              rm -rf $BACKUP_DIR
+            else
+              # 如果从来没有 data 目录，解压包中也不包含，则创建一个空的（可选）
+              mkdir -p $APP_DIR/data
+            fi
+            
+            # 5. 设置 data 目录权限（确保 www-data 或 ubuntu 可写）
+            sudo chown -R ubuntu:www-data $APP_DIR/data
+            sudo chmod -R 775 $APP_DIR/data
+            
+            # 6. 重启 PM2 应用
+            cd $APP_DIR
+            if pm2 list | grep -q "feisman-power"; then
+              pm2 restart feisman-power
+            else
+              pm2 start npm --name "feisman-power" -- start
+            fi
+            pm2 save
+            
+            echo "Deployment completed successfully."
