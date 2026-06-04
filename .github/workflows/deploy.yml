@@ -17,27 +17,19 @@ jobs:
         with:
           node-version: '24'
 
-      - name: 安装依赖并构建
-        env:
-          NODE_OPTIONS: "--max_old_space_size=2048"
-        run: |
-          # 临时环境变量，避免构建报错
-          echo "DEEPSEEK_API_KEY=build_dummy_key" >> .env.production
-          echo "DEEPSEEK_BASE_URL=https://api.deepseek.com" >> .env.production
-          npm ci --omit=dev --fetch-retries=5
-          npm run build
-
-      - name: 打包构建产物（含 node_modules）
+      - name: 打包项目源码（不含 node_modules/.next/data）
         run: |
           mkdir -p deploy_artifact
-          cp -r .next deploy_artifact/
-          cp -r public deploy_artifact/
+          # 复制项目文件（排除 node_modules, .next, data, .git, 等）
+          rsync -av --exclude='node_modules' --exclude='.next' --exclude='data' --exclude='.git' --exclude='deploy_artifact' --exclude='deploy.tar.gz' ./ deploy_artifact/
+          # 确保 package.json 等必须文件存在
           cp package.json package-lock.json deploy_artifact/
-          cp -r node_modules deploy_artifact/
-          # 注意：不包含 data/ 文件夹
+          # 创建 .env.production 占位（实际环境变量应在服务器上设置）
+          echo "DEEPSEEK_API_KEY=build_dummy_key" >> deploy_artifact/.env.production
+          echo "DEEPSEEK_BASE_URL=https://api.deepseek.com" >> deploy_artifact/.env.production
           tar -czf deploy.tar.gz -C deploy_artifact .
 
-      - name: 通过 SCP 上传到服务器
+      - name: 通过 SCP 上传压缩包
         uses: appleboy/scp-action@v0.1.4
         with:
           host: ${{ secrets.SERVER_IP }}
@@ -49,7 +41,7 @@ jobs:
           command_timeout: 30m
           overwrite: true
 
-      - name: 远程解压、备份数据、重启 PM2
+      - name: 在服务器上解压、安装依赖、构建并启动
         uses: appleboy/ssh-action@v1.0.3
         with:
           host: ${{ secrets.SERVER_IP }}
@@ -61,45 +53,51 @@ jobs:
             set -e
             APP_DIR="/www/wwwroot/feisman-power"
             BACKUP_DIR="/tmp/feisman_data_backup_$(date +%Y%m%d_%H%M%S)"
-            
-            # 1. 确保目标目录存在
-            sudo mkdir -p $APP_DIR
-            sudo chown -R ubuntu:ubuntu $APP_DIR
-            
-            # 2. 备份现有的 data 文件夹（如果存在）
+
+            # 备份 data 目录
             if [ -d "$APP_DIR/data" ]; then
-              echo "Backing up existing data folder to $BACKUP_DIR"
+              echo "Backing up data..."
               cp -r $APP_DIR/data $BACKUP_DIR
-            else
-              echo "No existing data folder to backup."
             fi
-            
-            # 3. 解压新代码（覆盖除 data 外的所有文件）
+
+            # 清空并重建项目目录
+            sudo rm -rf $APP_DIR
+            sudo mkdir -p $APP_DIR
+            sudo chown ubuntu:ubuntu $APP_DIR
+
             cd /home/ubuntu
             tar -xzf deploy.tar.gz -C $APP_DIR
             rm -f deploy.tar.gz
-            
-            # 4. 恢复备份的 data 文件夹（如果之前有备份）
+
+            # 恢复 data 目录
             if [ -d "$BACKUP_DIR" ]; then
-              echo "Restoring data folder from backup"
-              cp -r $BACKUP_DIR/* $APP_DIR/data/
+              echo "Restoring data..."
+              cp -r $BACKUP_DIR $APP_DIR/data
               rm -rf $BACKUP_DIR
             else
-              # 如果从来没有 data 目录，解压包中也不包含，则创建一个空的（可选）
               mkdir -p $APP_DIR/data
             fi
-            
-            # 5. 设置 data 目录权限（确保 www-data 或 ubuntu 可写）
-            sudo chown -R ubuntu:www-data $APP_DIR/data
-            sudo chmod -R 775 $APP_DIR/data
-            
-            # 6. 重启 PM2 应用
+
             cd $APP_DIR
-            if pm2 list | grep -q "feisman-power"; then
-              pm2 restart feisman-power
-            else
-              pm2 start npm --name "feisman-power" -- start
-            fi
+
+            # 安装生产依赖（自动编译原生模块）
+            export NODE_OPTIONS="--max_old_space_size=1536"
+            npm install --omit=dev --fetch-retries=5
+
+            # 构建 Next.js
+            npm run build
+
+            # 创建 .env.local（真实环境变量）
+            cat > .env.local << 'EOF'
+            NODE_ENV=production
+            JWT_SECRET=LHjK20LkUbYVLazrb16ueQLPmZmkkPuuzt7r1tyVejw
+            DEEPSEEK_API_KEY=sk-d736ef3755c243c6aafc99cf160f2895
+            DEEPSEEK_BASE_URL=https://api.deepseek.com
+            EOF
+
+            # 使用 PM2 启动（监听 0.0.0.0）
+            pm2 delete feisman-power 2>/dev/null || true
+            pm2 start node_modules/.bin/next --name "feisman-power" -- start --hostname 0.0.0.0 --port 3000
             pm2 save
-            
+
             echo "Deployment completed successfully."

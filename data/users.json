@@ -4,7 +4,7 @@
     "email": "admin@admin.com",
     "name": "超级管理员",
     "englishName": "Admin",
-    "passwordHash": "$2b$10$QEfitvQrTkEV6GPlnsGS7OLuPBCcy.LsdbhCueLQZntg7G5GSB6fG",
+    "passwordHash": "$2b$10$yDBubqffAuScFmQGQbw13uhqR4xrQ1j4scKcrihvzgfvv5AyLtm.S",
     "createdAt": "2026-04-09T14:43:51.566Z",
     "mustChangePassword": false,
     "role": "super"
