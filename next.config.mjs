@@ -19,9 +19,6 @@ const withNextra = nextra({
 
 /** @type {import('next').NextConfig} */
 const nextConfig = {
-  // 启用 Standalone 输出模式，生成自包含的 server.js
-  output: 'standalone',
-  
   // 以下是你原有的所有配置，完全未改动
   images: {
     remotePatterns: [

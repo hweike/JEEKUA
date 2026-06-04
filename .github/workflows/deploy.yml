@@ -1,124 +1,29 @@
-name: Build Standalone and Deploy to AWS Lightsail
+name: Auto Deploy on Push
 
 on:
   push:
     branches: [ main ]
 
 jobs:
-  build-and-deploy:
+  deploy:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
     steps:
-      - name: 检出代码
-        uses: actions/checkout@v4
-
-      - name: 设置 Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: '24'
-
-      - name: 安装依赖并构建 Standalone
-        env:
-          NODE_OPTIONS: "--max_old_space_size=2048"
-          OPENAI_API_KEY: "dummy_openai_key_for_build"
-        run: |
-          # 安装全部依赖（确保构建完整性）
-          npm ci --fetch-retries=5
-          # 构建（前提是 next.config.mjs 已配置 output: 'standalone'）
-          npm run build
-
-      - name: 检查 standalone 目录
-        run: |
-          if [ ! -d ".next/standalone" ]; then
-            echo "❌ .next/standalone directory not found. Please ensure next.config.mjs has 'output: standalone' and build script does not use --turbopack."
-            exit 1
-          fi
-          echo "✅ .next/standalone exists."
-
-      - name: 准备部署包（Standalone + public + static）
-        run: |
-          mkdir -p deploy_standalone
-          # 复制 standalone 目录内容
-          cp -r .next/standalone/* deploy_standalone/
-          # 复制 public 目录
-          cp -r public deploy_standalone/
-          # 复制 .next/static 到正确位置
-          mkdir -p deploy_standalone/.next
-          cp -r .next/static deploy_standalone/.next/
-          # 打包
-          tar -czf deploy.tar.gz -C deploy_standalone .
-
-      - name: 通过 SCP 上传压缩包
-        uses: appleboy/scp-action@v0.1.4
-        with:
-          host: ${{ secrets.SERVER_IP }}
-          username: ${{ secrets.SERVER_USER }}
-          key: ${{ secrets.SERVER_SSH_KEY }}
-          source: "deploy.tar.gz"
-          target: "/home/ubuntu/"
-          timeout: 30m
-          command_timeout: 30m
-          overwrite: true
-
-      - name: 远程解压、恢复数据、创建 .env、启动 PM2
+      - name: SSH into server and update
         uses: appleboy/ssh-action@v1.0.3
         with:
           host: ${{ secrets.SERVER_IP }}
           username: ${{ secrets.SERVER_USER }}
           key: ${{ secrets.SERVER_SSH_KEY }}
-          timeout: 30m
-          command_timeout: 30m
           script: |
             set -e
-            APP_DIR="/www/wwwroot/feisman-power"
-            BACKUP_DIR="/tmp/feisman_data_backup_$(date +%Y%m%d_%H%M%S)"
-
-            # 备份 data 目录
-            if [ -d "$APP_DIR/data" ]; then
-              echo "Backing up data..."
-              cp -r $APP_DIR/data $BACKUP_DIR
-            fi
-
-            # 清空并重建项目目录
-            sudo rm -rf $APP_DIR
-            sudo mkdir -p $APP_DIR
-            sudo chown ubuntu:ubuntu $APP_DIR
-
-            # 解压部署包
-            cd /home/ubuntu
-            tar -xzf deploy.tar.gz -C $APP_DIR
-            rm -f deploy.tar.gz
-
-            # 恢复 data 目录（使用 /. 复制隐藏文件）
-            if [ -d "$BACKUP_DIR" ]; then
-              mkdir -p $APP_DIR/data
-              cp -r $BACKUP_DIR/. $APP_DIR/data/
-              rm -rf $BACKUP_DIR
-            else
-              mkdir -p $APP_DIR/data
-            fi
-
-            # 设置 data 目录权限（与 PM2 运行用户一致）
-            sudo chown -R ubuntu:ubuntu $APP_DIR/data
-            sudo chmod -R 775 $APP_DIR/data
-
-            # 创建 .env 文件（仅含变量名，实际值由宝塔面板环境变量提供）
-            cat > $APP_DIR/.env << 'EOF'
-            JWT_SECRET=
-            DEEPSEEK_API_KEY=
-            DEEPSEEK_BASE_URL=https://api.deepseek.com
-            EOF
-
-            # 启动 standalone server.js
-            cd $APP_DIR
-            pm2 delete feisman-power 2>/dev/null || true
-            pm2 start server.js --name "feisman-power" -- --hostname 0.0.0.0
-            pm2 save
-
-            # 输出部署后的状态，便于排查
-            echo "========== PM2 Process List =========="
-            pm2 list
-            echo "========== PM2 Logs (last 10 lines) =========="
-            pm2 logs feisman-power --lines 10 --nostream
-
-            echo "Deployment completed successfully."
+            cd /www/wwwroot/feisman-power
+            echo "🚀 Pulling latest code..."
+            git pull
+            echo "📦 Installing dependencies..."
+            npm install --omit=dev
+            echo "🏗️ Building Next.js app..."
+            export NODE_OPTIONS="--max_old_space_size=3072"
+            npm run build
+            echo "🔄 Restarting PM2 process..."
+            pm2 restart feisman-power
+            echo "✅ Deployment finished."
