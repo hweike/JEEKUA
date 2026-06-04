@@ -55,13 +55,7 @@ const nextConfig = {
       },
     ],
   },
-  turbopack: {
-    root: path.resolve(__dirname),
-    resolveAlias: {
-      '@': path.resolve(__dirname),
-    },
-    resolveExtensions: ['.tsx', '.ts', '.jsx', '.js', '.mjs', '.json'],
-  },
+  // turbopack 配置已删除（生产构建不稳定，改用 Webpack）
   webpack: (config) => {
     config.resolve.alias = {
       ...(config.resolve.alias || {}),
