@@ -1,4 +1,4 @@
-name: Build, Package and Deploy to AWS Lightsail
+name: Build Standalone and Deploy to AWS Lightsail
 
 on:
   push:
@@ -17,17 +17,27 @@ jobs:
         with:
           node-version: '24'
 
-      - name: 打包项目源码（不含 node_modules/.next/data）
+      - name: 安装依赖并构建 Standalone
+        env:
+          NODE_OPTIONS: "--max_old_space_size=2048"
         run: |
-          mkdir -p deploy_artifact
-          # 复制项目文件（排除 node_modules, .next, data, .git, 等）
-          rsync -av --exclude='node_modules' --exclude='.next' --exclude='data' --exclude='.git' --exclude='deploy_artifact' --exclude='deploy.tar.gz' ./ deploy_artifact/
-          # 确保 package.json 等必须文件存在
-          cp package.json package-lock.json deploy_artifact/
-          # 创建 .env.production 占位（实际环境变量应在服务器上设置）
-          echo "DEEPSEEK_API_KEY=build_dummy_key" >> deploy_artifact/.env.production
-          echo "DEEPSEEK_BASE_URL=https://api.deepseek.com" >> deploy_artifact/.env.production
-          tar -czf deploy.tar.gz -C deploy_artifact .
+          # 安装全部依赖（确保构建完整性）
+          npm ci --fetch-retries=5
+          # 构建（前提是 next.config.mjs 已配置 output: 'standalone'）
+          npm run build
+
+      - name: 准备部署包（Standalone + public + static）
+        run: |
+          mkdir -p deploy_standalone
+          # 复制 standalone 目录内容
+          cp -r .next/standalone/* deploy_standalone/
+          # 复制 public 目录
+          cp -r public deploy_standalone/
+          # 复制 .next/static 到正确位置
+          mkdir -p deploy_standalone/.next
+          cp -r .next/static deploy_standalone/.next/
+          # 打包
+          tar -czf deploy.tar.gz -C deploy_standalone .
 
       - name: 通过 SCP 上传压缩包
         uses: appleboy/scp-action@v0.1.4
@@ -41,7 +51,7 @@ jobs:
           command_timeout: 30m
           overwrite: true
 
-      - name: 在服务器上解压、安装依赖、构建并启动
+      - name: 远程解压、恢复数据、创建 .env、启动 PM2
         uses: appleboy/ssh-action@v1.0.3
         with:
           host: ${{ secrets.SERVER_IP }}
@@ -65,39 +75,41 @@ jobs:
             sudo mkdir -p $APP_DIR
             sudo chown ubuntu:ubuntu $APP_DIR
 
+            # 解压部署包
             cd /home/ubuntu
             tar -xzf deploy.tar.gz -C $APP_DIR
             rm -f deploy.tar.gz
 
-            # 恢复 data 目录
+            # 恢复 data 目录（使用 /. 复制隐藏文件）
             if [ -d "$BACKUP_DIR" ]; then
-              echo "Restoring data..."
-              cp -r $BACKUP_DIR $APP_DIR/data
+              mkdir -p $APP_DIR/data
+              cp -r $BACKUP_DIR/. $APP_DIR/data/
               rm -rf $BACKUP_DIR
             else
               mkdir -p $APP_DIR/data
             fi
 
-            cd $APP_DIR
+            # 设置 data 目录权限（与 PM2 运行用户一致）
+            sudo chown -R ubuntu:ubuntu $APP_DIR/data
+            sudo chmod -R 775 $APP_DIR/data
 
-            # 安装生产依赖（自动编译原生模块）
-            export NODE_OPTIONS="--max_old_space_size=1536"
-            npm install --omit=dev --fetch-retries=5
-
-            # 构建 Next.js
-            npm run build
-
-            # 创建 .env.local（真实环境变量）
-            cat > .env.local << 'EOF'
-            NODE_ENV=production
-            JWT_SECRET=LHjK20LkUbYVLazrb16ueQLPmZmkkPuuzt7r1tyVejw
-            DEEPSEEK_API_KEY=sk-d736ef3755c243c6aafc99cf160f2895
+            # 创建 .env 文件（仅含变量名，实际值由宝塔面板环境变量提供）
+            cat > $APP_DIR/.env << 'EOF'
+            JWT_SECRET=
+            DEEPSEEK_API_KEY=
             DEEPSEEK_BASE_URL=https://api.deepseek.com
             EOF
 
-            # 使用 PM2 启动（监听 0.0.0.0）
+            # 启动 standalone server.js
+            cd $APP_DIR
             pm2 delete feisman-power 2>/dev/null || true
-            pm2 start node_modules/.bin/next --name "feisman-power" -- start --hostname 0.0.0.0 --port 3000
+            pm2 start server.js --name "feisman-power" -- --hostname 0.0.0.0
             pm2 save
+
+            # 输出部署后的状态，便于排查
+            echo "========== PM2 Process List =========="
+            pm2 list
+            echo "========== PM2 Logs (last 10 lines) =========="
+            pm2 logs feisman-power --lines 10 --nostream
 
             echo "Deployment completed successfully."
