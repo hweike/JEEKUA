@@ -17,8 +17,9 @@ jobs:
           script: |
             set -e
             cd /www/wwwroot/feisman-power
-            echo "🚀 Pulling latest code..."
-            git pull
+            echo "🚀 Fetching latest code (force reset)..."
+            git fetch origin
+            git reset --hard origin/main
             echo "📦 Installing dependencies..."
             npm install --omit=dev
             echo "🏗️ Building Next.js app..."
