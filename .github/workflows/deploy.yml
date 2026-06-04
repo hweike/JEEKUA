@@ -20,6 +20,7 @@ jobs:
       - name: 安装依赖并构建 Standalone
         env:
           NODE_OPTIONS: "--max_old_space_size=2048"
+          OPENAI_API_KEY: "dummy_openai_key_for_build"
         run: |
           # 安装全部依赖（确保构建完整性）
           npm ci --fetch-retries=5
