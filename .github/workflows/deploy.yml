@@ -27,6 +27,14 @@ jobs:
           # 构建（前提是 next.config.mjs 已配置 output: 'standalone'）
           npm run build
 
+      - name: 检查 standalone 目录
+        run: |
+          if [ ! -d ".next/standalone" ]; then
+            echo "❌ .next/standalone directory not found. Please ensure next.config.mjs has 'output: standalone' and build script does not use --turbopack."
+            exit 1
+          fi
+          echo "✅ .next/standalone exists."
+
       - name: 准备部署包（Standalone + public + static）
         run: |
           mkdir -p deploy_standalone

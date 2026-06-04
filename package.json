@@ -6,7 +6,7 @@
     "seed": "node scripts/seed-templates.js",
     "build:css": "tailwindcss -i app/globals.css -o public/preview-styles.css && node scripts/generate-preview-styles.js",
     "dev": "npm run build:css && next dev --turbopack",
-    "build": "npm run build:css && next build --turbopack",
+    "build": "npm run build:css && next build",
     "start": "next start",
     "lint": "eslint",
     "gen:registry": "node scripts/generate-component-registry.js",
