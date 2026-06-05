@@ -1,26 +1,45 @@
-import fs from 'fs/promises';
-import path from 'path';
+// lib/videosys/categories.ts
+import { getPrivateStorage } from '@/lib/storage/factory';
 import { CategoriesMap, Category } from './types';
 
-const BASE_DIR = path.join(process.cwd(), 'data/videosys');
+/**
+ * 获取分类 JSON 文件在私有桶中的存储 Key
+ */
+function getCategoriesKey(locale: string): string {
+  return `data/videosys/${locale}/categories.json`;
+}
 
+/**
+ * 获取所有分类（从私有桶读取）
+ */
 export async function getCategories(locale: string): Promise<CategoriesMap> {
-  const filePath = path.join(BASE_DIR, locale, 'categories.json');
+  const storage = getPrivateStorage();
+  const key = getCategoriesKey(locale);
   try {
-    const data = await fs.readFile(filePath, 'utf-8');
-    return JSON.parse(data);
-  } catch {
-    return {};
+    const content = await storage.read(key, 'utf8');
+    return JSON.parse(content as string);
+  } catch (error: any) {
+    if (error?.message?.includes('File not found') || error?.code === 'NoSuchKey') {
+      return {};
+    }
+    throw error;
   }
 }
 
+/**
+ * 保存所有分类到私有桶
+ */
 export async function saveCategories(locale: string, categories: CategoriesMap): Promise<void> {
-  const dir = path.join(BASE_DIR, locale);
-  await fs.mkdir(dir, { recursive: true });
-  const filePath = path.join(dir, 'categories.json');
-  await fs.writeFile(filePath, JSON.stringify(categories, null, 2), 'utf-8');
+  const storage = getPrivateStorage();
+  const key = getCategoriesKey(locale);
+  await storage.write(key, JSON.stringify(categories, null, 2), {
+    contentType: 'application/json',
+  });
 }
 
+/**
+ * 根据 key 获取单个分类
+ */
 export async function getCategory(key: string, locale: string): Promise<Category | null> {
   const categories = await getCategories(locale);
   return categories[key] || null;

@@ -1,38 +1,47 @@
-import fs from 'fs/promises';
-import path from 'path';
+// lib/pages/storage.ts
 import matter from 'gray-matter';
 import { PageData, PageFrontMatter, PageIndexEntry, LocalePagesIndex, HreflangIndex } from '@/types/page';
+import { getPrivateStorage } from '@/lib/storage/factory';
 
-const DATA_ROOT = path.join(process.cwd(), 'data/pages');
+// 私有桶中的基础前缀（对应原 data/pages）
+const STORAGE_PREFIX = 'data/pages';
 
-// 辅助：原子写入（临时文件 + rename）
-async function atomicWrite(filePath: string, data: string) {
-  const tempPath = `${filePath}.tmp.${Date.now()}`;
-  await fs.writeFile(tempPath, data, 'utf-8');
-  await fs.rename(tempPath, filePath);
+/**
+ * 获取页面 Markdown 文件的存储 Key
+ */
+function getPageFileKey(locale: string, pageId: string): string {
+  return `${STORAGE_PREFIX}/${locale}/${pageId}.md`;
 }
 
-async function ensureDir(dir: string) {
-  await fs.mkdir(dir, { recursive: true });
+/**
+ * 获取语言级 pages.json 索引文件的存储 Key
+ */
+function getPagesIndexKey(locale: string): string {
+  return `${STORAGE_PREFIX}/${locale}/pages.json`;
 }
 
-function getPageFilePath(locale: string, pageId: string): string {
-  return path.join(DATA_ROOT, locale, `${pageId}.md`);
-}
+/**
+ * 全局 hreflang 索引文件的存储 Key
+ */
+const HREFLANG_KEY = `${STORAGE_PREFIX}/hreflang_index.json`;
 
-function getPagesIndexPath(locale: string): string {
-  return path.join(DATA_ROOT, locale, 'pages.json');
+// ---------- 辅助：确保目录（云存储无需创建，保留空实现） ----------
+async function ensureDir(dir: string): Promise<void> {
+  // 云存储不需要创建目录
 }
 
 // ---------- 索引读写（带重试） ----------
 async function readPagesIndex(locale: string, retries = 3): Promise<LocalePagesIndex> {
-  const indexPath = getPagesIndexPath(locale);
+  const storage = getPrivateStorage();
+  const key = getPagesIndexKey(locale);
   for (let i = 0; i < retries; i++) {
     try {
-      const data = await fs.readFile(indexPath, 'utf-8');
-      return JSON.parse(data);
+      const content = await storage.read(key, 'utf8');
+      return JSON.parse(content as string);
     } catch (err: any) {
-      if (err.code === 'ENOENT') return {};
+      if (err?.message?.includes('File not found') || err?.code === 'NoSuchKey') {
+        return {};
+      }
       if (i === retries - 1) throw new Error(`Failed to read pages.json for ${locale}: ${err.message}`);
       await new Promise(r => setTimeout(r, 100 * (i + 1)));
     }
@@ -41,9 +50,11 @@ async function readPagesIndex(locale: string, retries = 3): Promise<LocalePagesI
 }
 
 async function writePagesIndex(locale: string, index: LocalePagesIndex): Promise<void> {
-  const indexPath = getPagesIndexPath(locale);
-  await ensureDir(path.dirname(indexPath));
-  await atomicWrite(indexPath, JSON.stringify(index, null, 2));
+  const storage = getPrivateStorage();
+  const key = getPagesIndexKey(locale);
+  await storage.write(key, JSON.stringify(index, null, 2), {
+    contentType: 'application/json',
+  });
 }
 
 // 更新或添加单个页面条目
@@ -82,25 +93,27 @@ function validatePageData(page: PageData): void {
 }
 
 export async function readPage(locale: string, pageId: string): Promise<PageData | null> {
-  const filePath = getPageFilePath(locale, pageId);
- 
+  const storage = getPrivateStorage();
+  const key = getPageFileKey(locale, pageId);
   try {
-    const content = await fs.readFile(filePath, 'utf-8');
-    const { data, content: markdown } = matter(content);
-    
+    const content = await storage.read(key, 'utf8');
+    const { data, content: markdown } = matter(content as string);
     const front = data as PageFrontMatter;
     validatePageData({ ...front, content: markdown });
     return { ...front, content: markdown };
   } catch (err: any) {
     console.error(`[readPage] error for ${locale}/${pageId}:`, err);
-    if (err.code === 'ENOENT') return null;
+    if (err?.message?.includes('File not found') || err?.code === 'NoSuchKey') {
+      return null;
+    }
     throw err;
   }
 }
 
 export async function writePage(locale: string, page: PageData): Promise<void> {
   validatePageData(page);
-  const filePath = getPageFilePath(locale, page.id);
+  const storage = getPrivateStorage();
+  const key = getPageFileKey(locale, page.id);
   const frontMatter: PageFrontMatter = {
     id: page.id,
     title: page.title,
@@ -116,18 +129,20 @@ export async function writePage(locale: string, page: PageData): Promise<void> {
     updatedAt: page.updatedAt,
   };
   const fileContent = matter.stringify(page.content, frontMatter);
-  await ensureDir(path.dirname(filePath));
-  await fs.writeFile(filePath, fileContent, 'utf-8');
+  await storage.write(key, fileContent, { contentType: 'text/markdown' });
   // 更新索引
   await updatePagesIndexEntry(locale, page);
 }
 
 export async function deletePageFile(locale: string, pageId: string): Promise<void> {
-  const filePath = getPageFilePath(locale, pageId);
+  const storage = getPrivateStorage();
+  const key = getPageFileKey(locale, pageId);
   try {
-    await fs.unlink(filePath);
-  } catch (err) {
-    if ((err as NodeJS.ErrnoException).code !== 'ENOENT') throw err;
+    await storage.delete(key);
+  } catch (err: any) {
+    if (!(err?.message?.includes('NoSuchKey') || err?.code === 'NoSuchKey')) {
+      throw err;
+    }
   }
   // 删除索引条目
   await deletePagesIndexEntry(locale, pageId);
@@ -145,9 +160,8 @@ export async function listPages(locale: string): Promise<PageData[]> {
 // ---------- Slug 相关（基于索引遍历，简单够用） ----------
 export async function getPageIdBySlug(locale: string, slug: string): Promise<string | null> {
   const index = await readPagesIndex(locale);
-  const normalizedInputSlug = slug.toLowerCase(); // 将传入的 slug 转为小写
+  const normalizedInputSlug = slug.toLowerCase();
   for (const [id, entry] of Object.entries(index)) {
-    // 将存储的 slug 也转为小写进行比较
     if (entry.slug && entry.slug.toLowerCase() === normalizedInputSlug) {
       return id;
     }
@@ -162,22 +176,25 @@ export async function isSlugExists(locale: string, slug: string, excludePageId?:
   return true;
 }
 
-// ---------- hreflang 全局索引（保留，但不在此清理） ----------
-const HREFLANG_PATH = path.join(DATA_ROOT, 'hreflang_index.json');
-
+// ---------- hreflang 全局索引 ----------
 async function readHreflangIndex(): Promise<HreflangIndex> {
+  const storage = getPrivateStorage();
   try {
-    const data = await fs.readFile(HREFLANG_PATH, 'utf-8');
-    return JSON.parse(data);
+    const content = await storage.read(HREFLANG_KEY, 'utf8');
+    return JSON.parse(content as string);
   } catch (err: any) {
-    if (err.code === 'ENOENT') return {};
+    if (err?.message?.includes('File not found') || err?.code === 'NoSuchKey') {
+      return {};
+    }
     throw new Error(`Failed to read hreflang_index.json: ${err.message}`);
   }
 }
 
 async function writeHreflangIndex(index: HreflangIndex): Promise<void> {
-  await ensureDir(path.dirname(HREFLANG_PATH));
-  await atomicWrite(HREFLANG_PATH, JSON.stringify(index, null, 2));
+  const storage = getPrivateStorage();
+  await storage.write(HREFLANG_KEY, JSON.stringify(index, null, 2), {
+    contentType: 'application/json',
+  });
 }
 
 export async function updateHreflangEntry(pageId: string, locale: string, urlPath: string): Promise<void> {
@@ -200,11 +217,22 @@ export async function getHreflangMap(pageId: string): Promise<Record<string, str
 
 // ---------- 辅助函数 ----------
 export async function getAllLocales(): Promise<string[]> {
+  const storage = getPrivateStorage();
   try {
-    const entries = await fs.readdir(DATA_ROOT, { withFileTypes: true });
-    const dirs = entries.filter(e => e.isDirectory()).map(e => e.name);
-    return dirs.length ? dirs : ['zh', 'en'];
-  } catch {
+    // 列出 STORAGE_PREFIX 下的所有 key，提取第一级子目录作为 locale
+    const keys = await storage.list(STORAGE_PREFIX);
+    const locales = new Set<string>();
+    for (const key of keys) {
+      // key 格式: data/pages/{locale}/xxx
+      const parts = key.split('/');
+      if (parts.length >= 3) {
+        locales.add(parts[2]);
+      }
+    }
+    if (locales.size === 0) return ['zh', 'en'];
+    return Array.from(locales).sort();
+  } catch (err) {
+    console.error('Failed to list locales from R2:', err);
     return ['zh', 'en'];
   }
 }

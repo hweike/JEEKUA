@@ -1,3 +1,4 @@
+// lib/pages/index.ts
 import { PageData, PageType, Visibility } from '@/types/page';
 import {
   readPage,
@@ -12,25 +13,32 @@ import {
   getAllLocales,
 } from './storage';
 import { toPinyin } from '@/lib/utils/pinyin';
-import fs from 'fs/promises';
-import path from 'path';
+import { getPrivateStorage } from '@/lib/storage/factory';
 
-// hreflang 索引文件路径
-const HREFLANG_INDEX_PATH = path.join(process.cwd(), 'data', 'pages', 'hreflang.json');
+// hreflang 索引在私有桶中的存储 key
+const HREFLANG_INDEX_KEY = 'data/pages/hreflang.json';
 
-// 读取 hreflang 索引
+// 读取 hreflang 索引（从私有桶）
 async function readHreflangIndex(): Promise<Record<string, Record<string, string>>> {
+  const storage = getPrivateStorage();
   try {
-    const data = await fs.readFile(HREFLANG_INDEX_PATH, 'utf-8');
-    return JSON.parse(data);
-  } catch {
+    const content = await storage.read(HREFLANG_INDEX_KEY, 'utf8');
+    return JSON.parse(content as string);
+  } catch (error: any) {
+    if (error?.message?.includes('File not found') || error?.code === 'NoSuchKey') {
+      return {};
+    }
+    console.error('读取 hreflang 索引失败:', error);
     return {};
   }
 }
 
-// 写入 hreflang 索引
+// 写入 hreflang 索引（到私有桶）
 async function writeHreflangIndex(index: Record<string, Record<string, string>>): Promise<void> {
-  await fs.writeFile(HREFLANG_INDEX_PATH, JSON.stringify(index, null, 2), 'utf-8');
+  const storage = getPrivateStorage();
+  await storage.write(HREFLANG_INDEX_KEY, JSON.stringify(index, null, 2), {
+    contentType: 'application/json',
+  });
 }
 
 // 生成8位数字ID（基于时间戳+随机数）

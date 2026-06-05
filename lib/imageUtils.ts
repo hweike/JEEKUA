@@ -1,25 +1,20 @@
 // lib/imageUtils.ts
-import fs from 'fs/promises';
-import path from 'path';
+import { getPublicStorage } from '@/lib/storage/factory';
 
 /**
- * 确保目录存在，如果不存在则创建（类似 mkdir -p）
+ * 确保目录存在（云存储无需实际创建，保留空函数以兼容调用）
  */
 export async function ensureDir(dir: string): Promise<void> {
-  try {
-    await fs.access(dir);
-  } catch {
-    await fs.mkdir(dir, { recursive: true });
-  }
+  // 云存储不需要创建目录
 }
 
 /**
- * 下载远程图片并保存到本地
+ * 下载远程图片并保存到公开桶
  * @param url 图片地址（支持 http/https 或本地路径）
- * @returns 图片存储后的本地访问路径，如果下载失败则返回空字符串
+ * @returns 图片存储后的公开访问 URL，如果下载失败则返回空字符串
  */
 export async function downloadImage(url: string): Promise<string> {
-  // 如果 URL 为空，或已是本地路径，则直接返回
+  // 如果 URL 为空，或已是公开桶路径（以 /uploads 开头），则直接返回
   if (!url || url.startsWith('/uploads') || url.startsWith('/')) {
     return url || '';
   }
@@ -41,17 +36,25 @@ export async function downloadImage(url: string): Promise<string> {
     const buffer = Buffer.from(arrayBuffer);
 
     // 2. 生成唯一文件名
-    const ext = path.extname(new URL(url).pathname) || '.jpg';
+    const ext = (() => {
+      try {
+        const pathname = new URL(url).pathname;
+        const match = pathname.match(/\.([a-zA-Z0-9]+)$/);
+        return match ? `.${match[1]}` : '.jpg';
+      } catch {
+        return '.jpg';
+      }
+    })();
     const fileName = `${Date.now()}-${Math.random().toString(36).substring(2, 10)}${ext}`;
-    const uploadDir = path.join(process.cwd(), 'public', 'uploads');
-    await ensureDir(uploadDir);
-    const filePath = path.join(uploadDir, fileName);
+    const key = `uploads/${fileName}`; // 公开桶中的 Key
 
-    // 3. 保存图片到本地
-    await fs.writeFile(filePath, buffer);
+    // 3. 上传图片到公开桶
+    const storage = getPublicStorage();
+    await storage.write(key, buffer, { contentType: `image/${ext.slice(1)}` });
 
-    // 4. 返回可公开访问的 URL
-    return `/uploads/${fileName}`;
+    // 4. 返回公开访问 URL（优先使用自定义域名，否则使用 R2 默认域名）
+    const publicUrl = storage.getPublicUrl(key);
+    return publicUrl;
   } catch (error) {
     console.error(`下载图片异常: ${url}`, error);
     return '';

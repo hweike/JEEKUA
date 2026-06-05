@@ -1,7 +1,7 @@
+// lib/products/products.db.ts
 import { supabase } from '@/lib/supabase/client';
-import fs from 'fs';
-import path from 'path';
 import { LRUCache } from 'lru-cache';
+import { getPrivateStorage } from '@/lib/storage/factory';
 
 const DEFAULT_SITE_ID = process.env.NEXT_PUBLIC_SITE_ID || '000001';
 const categoryCache = new LRUCache<string, any>({ max: 10, ttl: 60_000 });
@@ -229,7 +229,7 @@ export async function getProductBySlug(locale: string, slug: string): Promise<Pr
   return parseProductRow(data);
 }
 
-// 根据 productId 获取产品（不推荐，建议使用 getProductIndex）
+// 根据 productId 获取产品
 export async function getProductById(locale: string, productId: string): Promise<ProductIndexItem | null> {
   const { data, error } = await supabase
     .from('products')
@@ -386,25 +386,37 @@ export async function getProductsByCategory(
   return getProductsByCategoryAndSeries(locale, categoryId, null, page, pageSize);
 }
 
-// === 以下函数与分类缓存相关，保持不变（仅读取本地文件） ===
-function getCachedCategories(locale: string) {
+// ==================== 以下函数改为从私有桶读取分类缓存 ====================
+
+/**
+ * 从私有桶读取 categories.json（带内存缓存）
+ */
+async function getCachedCategories(locale: string) {
   const cacheKey = `categories_${locale}`;
   let data = categoryCache.get(cacheKey);
   if (!data) {
-    const filePath = path.join(process.cwd(), 'data', 'products', locale, 'categories.json');
+    const storage = getPrivateStorage();
+    const key = `data/products/${locale}/categories.json`;
     try {
-      const raw = fs.readFileSync(filePath, 'utf-8');
-      data = JSON.parse(raw);
+      const content = await storage.read(key, 'utf8');
+      data = JSON.parse(content as string);
       categoryCache.set(cacheKey, data);
-    } catch {
-      data = { categories: [] };
+    } catch (error: any) {
+      if (error?.message?.includes('File not found') || error?.code === 'NoSuchKey') {
+        data = { categories: [] };
+      } else {
+        throw error;
+      }
     }
   }
   return data;
 }
 
-export function getProductLineIdFromCategory(locale: string, categoryId: string): string {
-  const data = getCachedCategories(locale);
+/**
+ * 根据分类ID获取产品线ID（原同步函数改为异步）
+ */
+export async function getProductLineIdFromCategory(locale: string, categoryId: string): Promise<string> {
+  const data = await getCachedCategories(locale);
   const cat = data.categories?.find((c: any) => c.id === categoryId);
   return cat?.productLineId || '';
 }

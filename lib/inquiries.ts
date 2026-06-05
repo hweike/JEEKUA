@@ -1,98 +1,125 @@
-import fs from 'fs/promises';
-import path from 'path';
+// lib/inquiries/index.ts
+import { getPrivateStorage } from '@/lib/storage/factory';
 
-const INQUIRIES_DIR = path.join(process.cwd(), 'data', 'inquiries');
+// 私有桶中的基础前缀
+const STORAGE_PREFIX = 'data/inquiries';
 
-// 保存询盘
-export async function saveInquiry(inquiry: any) {
+/**
+ * 查找询盘文件在私有桶中的 Key（通过 ID）
+ * @param id 询盘ID
+ * @returns 存储 Key，如果未找到则返回 null
+ */
+async function findInquiryKey(id: string): Promise<string | null> {
+  const storage = getPrivateStorage();
+  const prefix = `${STORAGE_PREFIX}/`;
+  try {
+    const keys = await storage.list(prefix);
+    // 查找以 `${id}.json` 结尾的文件（路径格式：.../年/月/${id}.json）
+    const targetKey = keys.find(key => key.endsWith(`/${id}.json`));
+    return targetKey || null;
+  } catch (error) {
+    console.error('查找询盘文件失败:', error);
+    return null;
+  }
+}
+
+/**
+ * 保存询盘
+ * @param inquiry 询盘数据（不含 id, createdAt, read 字段）
+ * @returns 生成的询盘 ID
+ */
+export async function saveInquiry(inquiry: any): Promise<string> {
   const timestamp = new Date().toISOString();
   const year = timestamp.slice(0, 4);
   const month = timestamp.slice(5, 7);
-  const dir = path.join(INQUIRIES_DIR, year, month);
-  await fs.mkdir(dir, { recursive: true });
-
   const id = `${Date.now()}-${Math.random().toString(36).substring(2, 8)}`;
-  const filePath = path.join(dir, `${id}.json`);
+  const key = `${STORAGE_PREFIX}/${year}/${month}/${id}.json`;
+
   const data = {
     id,
     createdAt: timestamp,
     read: false,
     ...inquiry,
   };
-  await fs.writeFile(filePath, JSON.stringify(data, null, 2), 'utf-8');
+
+  const storage = getPrivateStorage();
+  await storage.write(key, JSON.stringify(data, null, 2), {
+    contentType: 'application/json',
+  });
   return id;
 }
 
-// 获取所有询盘（按时间倒序）
-export async function getInquiries() {
+/**
+ * 获取所有询盘（按时间倒序）
+ */
+export async function getInquiries(): Promise<any[]> {
+  const storage = getPrivateStorage();
+  const prefix = `${STORAGE_PREFIX}/`;
   const inquiries: any[] = [];
+
   try {
-    const years = await fs.readdir(INQUIRIES_DIR);
-    for (const year of years) {
-      const yearDir = path.join(INQUIRIES_DIR, year);
-      const months = await fs.readdir(yearDir);
-      for (const month of months) {
-        const monthDir = path.join(yearDir, month);
-        const files = await fs.readdir(monthDir);
-        for (const file of files) {
-          if (file.endsWith('.json')) {
-            const filePath = path.join(monthDir, file);
-            const content = await fs.readFile(filePath, 'utf-8');
-            const data = JSON.parse(content);
-            inquiries.push(data);
-          }
-        }
+    const keys = await storage.list(prefix);
+    const jsonKeys = keys.filter(key => key.endsWith('.json'));
+
+    for (const key of jsonKeys) {
+      try {
+        const content = await storage.read(key, 'utf8');
+        const data = JSON.parse(content as string);
+        inquiries.push(data);
+      } catch (err) {
+        console.error(`读取询盘文件失败: ${key}`, err);
       }
     }
-  } catch (err) {
+  } catch (error: any) {
+    if (!(error?.message?.includes('File not found') || error?.code === 'NoSuchKey')) {
+      console.error('获取询盘列表失败:', error);
+    }
     // 目录不存在时返回空数组
-    if (err.code !== 'ENOENT') console.error('读取询盘失败:', err);
+    return [];
   }
+
   // 按创建时间倒序排列
   return inquiries.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
 }
 
-// 获取单个询盘
-export async function getInquiryById(id: string) {
-  // 遍历所有年份月份查找
+/**
+ * 获取单个询盘
+ * @param id 询盘ID
+ */
+export async function getInquiryById(id: string): Promise<any | null> {
+  const key = await findInquiryKey(id);
+  if (!key) return null;
+
+  const storage = getPrivateStorage();
   try {
-    const years = await fs.readdir(INQUIRIES_DIR);
-    for (const year of years) {
-      const yearDir = path.join(INQUIRIES_DIR, year);
-      const months = await fs.readdir(yearDir);
-      for (const month of months) {
-        const monthDir = path.join(yearDir, month);
-        const filePath = path.join(monthDir, `${id}.json`);
-        try {
-          const content = await fs.readFile(filePath, 'utf-8');
-          return JSON.parse(content);
-        } catch {}
-      }
-    }
-  } catch {}
-  return null;
+    const content = await storage.read(key, 'utf8');
+    return JSON.parse(content as string);
+  } catch (err) {
+    console.error(`读取询盘 ${id} 失败:`, err);
+    return null;
+  }
 }
 
-// 标记询盘为已读
-export async function markAsRead(id: string) {
-  // 先找到文件
+/**
+ * 标记询盘为已读
+ * @param id 询盘ID
+ * @returns 是否成功
+ */
+export async function markAsRead(id: string): Promise<boolean> {
+  const key = await findInquiryKey(id);
+  if (!key) return false;
+
+  const storage = getPrivateStorage();
   try {
-    const years = await fs.readdir(INQUIRIES_DIR);
-    for (const year of years) {
-      const yearDir = path.join(INQUIRIES_DIR, year);
-      const months = await fs.readdir(yearDir);
-      for (const month of months) {
-        const monthDir = path.join(yearDir, month);
-        const filePath = path.join(monthDir, `${id}.json`);
-        try {
-          const content = await fs.readFile(filePath, 'utf-8');
-          const data = JSON.parse(content);
-          data.read = true;
-          await fs.writeFile(filePath, JSON.stringify(data, null, 2), 'utf-8');
-          return true;
-        } catch {}
-      }
-    }
-  } catch {}
-  return false;
+    const content = await storage.read(key, 'utf8');
+    const data = JSON.parse(content as string);
+    data.read = true;
+    await storage.write(key, JSON.stringify(data, null, 2), {
+      contentType: 'application/json',
+    });
+    return true;
+  } catch (err) {
+    console.error(`更新询盘 ${id} 失败:`, err);
+    return false;
+  }
 }

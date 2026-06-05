@@ -3,7 +3,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { verifyPassword } from '@/lib/auth/password';
 import { findUserByEmail } from '@/lib/auth/users';
 import { setAuthCookie } from '@/lib/auth/jwt';
-import { logLogin } from '@/lib/logger';
+import { logLogin } from '@/lib/logger'; // 已改造为写入数据库（如 Supabase）
 
 export async function POST(request: NextRequest) {
   const { email, password } = await request.json();

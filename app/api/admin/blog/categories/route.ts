@@ -1,38 +1,42 @@
+// app/api/admin/blog/categories/route.ts
 import { NextRequest, NextResponse } from 'next/server';
-import fs from 'fs/promises';
-import path from 'path';
-import { existsSync } from 'fs';
-
-const DATA_DIR = path.join(process.cwd(), 'data/blog');
-
-// 辅助：获取指定语言的数据文件路径
-function getDataFilePath(locale: string): string {
-  return path.join(DATA_DIR, locale, 'categories.json');
-}
-
-// 辅助：读取分类列表
-async function readCategories(locale: string): Promise<any[]> {
-  const filePath = getDataFilePath(locale);
-  if (!existsSync(filePath)) {
-    // 若文件不存在，创建空数组
-    await fs.mkdir(path.dirname(filePath), { recursive: true });
-    await fs.writeFile(filePath, JSON.stringify([], null, 2));
-    return [];
-  }
-  const content = await fs.readFile(filePath, 'utf-8');
-  return JSON.parse(content);
-}
-
-// 辅助：写入分类列表
-async function writeCategories(locale: string, categories: any[]): Promise<void> {
-  const filePath = getDataFilePath(locale);
-  await fs.mkdir(path.dirname(filePath), { recursive: true });
-  await fs.writeFile(filePath, JSON.stringify(categories, null, 2));
-}
+import { getPrivateStorage } from '@/lib/storage/factory';
 
 // 生成8位随机数字ID
 function generateId(): string {
   return Math.floor(10000000 + Math.random() * 90000000).toString();
+}
+
+// 获取指定语言的分类文件在私有桶中的 key（相对路径）
+function getCategoryKey(locale: string): string {
+  // 私有桶中存储路径：blog/{locale}/categories.json
+  return `data/blog/${locale}/categories.json`;
+}
+
+// 读取分类列表
+async function readCategories(locale: string): Promise<any[]> {
+  const storage = getPrivateStorage();
+  const key = getCategoryKey(locale);
+  try {
+    const content = await storage.read(`data/${key}`, 'utf8');
+    return JSON.parse(content as string);
+  } catch (error: any) {
+    // 文件不存在，返回空数组（不上报错误）
+    if (error?.message?.includes('File not found') || error?.code === 'NoSuchKey') {
+      return [];
+    }
+    console.error(`读取分类文件失败 [${locale}]:`, error);
+    throw error;
+  }
+}
+
+// 写入分类列表
+async function writeCategories(locale: string, categories: any[]): Promise<void> {
+  const storage = getPrivateStorage();
+  const key = getCategoryKey(locale);
+  await storage.write(`data/${key}`, JSON.stringify(categories, null, 2), {
+    contentType: 'application/json',
+  });
 }
 
 // GET: 获取某语言的所有分类
@@ -43,6 +47,7 @@ export async function GET(request: NextRequest) {
     const categories = await readCategories(locale);
     return NextResponse.json(categories);
   } catch (error) {
+    console.error('GET /api/admin/blog/categories error:', error);
     return NextResponse.json({ error: '读取失败' }, { status: 500 });
   }
 }
@@ -67,6 +72,7 @@ export async function POST(request: NextRequest) {
     await writeCategories(locale, categories);
     return NextResponse.json(newCategory);
   } catch (error) {
+    console.error('POST /api/admin/blog/categories error:', error);
     return NextResponse.json({ error: '创建失败' }, { status: 500 });
   }
 }
@@ -95,6 +101,7 @@ export async function PUT(request: NextRequest) {
     await writeCategories(locale, categories);
     return NextResponse.json(updated);
   } catch (error) {
+    console.error('PUT /api/admin/blog/categories error:', error);
     return NextResponse.json({ error: '更新失败' }, { status: 500 });
   }
 }
@@ -117,6 +124,7 @@ export async function DELETE(request: NextRequest) {
     await writeCategories(locale, filtered);
     return NextResponse.json({ success: true });
   } catch (error) {
+    console.error('DELETE /api/admin/blog/categories error:', error);
     return NextResponse.json({ error: '删除失败' }, { status: 500 });
   }
 }

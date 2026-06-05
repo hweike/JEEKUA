@@ -1,11 +1,10 @@
-import fs from 'fs/promises';
-import path from 'path';
+// lib/sitemap/generate.ts
 import { supabase } from '@/lib/supabase/client';
 import { getSiteSettings } from '@/lib/getSiteSettings';
+import { getPublicStorage } from '@/lib/storage/factory';
 
 const SITE_ID = process.env.NEXT_PUBLIC_SITE_ID || '000001';
 const CHUNK_SIZE = 45000;
-const SITEMAP_DIR = path.join(process.cwd(), 'public', 'sitemap');
 
 interface PageGroup {
   id: string;
@@ -24,12 +23,13 @@ async function getBaseUrl(): Promise<string> {
   return baseUrl.endsWith('/') ? baseUrl.slice(0, -1) : baseUrl;
 }
 
-export async function generateSitemaps() {
-  // 验证 baseUrl
+/**
+ * 生成所有 sitemap 文件并存储到公开桶
+ * @returns 生成的 sitemap 文件路径列表（相对于公开桶根目录）
+ */
+export async function generateSitemaps(): Promise<string[]> {
   const baseUrl = await getBaseUrl();
-
-  // 确保目录存在
-  await fs.mkdir(SITEMAP_DIR, { recursive: true });
+  const storage = getPublicStorage(); // 使用公开桶
 
   // 查询所有需要包含的页面（noindex = 0）
   const { data: rows, error } = await supabase
@@ -72,27 +72,29 @@ export async function generateSitemaps() {
     typeGroups.get(group.type)!.push(group);
   }
 
-  const allSitemapFiles: string[] = [];
+  const allSitemapKeys: string[] = []; // 存储桶中的 key
   for (const [type, groups] of typeGroups.entries()) {
     const totalGroups = groups.length;
     const chunkCount = Math.ceil(totalGroups / CHUNK_SIZE);
     for (let i = 0; i < chunkCount; i++) {
       const chunk = groups.slice(i * CHUNK_SIZE, (i + 1) * CHUNK_SIZE);
-      const fileName = `sitemap-${type}-${i + 1}.xml`;
-      const filePath = path.join(SITEMAP_DIR, fileName);
+      const key = `sitemap/sitemap-${type}-${i + 1}.xml`; // 公开桶中的路径
       const xml = generateSitemapChunk(chunk, baseUrl);
-      await fs.writeFile(filePath, xml, 'utf-8');
-      allSitemapFiles.push(`/sitemap/${fileName}`);
-      console.log(`Generated ${fileName}`);
+      await storage.write(key, xml, { contentType: 'application/xml' });
+      allSitemapKeys.push(key);
+      console.log(`Generated ${key}`);
     }
   }
 
   // 生成索引文件
-  const indexXml = generateSitemapIndex(allSitemapFiles, baseUrl);
-  await fs.writeFile(path.join(SITEMAP_DIR, 'sitemap-index.xml'), indexXml, 'utf-8');
+  const indexKey = 'sitemap/sitemap-index.xml';
+  const publicUrls = allSitemapKeys.map(key => storage.getPublicUrl(key));
+  const indexXml = generateSitemapIndex(publicUrls, baseUrl);
+  await storage.write(indexKey, indexXml, { contentType: 'application/xml' });
   console.log('Generated sitemap-index.xml');
 
-  return allSitemapFiles;
+  // 返回公开 URL 列表（用于后续 sitemap 引用）
+  return publicUrls;
 }
 
 function generateSitemapChunk(groups: PageGroup[], baseUrl: string): string {
@@ -127,7 +129,7 @@ function generateSitemapChunk(groups: PageGroup[], baseUrl: string): string {
 function generateSitemapIndex(files: string[], baseUrl: string): string {
   const sitemaps = files.map(file => `
   <sitemap>
-    <loc>${baseUrl}${file}</loc>
+    <loc>${escapeXml(file)}</loc>
     <lastmod>${new Date().toISOString()}</lastmod>
   </sitemap>`).join('');
   return `<?xml version="1.0" encoding="UTF-8"?>

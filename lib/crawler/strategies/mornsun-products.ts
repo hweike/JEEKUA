@@ -1,10 +1,9 @@
 // lib/crawler/strategies/mornsun-products.ts
 import { Page } from 'playwright';
-import fs from 'fs/promises';
-import path from 'path';
 import { CrawlerRule } from '../types';
 import { getTask } from '../core/task';
 import { waitWithRetry } from '../core/utils';
+import { getPrivateStorage } from '@/lib/storage/factory';
 
 export async function crawlMornsunProducts(
   page: Page,
@@ -19,9 +18,15 @@ export async function crawlMornsunProducts(
     const srcTask = await getTask(src.taskId);
     categories = srcTask?.categories || [];
   } else if (src.type === 'file' && src.filePath) {
-    const filePath = path.resolve(process.cwd(), src.filePath);
-    const content = await fs.readFile(filePath, 'utf-8');
-    categories = JSON.parse(content);
+    // 从私有桶读取分类文件（文件路径相对于项目根目录，直接作为存储 key）
+    const storage = getPrivateStorage();
+    try {
+      const content = await storage.read(src.filePath, 'utf8');
+      categories = JSON.parse(content as string);
+    } catch (error) {
+      console.error(`读取分类文件失败: ${src.filePath}`, error);
+      throw new Error(`无法读取分类文件: ${src.filePath}`);
+    }
   } else {
     throw new Error('Invalid categoriesSource configuration');
   }

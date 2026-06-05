@@ -1,32 +1,54 @@
 // lib/products/mdParser.ts
-import fs from 'fs/promises';
-import path from 'path';
 import matter from 'gray-matter';
+import { getPrivateStorage } from '@/lib/storage/factory';
 
-const PRODUCTS_DIR = path.join(process.cwd(), 'data/products');
+/**
+ * 获取产品 MD 文件在私有桶中的存储 Key
+ */
+function getProductMdKey(locale: string, productId: string): string {
+  return `data/products/${locale}/products/${productId}.md`;
+}
 
+/**
+ * 读取产品 MD 文件
+ */
 export async function readProduct(locale: string, productId: string): Promise<any> {
-  const filePath = path.join(PRODUCTS_DIR, locale, 'products', `${productId}.md`);
+  const storage = getPrivateStorage();
+  const key = getProductMdKey(locale, productId);
   try {
-    const content = await fs.readFile(filePath, 'utf-8');
-    const { data, content: markdown } = matter(content);
+    const fileContent = await storage.read(key, 'utf8');
+    const { data, content: markdown } = matter(fileContent as string);
     return { ...data, content: markdown, productId };
-  } catch {
-    return null;
+  } catch (error: any) {
+    if (error?.message?.includes('File not found') || error?.code === 'NoSuchKey') {
+      return null;
+    }
+    throw error;
   }
 }
 
-export async function writeProduct(locale: string, productId: string, frontMatter: any, content: string) {
-  const filePath = path.join(PRODUCTS_DIR, locale, 'products', `${productId}.md`);
-  const dir = path.dirname(filePath);
-  await fs.mkdir(dir, { recursive: true });
+/**
+ * 写入产品 MD 文件
+ */
+export async function writeProduct(locale: string, productId: string, frontMatter: any, content: string): Promise<void> {
+  const storage = getPrivateStorage();
+  const key = getProductMdKey(locale, productId);
   const fileContent = matter.stringify(content, frontMatter);
-  await fs.writeFile(filePath, fileContent, 'utf-8');
+  await storage.write(key, fileContent, { contentType: 'text/markdown' });
 }
 
-export async function deleteProduct(locale: string, productId: string) {
-  const filePath = path.join(PRODUCTS_DIR, locale, 'products', `${productId}.md`);
+/**
+ * 删除产品 MD 文件
+ */
+export async function deleteProduct(locale: string, productId: string): Promise<void> {
+  const storage = getPrivateStorage();
+  const key = getProductMdKey(locale, productId);
   try {
-    await fs.unlink(filePath);
-  } catch {}
+    await storage.delete(key);
+  } catch (error: any) {
+    // 如果文件不存在，忽略错误（与原逻辑一致）
+    if (!(error?.message?.includes('NoSuchKey') || error?.code === 'NoSuchKey')) {
+      throw error;
+    }
+  }
 }

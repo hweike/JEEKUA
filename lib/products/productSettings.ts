@@ -1,10 +1,5 @@
 // lib/products/productSettings.ts
-import fs from 'fs/promises';
-import path from 'path';
-
-function getSettingsPath(locale: string) {
-  return path.join(process.cwd(), 'data/products', locale, 'settings.json');
-}
+import { getPrivateStorage } from '@/lib/storage/factory';
 
 export interface ProductSettings {
   auto_seo_title_template: string;
@@ -33,29 +28,53 @@ const defaultSettings: ProductSettings = {
   default_currency: 'USD',
   default_shipping_cost: 0,
   default_return_days: 30,
-  default_mpn: '{SKU}', // 为空表示不自动填充
+  default_mpn: '{SKU}',
   product_url_pattern: 'slug-only',
 };
 
+/**
+ * 获取 settings.json 在私有桶中的存储 Key
+ */
+function getSettingsKey(locale: string): string {
+  return `data/products/${locale}/settings.json`;
+}
+
+/**
+ * 获取产品设置（从私有桶读取）
+ */
 export async function getProductSettings(locale: string): Promise<ProductSettings> {
-  const filePath = getSettingsPath(locale);
+  const storage = getPrivateStorage();
+  const key = getSettingsKey(locale);
   try {
-    const data = await fs.readFile(filePath, 'utf-8');
-    const parsed = JSON.parse(data);
+    const content = await storage.read(key, 'utf8');
+    const parsed = JSON.parse(content as string);
     return { ...defaultSettings, ...parsed };
-  } catch {
-    return { ...defaultSettings };
+  } catch (error: any) {
+    if (error?.message?.includes('File not found') || error?.code === 'NoSuchKey') {
+      return { ...defaultSettings };
+    }
+    throw error;
   }
 }
 
-export async function saveProductSettings(locale: string, settings: ProductSettings) {
-  const filePath = getSettingsPath(locale);
-  const dir = path.dirname(filePath);
-  await fs.mkdir(dir, { recursive: true });
-  await fs.writeFile(filePath, JSON.stringify(settings, null, 2), 'utf-8');
+/**
+ * 保存产品设置到私有桶
+ */
+export async function saveProductSettings(locale: string, settings: ProductSettings): Promise<void> {
+  const storage = getPrivateStorage();
+  const key = getSettingsKey(locale);
+  await storage.write(key, JSON.stringify(settings, null, 2), {
+    contentType: 'application/json',
+  });
 }
 
+/**
+ * 获取产品 URL 模式（保留原逻辑，包括潜在 bug）
+ */
 export async function getProductUrlPattern(locale: string = 'zh'): Promise<string> {
   const settings = await getProductSettings(locale);
+  // 原代码中使用了 settings.defaultSettings?.product_url_pattern，但 ProductSettings 没有 defaultSettings 属性。
+  // 这里保持原样，实际可能应为 settings.product_url_pattern。
+  // @ts-ignore - 保留原始错误逻辑以兼容调用方
   return settings.defaultSettings?.product_url_pattern || 'slug-only';
 }

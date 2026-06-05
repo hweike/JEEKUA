@@ -1,10 +1,8 @@
-import fs from 'fs';
-import path from 'path';
+// lib/theme.ts
+import { getPrivateStorage } from '@/lib/storage/factory';
 
-const THEMES_DIR = path.join(process.cwd(), 'data', 'themes');
-const ACTIVE_THEME_FILE = path.join(THEMES_DIR, 'active-theme.json');
-
-if (!fs.existsSync(THEMES_DIR)) fs.mkdirSync(THEMES_DIR, { recursive: true });
+// 私有桶中的存储 Key
+const ACTIVE_THEME_KEY = 'data/themes/active-theme.json';
 
 // 默认主题（当 active-theme.json 不存在时使用）
 const DEFAULT_THEME = {
@@ -46,26 +44,40 @@ const DEFAULT_THEME = {
   animation: {},
 };
 
-// 获取当前激活的主题（完整配置），如果不存在则返回默认主题
-export function getActiveTheme(): any {
+/**
+ * 获取当前激活的主题（完整配置），如果不存在则返回默认主题
+ */
+export async function getActiveTheme(): Promise<any> {
+  const storage = getPrivateStorage();
   try {
-    if (fs.existsSync(ACTIVE_THEME_FILE)) {
-      const content = fs.readFileSync(ACTIVE_THEME_FILE, 'utf-8');
-      return JSON.parse(content);
+    const content = await storage.read(ACTIVE_THEME_KEY, 'utf8');
+    return JSON.parse(content as string);
+  } catch (error: any) {
+    if (error?.message?.includes('File not found') || error?.code === 'NoSuchKey') {
+      // 文件不存在，返回默认主题的深拷贝
+      return JSON.parse(JSON.stringify(DEFAULT_THEME));
     }
-  } catch (error) {
     console.error('读取激活主题失败:', error);
+    return JSON.parse(JSON.stringify(DEFAULT_THEME));
   }
-  // 返回默认主题的深拷贝
-  return JSON.parse(JSON.stringify(DEFAULT_THEME));
 }
 
-// 保存激活的主题
-export function saveActiveTheme(theme: any) {
-  fs.writeFileSync(ACTIVE_THEME_FILE, JSON.stringify(theme, null, 2));
+/**
+ * 保存激活的主题
+ * @param theme 主题配置对象
+ */
+export async function saveActiveTheme(theme: any): Promise<void> {
+  const storage = getPrivateStorage();
+  await storage.write(ACTIVE_THEME_KEY, JSON.stringify(theme, null, 2), {
+    contentType: 'application/json',
+  });
 }
 
-// 展平嵌套对象为 CSS 变量字符串（用于 layout 注入）
+/**
+ * 展平嵌套对象为 CSS 变量字符串（用于 layout 注入）
+ * @param theme 主题配置对象（必须包含 colors 字段）
+ * @returns CSS 变量字符串，如 "--background: oklch(1 0 0);\n"
+ */
 export function flattenThemeToCss(theme: any): string {
   let css = '';
   const colors = theme.colors || {};

@@ -338,6 +338,39 @@ CREATE TABLE IF NOT EXISTS "sync_logs" (
 
 CREATE INDEX IF NOT EXISTS "idx_sync_logs_site" ON "sync_logs" ("site_id");
 
+
+-- 创建 admin_logs 表（不含内联索引）
+CREATE TABLE IF NOT EXISTS admin_logs (
+  id BIGSERIAL PRIMARY KEY,
+  timestamp TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  type TEXT NOT NULL CHECK (type IN ('login', 'admin', 'menu')),
+  
+  -- 通用字段
+  email TEXT,
+  ip TEXT,
+  user_agent TEXT,
+  
+  -- login 特有
+  success BOOLEAN,
+  message TEXT,
+  
+  -- admin 特有
+  operator_email TEXT,
+  action TEXT CHECK (action IN ('add', 'delete')),
+  target_email TEXT,
+  target_name TEXT,
+  
+  -- menu 特有
+  path TEXT,
+  menu_name TEXT
+);
+
+-- 创建索引（独立语句）
+CREATE INDEX IF NOT EXISTS idx_admin_logs_timestamp ON admin_logs (timestamp);
+CREATE INDEX IF NOT EXISTS idx_admin_logs_type ON admin_logs (type);
+CREATE INDEX IF NOT EXISTS idx_admin_logs_email ON admin_logs (email);
+CREATE INDEX IF NOT EXISTS idx_admin_logs_operator_email ON admin_logs (operator_email);
+
 -- ============================================================
 -- 附录：数据迁移说明（从单站点升级到多租户）
 -- ============================================================

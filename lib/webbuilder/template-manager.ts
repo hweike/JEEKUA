@@ -1,7 +1,8 @@
-import fs from 'fs/promises';
-import path from 'path';
+// lib/webbuilder/template-repo.ts
+import { getPrivateStorage } from '@/lib/storage/factory';
 
-const TEMPLATES_DIR = path.join(process.cwd(), 'data/webbuilder/templates');
+// 私有桶中的基础前缀
+const STORAGE_PREFIX = 'data/webbuilder/templates';
 
 // 扩展 TemplateCategory 包含 product_line 和 document_library
 export type TemplateCategory =
@@ -9,7 +10,7 @@ export type TemplateCategory =
   | 'product'
   | 'product_category'
   | 'document'
-  | 'document_library'      // 新增：文档库模板
+  | 'document_library'      // 文档库模板
   | 'blog'
   | 'blog_post'
   | 'video_category'
@@ -26,71 +27,93 @@ export interface Template {
   updatedAt: string;
 }
 
-// 确保目录存在
-async function ensureDir(dir: string) {
-  try {
-    await fs.access(dir);
-  } catch {
-    await fs.mkdir(dir, { recursive: true });
-  }
+// 所有可能的分类列表（用于遍历）
+const ALL_CATEGORIES: TemplateCategory[] = [
+  'page', 'product', 'product_category', 'document', 'document_library',
+  'blog', 'blog_post', 'video_category', 'video', 'product_line'
+];
+
+/**
+ * 获取某个分类下所有模板的存储 Key 前缀
+ */
+function getCategoryPrefix(category: TemplateCategory): string {
+  return `${STORAGE_PREFIX}/${category}/`;
 }
 
+/**
+ * 获取模板文件的完整 Key
+ */
+function getTemplateKey(category: TemplateCategory, id: string): string {
+  return `${STORAGE_PREFIX}/${category}/${id}.json`;
+}
+
+/**
+ * 确保目录存在（云存储无需创建，保留空实现以兼容）
+ */
+async function ensureDir(dir: string): Promise<void> {
+  // 云存储不需要创建目录
+}
+
+/**
+ * 获取所有模板（可选按分类过滤）
+ */
 export async function getAllTemplates(category?: TemplateCategory | null): Promise<Template[]> {
-  await ensureDir(TEMPLATES_DIR);
+  const storage = getPrivateStorage();
+  const categories = category ? [category] : ALL_CATEGORIES;
   const templates: Template[] = [];
-  
-  // 所有可能的分类列表（包含 product_line 和 document_library）
-  const allCategories: TemplateCategory[] = [
-    'page', 'product', 'product_category', 'document', 'document_library',
-    'blog', 'blog_post', 'video_category', 'video', 'product_line'
-  ];
-  const categories = category ? [category] : allCategories;
 
   for (const cat of categories) {
-    const catDir = path.join(TEMPLATES_DIR, cat);
+    const prefix = getCategoryPrefix(cat);
     try {
-      const files = await fs.readdir(catDir);
-      for (const file of files) {
-        if (file.endsWith('.json')) {
-          const content = await fs.readFile(path.join(catDir, file), 'utf-8');
-          templates.push(JSON.parse(content));
+      const keys = await storage.list(prefix);
+      const jsonKeys = keys.filter(key => key.endsWith('.json'));
+      for (const key of jsonKeys) {
+        try {
+          const content = await storage.read(key, 'utf8');
+          const template = JSON.parse(content as string);
+          templates.push(template);
+        } catch (err) {
+          console.error(`Failed to parse template file ${key}:`, err);
         }
       }
-    } catch {
-      // 目录不存在则跳过
+    } catch (error: any) {
+      if (!(error?.message?.includes('File not found') || error?.code === 'NoSuchKey')) {
+        console.error(`Failed to list templates for category ${cat}:`, error);
+      }
     }
   }
   return templates;
 }
 
+/**
+ * 根据 ID 获取模板（自动遍历所有分类查找）
+ */
 export async function getTemplateById(id: string): Promise<Template | null> {
-  await ensureDir(TEMPLATES_DIR);
-  // 所有可能的分类列表（包含 product_line 和 document_library）
-  const allCategories: TemplateCategory[] = [
-    'page', 'product', 'product_category', 'document', 'document_library',
-    'blog', 'blog_post', 'video_category', 'video', 'product_line'
-  ];
-  for (const cat of allCategories) {
-    const filePath = path.join(TEMPLATES_DIR, cat, `${id}.json`);
+  const storage = getPrivateStorage();
+  for (const cat of ALL_CATEGORIES) {
+    const key = getTemplateKey(cat, id);
     try {
-      const content = await fs.readFile(filePath, 'utf-8');
-      return JSON.parse(content);
-    } catch {
-      // 继续尝试下一个分类
+      const content = await storage.read(key, 'utf8');
+      return JSON.parse(content as string);
+    } catch (error: any) {
+      // 文件不存在则继续尝试下一个分类
+      if (!(error?.message?.includes('File not found') || error?.code === 'NoSuchKey')) {
+        console.error(`Error reading template ${id} from category ${cat}:`, error);
+      }
     }
   }
   return null;
 }
 
+/**
+ * 创建新模板
+ */
 export async function createTemplate(input: {
   name: string;
   category: TemplateCategory;
   data: any;
 }): Promise<Template> {
-  await ensureDir(TEMPLATES_DIR);
-  const catDir = path.join(TEMPLATES_DIR, input.category);
-  await ensureDir(catDir);
-
+  const storage = getPrivateStorage();
   const id = `template_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`;
   const now = new Date().toISOString();
 
@@ -103,13 +126,16 @@ export async function createTemplate(input: {
     updatedAt: now,
   };
 
-  await fs.writeFile(
-    path.join(catDir, `${id}.json`),
-    JSON.stringify(template, null, 2)
-  );
+  const key = getTemplateKey(input.category, id);
+  await storage.write(key, JSON.stringify(template, null, 2), {
+    contentType: 'application/json',
+  });
   return template;
 }
 
+/**
+ * 更新模板（支持修改分类、名称、数据）
+ */
 export async function updateTemplate(
   id: string,
   updates: Partial<Pick<Template, 'name' | 'category' | 'data'>>
@@ -123,35 +149,40 @@ export async function updateTemplate(
     updatedAt: new Date().toISOString(),
   };
 
-  const catDir = path.join(TEMPLATES_DIR, updated.category);
-  await ensureDir(catDir);
+  const storage = getPrivateStorage();
 
   // 如果分类变更，删除旧文件
   if (existing.category !== updated.category) {
-    const oldPath = path.join(TEMPLATES_DIR, existing.category, `${id}.json`);
+    const oldKey = getTemplateKey(existing.category, id);
     try {
-      await fs.unlink(oldPath);
-    } catch {
+      await storage.delete(oldKey);
+    } catch (err) {
       // 忽略删除失败
+      console.warn(`Failed to delete old template file ${oldKey}:`, err);
     }
   }
 
-  await fs.writeFile(
-    path.join(catDir, `${id}.json`),
-    JSON.stringify(updated, null, 2)
-  );
+  const newKey = getTemplateKey(updated.category, id);
+  await storage.write(newKey, JSON.stringify(updated, null, 2), {
+    contentType: 'application/json',
+  });
   return updated;
 }
 
+/**
+ * 删除模板
+ */
 export async function deleteTemplate(id: string): Promise<boolean> {
   const existing = await getTemplateById(id);
   if (!existing) return false;
 
-  const filePath = path.join(TEMPLATES_DIR, existing.category, `${id}.json`);
+  const storage = getPrivateStorage();
+  const key = getTemplateKey(existing.category, id);
   try {
-    await fs.unlink(filePath);
+    await storage.delete(key);
     return true;
-  } catch {
+  } catch (err) {
+    console.error(`Failed to delete template ${id}:`, err);
     return false;
   }
 }

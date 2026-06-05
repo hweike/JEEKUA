@@ -1,46 +1,65 @@
-import fs from 'fs/promises';
-import path from 'path';
+// lib/CRM/repository.ts
 import matter from 'gray-matter';
-import { Customer } from './types';
+import { getPrivateStorage } from '@/lib/storage/factory';
+import type { Customer } from './types';
 
-const DATA_DIR = path.join(process.cwd(), 'data', 'crm');
+// 存储前缀（对应私有桶中的目录）
+const STORAGE_PREFIX = 'data/crm';
 
-async function ensureDir() {
-  try {
-    await fs.access(DATA_DIR);
-  } catch {
-    await fs.mkdir(DATA_DIR, { recursive: true });
-  }
+/**
+ * 获取客户文件在私有桶中的完整 key
+ */
+function getCustomerKey(id: string): string {
+  return `${STORAGE_PREFIX}/${id}.md`;
 }
 
+/**
+ * 获取所有客户（从私有桶读取）
+ */
 export async function getAllCustomers(): Promise<Customer[]> {
-  await ensureDir();
-  const files = await fs.readdir(DATA_DIR);
-  const customers: Customer[] = [];
-  for (const file of files) {
-    if (file.endsWith('.md')) {
-      const id = file.replace('.md', '');
+  const storage = getPrivateStorage();
+  try {
+    // 列出所有 .md 文件
+    const keys = await storage.list(STORAGE_PREFIX);
+    const customerFiles = keys.filter(key => key.endsWith('.md'));
+    const customers: Customer[] = [];
+    for (const key of customerFiles) {
+      const id = key.replace(`${STORAGE_PREFIX}/`, '').replace('.md', '');
       const customer = await getCustomerById(id);
       if (customer) customers.push(customer);
     }
+    return customers.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+  } catch (error) {
+    console.error('Failed to list customers from R2:', error);
+    return [];
   }
-  return customers.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
 }
 
+/**
+ * 根据 ID 获取单个客户
+ */
 export async function getCustomerById(id: string): Promise<Customer | null> {
+  const storage = getPrivateStorage();
+  const key = getCustomerKey(id);
   try {
-    const filePath = path.join(DATA_DIR, `${id}.md`);
-    const content = await fs.readFile(filePath, 'utf-8');
-    const { data } = matter(content);
+    const content = await storage.read(key, 'utf8');
+    const { data } = matter(content as string);
     return data as Customer;
-  } catch {
+  } catch (error: any) {
+    if (error?.message?.includes('File not found') || error?.code === 'NoSuchKey') {
+      return null;
+    }
+    console.error(`Failed to read customer ${id}:`, error);
     return null;
   }
 }
 
+/**
+ * 保存客户（创建或更新）
+ */
 export async function saveCustomer(customer: Customer): Promise<void> {
-  await ensureDir();
-  const filePath = path.join(DATA_DIR, `${customer.id}.md`);
+  const storage = getPrivateStorage();
+  const key = getCustomerKey(customer.id);
   const { notes, ...rest } = customer;
   // 过滤掉 undefined 值，避免 YAML 序列化错误
   const frontMatter: Record<string, any> = {};
@@ -50,10 +69,21 @@ export async function saveCustomer(customer: Customer): Promise<void> {
     }
   }
   const markdown = matter.stringify(notes || '', frontMatter);
-  await fs.writeFile(filePath, markdown, 'utf-8');
+  await storage.write(key, markdown, { contentType: 'text/markdown' });
 }
 
+/**
+ * 删除客户
+ */
 export async function deleteCustomer(id: string): Promise<void> {
-  const filePath = path.join(DATA_DIR, `${id}.md`);
-  await fs.unlink(filePath);
+  const storage = getPrivateStorage();
+  const key = getCustomerKey(id);
+  try {
+    await storage.delete(key);
+  } catch (error: any) {
+    if (!error?.message?.includes('NoSuchKey')) {
+      console.error(`Failed to delete customer ${id}:`, error);
+      throw error;
+    }
+  }
 }

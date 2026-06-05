@@ -1,21 +1,34 @@
-import fs from 'fs';
-import path from 'path';
+// lib/templates/index.ts
+import { getPrivateStorage } from '@/lib/storage/factory';
 
-const TEMPLATES_DIR = path.join(process.cwd(), 'data', 'templates');
+// 私有桶中的基础前缀
+const STORAGE_PREFIX = 'data/templates';
 
-// 获取指定类型的模板
-export function getPageTemplate(type: 'series' | 'product' | 'subproduct', templateName: string = 'default') {
-  const filePath = path.join(TEMPLATES_DIR, type, `${templateName}.json`);
-  if (!fs.existsSync(filePath)) {
-    console.warn(`Template not found: ${filePath}, using default`);
-    // 返回默认模板（硬编码）
+/**
+ * 获取指定类型的模板（异步）
+ * @param type 模板类型：'series' | 'product' | 'subproduct'
+ * @param templateName 模板名称，默认为 'default'
+ * @returns 模板配置对象
+ */
+export async function getPageTemplate(type: 'series' | 'product' | 'subproduct', templateName: string = 'default') {
+  const storage = getPrivateStorage();
+  const key = `${STORAGE_PREFIX}/${type}/${templateName}.json`;
+  try {
+    const content = await storage.read(key, 'utf8');
+    return JSON.parse(content as string);
+  } catch (error: any) {
+    if (error?.message?.includes('File not found') || error?.code === 'NoSuchKey') {
+      console.warn(`Template not found: ${key}, using default`);
+      return getDefaultTemplate(type);
+    }
+    console.error(`读取模板失败: ${key}`, error);
     return getDefaultTemplate(type);
   }
-  const content = fs.readFileSync(filePath, 'utf-8');
-  return JSON.parse(content);
 }
 
-// 默认模板（当用户未配置时使用）
+/**
+ * 默认模板（当用户未配置时使用）
+ */
 function getDefaultTemplate(type: string) {
   if (type === 'series') {
     return [

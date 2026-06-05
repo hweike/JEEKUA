@@ -1,6 +1,6 @@
-import fs from 'fs/promises';
-import path from 'path';
+// lib/config.ts
 import { cache } from 'react';
+import { getPrivateStorage } from '@/lib/storage/factory';
 
 // ========== 类型定义 ==========
 export interface HeaderConfig {
@@ -31,7 +31,6 @@ export interface HeaderConfig {
       type?: 'info' | 'warning' | 'error';
     }>;
   };
-   // 新增搜索配置（可选）
   search?: {
     enabled: boolean;
     placeholder?: string;
@@ -127,7 +126,7 @@ const DEFAULT_HEADER_CONFIG: HeaderConfig = {
     enabled: false,
     items: []
   },
-   search: {
+  search: {
     enabled: false,
     placeholder: "Search..."
   }
@@ -199,63 +198,55 @@ function mergeDeep(target: any, source: any): any {
   return output;
 }
 
-// 获取页头配置（文件不存在直接返回默认配置，不再 fallback 到 zh）
-export const getHeaderConfig = cache(async (locale: string): Promise<HeaderConfig> => {
-  const filePath = path.join(process.cwd(), `data/SiteHeadersFooters/header/${locale}.json`);
+// 从私有桶读取 JSON 文件，不存在时返回 null
+async function readConfigFile(key: string): Promise<any | null> {
+  const storage = getPrivateStorage();
   try {
-    const content = await fs.readFile(filePath, 'utf-8');
-    const userConfig = JSON.parse(content);
-    return mergeDeep(DEFAULT_HEADER_CONFIG, userConfig);
-  } catch (error) {
-    console.warn(`Header config for locale ${locale} not found, using default.`, error);
-    return DEFAULT_HEADER_CONFIG;
-  }
-});
-
-// 获取页脚配置（文件不存在直接返回默认配置，不再 fallback 到 zh）
-export const getFooterConfig = cache(async (locale: string): Promise<FooterConfig> => {
-  const filePath = path.join(process.cwd(), `data/SiteHeadersFooters/footer/${locale}.json`);
-  try {
-    const content = await fs.readFile(filePath, 'utf-8');
-    const userConfig = JSON.parse(content);
-    return mergeDeep(DEFAULT_FOOTER_CONFIG, userConfig);
-  } catch (error) {
-    console.warn(`Footer config for locale ${locale} not found, using default.`, error);
-    return DEFAULT_FOOTER_CONFIG;
-  }
-});
-
-// 获取固定菜单（navigation / footer）- 文件不存在返回 null
-async function getFixedMenu(locale: string, menuSourceId: 'navigation' | 'footer'): Promise<Menu | null> {
-  const filePath = path.join(process.cwd(), `data/menus/${locale}/${menuSourceId}.json`);
-  try {
-    const content = await fs.readFile(filePath, 'utf-8');
-    return JSON.parse(content);
+    const content = await storage.read(key, 'utf8');
+    return JSON.parse(content as string);
   } catch (error: any) {
-    if (error.code === 'ENOENT') {
-      // console.error(`Menu file not found: ${filePath}`);
+    if (error?.message?.includes('File not found') || error?.code === 'NoSuchKey') {
       return null;
     }
     throw error;
   }
 }
 
+// 获取页头配置（文件不存在直接返回默认配置）
+export const getHeaderConfig = cache(async (locale: string): Promise<HeaderConfig> => {
+  const key = `data/SiteHeadersFooters/header/${locale}.json`;
+  const userConfig = await readConfigFile(key);
+  if (!userConfig) {
+    console.warn(`Header config for locale ${locale} not found, using default.`);
+    return DEFAULT_HEADER_CONFIG;
+  }
+  return mergeDeep(DEFAULT_HEADER_CONFIG, userConfig);
+});
+
+// 获取页脚配置（文件不存在直接返回默认配置）
+export const getFooterConfig = cache(async (locale: string): Promise<FooterConfig> => {
+  const key = `data/SiteHeadersFooters/footer/${locale}.json`;
+  const userConfig = await readConfigFile(key);
+  if (!userConfig) {
+    console.warn(`Footer config for locale ${locale} not found, using default.`);
+    return DEFAULT_FOOTER_CONFIG;
+  }
+  return mergeDeep(DEFAULT_FOOTER_CONFIG, userConfig);
+});
+
+// 获取固定菜单（navigation / footer）- 文件不存在返回 null
+async function getFixedMenu(locale: string, menuSourceId: 'navigation' | 'footer'): Promise<Menu | null> {
+  const key = `data/menus/${locale}/${menuSourceId}.json`;
+  return await readConfigFile(key);
+}
+
 // 获取自定义菜单（从 custom_menus.json 中按 ID 查找）
 async function getCustomMenuById(locale: string, menuId: string | number): Promise<Menu | null> {
-  const customFilePath = path.join(process.cwd(), `data/menus/${locale}/custom_menus.json`);
-  try {
-    const content = await fs.readFile(customFilePath, 'utf-8');
-    const customMenus: Menu[] = JSON.parse(content);
-    const target = customMenus.find(menu => String(menu.id) === String(menuId));
-    return target || null;
-  } catch (error: any) {
-    if (error.code === 'ENOENT') {
-      // console.error(`Custom menus file not found: ${customFilePath}`);
-      return null;
-    }
-    console.error(`Failed to load custom_menus.json for locale ${locale}:`, error);
-    return null;
-  }
+  const key = `data/menus/${locale}/custom_menus.json`;
+  const customMenus = await readConfigFile(key);
+  if (!customMenus || !Array.isArray(customMenus)) return null;
+  const target = customMenus.find(menu => String(menu.id) === String(menuId));
+  return target || null;
 }
 
 // 获取菜单（支持固定菜单和自定义菜单），不存在返回 null

@@ -1,64 +1,89 @@
-import fs from 'fs';
-import path from 'path';
-
-const BASE_DIR = path.join(process.cwd(), 'data', 'SiteHeadersFooters');
-const HEADER_DIR = path.join(BASE_DIR, 'header');
-const FOOTER_DIR = path.join(BASE_DIR, 'footer');
-const SAMPLES_DIR = path.join(BASE_DIR, 'samples');
-
-// 确保目录存在
-[HEADER_DIR, FOOTER_DIR, SAMPLES_DIR].forEach(dir => {
-  if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-});
+// lib/config-loader.ts
+import { getPrivateStorage } from '@/lib/storage/factory';
 
 type ConfigType = 'header' | 'footer';
 
+// 私有桶中的基础路径（对应原 data/SiteHeadersFooters）
+const STORAGE_PREFIX = 'data/SiteHeadersFooters';
+
+/**
+ * 获取配置文件在私有桶中的完整 Key
+ */
+function getConfigKey(type: ConfigType, locale: string): string {
+  return `${STORAGE_PREFIX}/${type}/${locale}.json`;
+}
+
 /**
  * 获取指定语言和类型的配置
+ * @returns 配置对象，如果文件不存在则返回 null
  */
 export async function getConfig(type: ConfigType, locale: string): Promise<any> {
-  const dir = type === 'header' ? HEADER_DIR : FOOTER_DIR;
-  const filePath = path.join(dir, `${locale}.json`);
-  if (!fs.existsSync(filePath)) {
-    return null; // ✅ 关键修改：没有文件时返回 null
+  const storage = getPrivateStorage();
+  const key = getConfigKey(type, locale);
+  try {
+    const content = await storage.read(key, 'utf8');
+    return JSON.parse(content as string);
+  } catch (error: any) {
+    if (error?.message?.includes('File not found') || error?.code === 'NoSuchKey') {
+      return null;
+    }
+    throw error;
   }
-  const content = fs.readFileSync(filePath, 'utf-8');
-  return JSON.parse(content);
 }
 
 /**
  * 保存指定语言和类型的配置
  */
 export async function saveConfig(type: ConfigType, locale: string, config: any): Promise<void> {
-  const dir = type === 'header' ? HEADER_DIR : FOOTER_DIR;
-  const filePath = path.join(dir, `${locale}.json`);
-  fs.writeFileSync(filePath, JSON.stringify(config, null, 2), 'utf-8');
+  const storage = getPrivateStorage();
+  const key = getConfigKey(type, locale);
+  await storage.write(key, JSON.stringify(config, null, 2), {
+    contentType: 'application/json',
+  });
 }
 
 /**
  * 初始化配置：从样本文件复制到目标语言文件
+ * 样本文件路径：data/SiteHeadersFooters/samples/{type}_sample.json
  */
 export async function initConfig(type: ConfigType, locale: string): Promise<void> {
-  const samplePath = path.join(SAMPLES_DIR, `${type}_sample.json`);
-  if (!fs.existsSync(samplePath)) {
-    throw new Error(`样本文件不存在: ${samplePath}`);
+  const storage = getPrivateStorage();
+  const sampleKey = `${STORAGE_PREFIX}/samples/${type}_sample.json`;
+  const targetKey = getConfigKey(type, locale);
+  try {
+    const sampleContent = await storage.read(sampleKey, 'utf8');
+    // 直接复制样本内容到目标文件
+    await storage.write(targetKey, sampleContent, { contentType: 'application/json' });
+  } catch (error: any) {
+    if (error?.message?.includes('File not found') || error?.code === 'NoSuchKey') {
+      throw new Error(`样本文件不存在: ${sampleKey}`);
+    }
+    throw error;
   }
-  const sample = JSON.parse(fs.readFileSync(samplePath, 'utf-8'));
-  await saveConfig(type, locale, sample);
 }
 
 /**
- * 获取可用菜单列表（调用现有 API 或直接读取菜单文件）
- * 注意：这里为了保持独立，我们通过 fetch 调用内部 API，但 Node.js 环境需要处理。
- * 更稳妥的方式是直接读取菜单数据文件，假设菜单存储在 data/menu/{locale}.json
+ * 获取可用菜单列表（读取 data/menu/{locale}.json）
+ * @param locale 语言代码
+ * @returns 菜单项扁平列表，每个项包含 id, name, level, parentId
  */
 export async function getAvailableMenus(locale: string): Promise<{ id: string; name: string; level?: number; parentId?: string }[]> {
-  const menuFilePath = path.join(process.cwd(), 'data', 'menu', `${locale}.json`);
-  if (!fs.existsSync(menuFilePath)) return [];
-  const data = JSON.parse(fs.readFileSync(menuFilePath, 'utf-8'));
-  // 假设菜单结构为扁平列表或树形，这里返回所有菜单项（带层级）
+  const storage = getPrivateStorage();
+  const key = `data/menu/${locale}.json`;
+  let data: any[] = [];
+  try {
+    const content = await storage.read(key, 'utf8');
+    data = JSON.parse(content as string);
+  } catch (error: any) {
+    if (error?.message?.includes('File not found') || error?.code === 'NoSuchKey') {
+      return []; // 文件不存在返回空数组
+    }
+    throw error;
+  }
+
+  // 递归展开菜单树
   const flatMenus: any[] = [];
-  function flatten(items: any[], parentId = '', level = 0) {
+  function flatten(items: any[], parentId: string = '', level: number = 0) {
     for (const item of items) {
       flatMenus.push({
         id: item.id,

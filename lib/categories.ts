@@ -1,13 +1,14 @@
-import fs from 'fs/promises';
-import path from 'path';
+// lib/products/categories.ts
+import { getPrivateStorage } from '@/lib/storage/factory';
 
 /** 获取分类详情（根据 slug） */
 export async function getCategoryBySlug(locale: string, slug: string) {
   console.log('[getCategoryBySlug] locale:', locale, 'slug:', slug);
   try {
-    const filePath = path.join(process.cwd(), 'data', 'products', locale, 'categories.json');
-    const content = await fs.readFile(filePath, 'utf-8');
-    const data = JSON.parse(content);
+    const storage = getPrivateStorage();
+    const key = `data/products/${locale}/categories.json`;
+    const content = await storage.read(key, 'utf8');
+    const data = JSON.parse(content as string);
     const categories = data.categories || [];
     const category = categories.find((c: any) => c.slug === slug);
     console.log('[getCategoryBySlug] found:', category);
@@ -32,8 +33,10 @@ export async function getCategoryBySlug(locale: string, slug: string) {
 /** 获取所有分类（用于分类树） */
 export async function getAllCategories(locale: string) {
   try {
-    const filePath = path.join(process.cwd(), 'data', 'products', locale, 'categories.json');
-    const data = JSON.parse(await fs.readFile(filePath, 'utf-8'));
+    const storage = getPrivateStorage();
+    const key = `data/products/${locale}/categories.json`;
+    const content = await storage.read(key, 'utf8');
+    const data = JSON.parse(content as string);
     return {
       productLines: data.productLines || [],
       categories: data.categories || [],
@@ -50,4 +53,3 @@ export async function getFirstCategory(locale: string) {
   if (categories.length === 0) return null;
   return categories.sort((a: any, b: any) => a.order - b.order)[0];
 }
-

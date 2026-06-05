@@ -1,8 +1,5 @@
-import fs from 'fs';
-import path from 'path';
-
-const LOGS_DIR = path.join(process.cwd(), 'data', 'sync-logs');
-const LOGS_FILE = path.join(LOGS_DIR, 'logs.json');
+// lib/sync-logs/index.ts
+import { getPrivateStorage } from '@/lib/storage/factory';
 
 export interface SyncLog {
   id: string;
@@ -16,20 +13,51 @@ export interface SyncLog {
   itemId?: string;
 }
 
-export function addLog(log: SyncLog) {
-  if (!fs.existsSync(LOGS_DIR)) fs.mkdirSync(LOGS_DIR, { recursive: true });
-  let logs: SyncLog[] = [];
-  if (fs.existsSync(LOGS_FILE)) {
-    logs = JSON.parse(fs.readFileSync(LOGS_FILE, 'utf-8'));
+// 私有桶中的存储 Key
+const LOGS_KEY = 'data/sync-logs/logs.json';
+
+/**
+ * 读取所有日志（从私有桶）
+ */
+async function readLogs(): Promise<SyncLog[]> {
+  const storage = getPrivateStorage();
+  try {
+    const content = await storage.read(LOGS_KEY, 'utf8');
+    return JSON.parse(content as string);
+  } catch (error: any) {
+    if (error?.message?.includes('File not found') || error?.code === 'NoSuchKey') {
+      return [];
+    }
+    throw error;
   }
-  logs.unshift(log);
-  if (logs.length > 1000) logs = logs.slice(0, 1000);
-  fs.writeFileSync(LOGS_FILE, JSON.stringify(logs, null, 2));
 }
 
-export function getLogs(filter?: Partial<SyncLog>): SyncLog[] {
-  if (!fs.existsSync(LOGS_FILE)) return [];
-  let logs = JSON.parse(fs.readFileSync(LOGS_FILE, 'utf-8'));
+/**
+ * 写入日志数组到私有桶
+ */
+async function writeLogs(logs: SyncLog[]): Promise<void> {
+  const storage = getPrivateStorage();
+  await storage.write(LOGS_KEY, JSON.stringify(logs, null, 2), {
+    contentType: 'application/json',
+  });
+}
+
+/**
+ * 添加一条日志（自动保留最近1000条）
+ */
+export async function addLog(log: SyncLog): Promise<void> {
+  const logs = await readLogs();
+  logs.unshift(log);
+  if (logs.length > 1000) logs.length = 1000;
+  await writeLogs(logs);
+}
+
+/**
+ * 获取日志列表（支持过滤）
+ * @param filter 可选过滤条件：syncType, targetLocale, sourceLocale
+ */
+export async function getLogs(filter?: Partial<SyncLog>): Promise<SyncLog[]> {
+  let logs = await readLogs();
   if (filter) {
     logs = logs.filter(l => 
       (!filter.syncType || l.syncType === filter.syncType) &&
@@ -40,8 +68,12 @@ export function getLogs(filter?: Partial<SyncLog>): SyncLog[] {
   return logs;
 }
 
-export function clearLogsByType(syncType: string): void {
-  const logs = getLogs(); // 获取所有日志
+/**
+ * 清除指定类型的日志
+ * @param syncType 要清除的同步类型
+ */
+export async function clearLogsByType(syncType: string): Promise<void> {
+  const logs = await readLogs();
   const filtered = logs.filter(log => log.syncType !== syncType);
-  fs.writeFileSync(LOGS_FILE, JSON.stringify(filtered, null, 2));
+  await writeLogs(filtered);
 }

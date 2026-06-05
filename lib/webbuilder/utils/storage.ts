@@ -1,60 +1,91 @@
 // lib/WebBuilder/utils/storage.ts
-import fs from 'fs/promises';
-import path from 'path';
+import { getPrivateStorage } from '@/lib/storage/factory';
 
-const DATA_ROOT = path.join(process.cwd(), 'lib/WebBuilder/data/templates');
+// 私有桶中的基础前缀（对应原 lib/WebBuilder/data/templates）
+const STORAGE_PREFIX = 'data/webbuilder/templates';
 
-// 获取模板数据
+/**
+ * 获取模板 JSON 文件在私有桶中的完整 Key
+ */
+function getTemplateKey(typeId: string, templateId: string, locale: string): string {
+  return `${STORAGE_PREFIX}/${locale}/${typeId}_${templateId}.json`;
+}
+
+/**
+ * 获取模板数据（若不存在返回 null）
+ */
 export async function getTemplateData(typeId: string, templateId: string, locale: string) {
-  const filePath = path.join(DATA_ROOT, locale, `${typeId}_${templateId}.json`);
+  const storage = getPrivateStorage();
+  const key = getTemplateKey(typeId, templateId, locale);
   try {
-    const content = await fs.readFile(filePath, 'utf-8');
-    return JSON.parse(content);
-  } catch {
-    return null;
+    const content = await storage.read(key, 'utf8');
+    return JSON.parse(content as string);
+  } catch (error: any) {
+    if (error?.message?.includes('File not found') || error?.code === 'NoSuchKey') {
+      return null;
+    }
+    throw error;
   }
 }
 
-// 保存模板数据
+/**
+ * 保存模板数据（自动更新 updatedAt 字段）
+ */
 export async function saveTemplateData(typeId: string, templateId: string, locale: string, data: any) {
-  const dir = path.join(DATA_ROOT, locale);
-  await fs.mkdir(dir, { recursive: true });
-  const filePath = path.join(dir, `${typeId}_${templateId}.json`);
-  await fs.writeFile(filePath, JSON.stringify({ ...data, updatedAt: new Date().toISOString() }, null, 2));
+  const storage = getPrivateStorage();
+  const key = getTemplateKey(typeId, templateId, locale);
+  const dataToSave = { ...data, updatedAt: new Date().toISOString() };
+  await storage.write(key, JSON.stringify(dataToSave, null, 2), {
+    contentType: 'application/json',
+  });
 }
 
-// 列出某类型的所有模板
+/**
+ * 列出某类型的所有模板（按 updatedAt 降序）
+ * 注意：原实现通过 stat.mtime 获取更新时间，现改为从 JSON 内容中读取 updatedAt 字段
+ */
 export async function listTemplates(typeId: string, locale: string = 'zh') {
-  const dir = path.join(DATA_ROOT, locale);
+  const storage = getPrivateStorage();
+  const prefix = `${STORAGE_PREFIX}/${locale}/`;
   try {
-    const files = await fs.readdir(dir);
+    const keys = await storage.list(prefix);
     const pattern = new RegExp(`^${typeId}_(.+)\\.json$`);
+    const templateKeys = keys.filter(key => pattern.test(key.split('/').pop() || ''));
     const templates = await Promise.all(
-      files.filter(f => pattern.test(f)).map(async (file) => {
-        const match = file.match(pattern);
-        const id = match![1];
-        const filePath = path.join(dir, file);
-        const stat = await fs.stat(filePath);
+      templateKeys.map(async (key) => {
+        const fileName = key.split('/').pop() || '';
+        const match = fileName.match(pattern);
+        const id = match ? match[1] : '';
         let name = id;
+        let updatedAt = new Date(0);
         try {
-          const content = await fs.readFile(filePath, 'utf-8');
-          const data = JSON.parse(content);
+          const content = await storage.read(key, 'utf8');
+          const data = JSON.parse(content as string);
           name = data.root?.title || data.root?.name || id;
-        } catch {}
-        return { id, name, updatedAt: stat.mtime };
+          updatedAt = data.updatedAt ? new Date(data.updatedAt) : new Date(0);
+        } catch {
+          // 忽略读取失败
+        }
+        return { id, name, updatedAt };
       })
     );
     return templates.sort((a, b) => b.updatedAt.getTime() - a.updatedAt.getTime());
-  } catch {
-    return [];
+  } catch (error: any) {
+    if (error?.message?.includes('File not found') || error?.code === 'NoSuchKey') {
+      return [];
+    }
+    throw error;
   }
 }
 
-// 删除模板
+/**
+ * 删除模板
+ */
 export async function deleteTemplate(typeId: string, templateId: string, locale: string = 'zh') {
-  const filePath = path.join(DATA_ROOT, locale, `${typeId}_${templateId}.json`);
+  const storage = getPrivateStorage();
+  const key = getTemplateKey(typeId, templateId, locale);
   try {
-    await fs.unlink(filePath);
+    await storage.delete(key);
     return true;
   } catch (error) {
     console.error('删除失败', error);
@@ -62,7 +93,9 @@ export async function deleteTemplate(typeId: string, templateId: string, locale:
   }
 }
 
-// 获取默认模板（新建时使用）
+/**
+ * 获取默认模板（新建时使用，不涉及文件存储）
+ */
 export async function getDefaultTemplate(typeId: string) {
   return {
     content: [],

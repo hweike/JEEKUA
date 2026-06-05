@@ -1,7 +1,5 @@
-import fs from 'fs/promises';
-import path from 'path';
-
-const SETTINGS_FILE = path.join(process.cwd(), 'data/settings.json');
+// lib/siteSettings.ts
+import { getPrivateStorage } from '@/lib/storage/factory';
 
 const defaultSettings = {
   site_name: '飞斯曼工业',
@@ -13,23 +11,22 @@ const defaultSettings = {
   default_og_image: '/og-default.jpg',
 };
 
-// export async function getSiteSettings() {
-//   try {
-//     const data = await fs.readFile(SETTINGS_FILE, 'utf-8');
-//     return { ...defaultSettings, ...JSON.parse(data) };
-//   } catch {
-//     return defaultSettings;
-//   }
-// }
-
-// lib/siteSettings.ts
-// 这是一个临时模拟文件，用于绕过模块解析错误
+/**
+ * 获取站点设置（从私有桶读取 data/settings.json）
+ */
 export async function getSiteSettings() {
-  return {
-    site_name: '我的网站',
-    site_brand_name: 'MyBrand',
-    site_currency: 'USD',
-    default_shipping_rate: 0,
-    return_policy_days: 30,
-  };
+  const storage = getPrivateStorage();
+  const key = 'data/settings.json';
+  try {
+    const content = await storage.read(key, 'utf8');
+    const parsed = JSON.parse(content as string);
+    return { ...defaultSettings, ...parsed };
+  } catch (error: any) {
+    // 文件不存在或读取失败，返回默认设置
+    if (error?.message?.includes('File not found') || error?.code === 'NoSuchKey') {
+      return defaultSettings;
+    }
+    console.error('读取站点设置失败:', error);
+    return defaultSettings;
+  }
 }

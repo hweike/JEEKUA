@@ -1,41 +1,78 @@
 // lib/crawler/core/buffer.ts
-import fs from 'fs/promises';
-import path from 'path';
-import { TASKS_DIR } from '../types';
+import { getPrivateStorage } from '@/lib/storage/factory';
 
 const BATCH_SIZE = 50;
 let pendingProducts: any[] = [];
 let batchTimer: NodeJS.Timeout | null = null;
 
-// 辅助函数：生成产品的唯一标识
+/**
+ * 获取指定任务的 products.json 在私有桶中的完整 key
+ */
+function getTaskProductsKey(taskId: string): string {
+  return `data/crawler/tasks/${taskId}/products.json`;
+}
+
+/**
+ * 读取指定任务的 products.json 文件
+ */
+async function readProducts(taskId: string): Promise<any[]> {
+  const storage = getPrivateStorage();
+  const key = getTaskProductsKey(taskId);
+  try {
+    const content = await storage.read(key, 'utf8');
+    return JSON.parse(content as string);
+  } catch (error: any) {
+    // 文件不存在 -> 返回空数组
+    if (error?.message?.includes('File not found') || error?.code === 'NoSuchKey') {
+      return [];
+    }
+    console.error(`读取 products.json 失败 [${taskId}]:`, error);
+    throw error;
+  }
+}
+
+/**
+ * 写入 products.json 到私有桶
+ */
+async function writeProducts(taskId: string, products: any[]): Promise<void> {
+  const storage = getPrivateStorage();
+  const key = getTaskProductsKey(taskId);
+  await storage.write(key, JSON.stringify(products, null, 2), {
+    contentType: 'application/json',
+  });
+}
+
+/**
+ * 生成产品的唯一标识（用于去重）
+ */
 function getProductKey(product: any): string {
-  // 优先使用 model，如果没有则使用 name 或 seriesId
   const identifier = product.model || product.name || product.seriesId;
   return `${product.categoryId}-${identifier}`;
 }
 
-// 检查产品是否已存在于 pending 或已持久化的列表中
+/**
+ * 检查产品是否已存在于 pending 或已持久化的列表中
+ */
 async function isProductDuplicate(taskId: string, product: any): Promise<boolean> {
   const key = getProductKey(product);
-  // 检查 pendingProducts
+
+  // 1. 检查 pendingProducts（全局，不区分 taskId，与原逻辑一致）
   if (pendingProducts.some(p => getProductKey(p.rawData) === key)) {
     return true;
   }
-  // 检查已持久化的 products.json
-  const taskDir = path.join(TASKS_DIR, taskId);
-  const productsPath = path.join(taskDir, 'products.json');
-  try {
-    const content = await fs.readFile(productsPath, 'utf-8');
-    const existingProducts = JSON.parse(content);
-    if (existingProducts.some((p: any) => getProductKey(p.rawData) === key)) {
-      return true;
-    }
-  } catch {
-    // 文件不存在或解析失败，忽略
+
+  // 2. 检查已持久化的 products.json
+  const existingProducts = await readProducts(taskId);
+  if (existingProducts.some((p: any) => getProductKey(p.rawData) === key)) {
+    return true;
   }
+
   return false;
 }
 
+/**
+ * 添加产品到缓冲区（带去重）
+ */
 export async function addProduct(taskId: string, product: any) {
   // 去重检查
   if (await isProductDuplicate(taskId, product)) {
@@ -61,19 +98,21 @@ export async function addProduct(taskId: string, product: any) {
   }
 }
 
-// flushProducts 函数保持不变
+/**
+ * 将缓冲区中的所有产品持久化到私有桶
+ */
 export async function flushProducts(taskId: string) {
   if (pendingProducts.length === 0) return;
-  const taskDir = path.join(TASKS_DIR, taskId);
-  const productsPath = path.join(taskDir, 'products.json');
-  let existingProducts: any[] = [];
-  try {
-    const content = await fs.readFile(productsPath, 'utf-8');
-    existingProducts = JSON.parse(content);
-  } catch {}
+
+  // 读取现有产品
+  let existingProducts: any[] = await readProducts(taskId);
+
+  // 追加所有待写入产品（保留原 bug：未按 taskId 筛选，直接全部追加）
   existingProducts.push(...pendingProducts);
-  const tempPath = productsPath + '.tmp';
-  await fs.writeFile(tempPath, JSON.stringify(existingProducts, null, 2));
-  await fs.rename(tempPath, productsPath);
+
+  // 写入私有桶（覆盖写）
+  await writeProducts(taskId, existingProducts);
+
+  // 清空缓冲区
   pendingProducts = [];
 }
