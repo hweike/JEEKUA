@@ -38,7 +38,7 @@ export async function POST(request: NextRequest) {
       console.log(`自动生成变体 SKU: ${sku} (父产品ID: ${parentId})`);
     }
 
-    // 构建要存储的变体对象（不包含品牌字段）
+    // 构建要存储的变体对象
     const newVariant = {
       id: variantData.id || (variantIndex !== undefined && variants[variantIndex]?.id) || undefined,
       product_name: variantName,
@@ -72,16 +72,11 @@ export async function POST(request: NextRequest) {
     parentProduct.variants = variants;
     await writeProduct(locale, parentId, parentProduct, parentProduct.content || '');
 
-    // 更新索引中的变体摘要（只保留关键信息）
-    const existingIndex = getProductIndex(parentId);
+    // 更新父产品索引的更新时间（变体列表只存储在 MD 文件中，索引不存储 variants 字段）
+    const existingIndex = await getProductIndex(parentId);
     if (existingIndex) {
-      upsertProductIndex({
+      await upsertProductIndex({
         ...existingIndex,
-        variants: variants.map((v: any) => ({
-          sku: v.sku,
-          name: v.product_name,
-          mainImage: v.main_image_url,
-        })),
         updatedAt: new Date().toISOString(),
       });
     }
@@ -127,15 +122,12 @@ export async function DELETE(request: NextRequest) {
   variants.splice(idx, 1);
   parentProduct.variants = variants;
   await writeProduct(locale, parentId, parentProduct, parentProduct.content || '');
-  const existingIndex = getProductIndex(parentId);
+
+  // 更新父产品索引的更新时间
+  const existingIndex = await getProductIndex(parentId);
   if (existingIndex) {
-    upsertProductIndex({
+    await upsertProductIndex({
       ...existingIndex,
-      variants: variants.map((v: any) => ({
-        sku: v.sku,
-        name: v.product_name,
-        mainImage: v.main_image_url,
-      })),
       updatedAt: new Date().toISOString(),
     });
   }

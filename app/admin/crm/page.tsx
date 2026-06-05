@@ -24,10 +24,12 @@ export default function CRMListPage() {
       const res = await fetch('/api/admin/crm');
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = await res.json();
-      setCustomers(data);
+      // 确保 data 是数组，防止后续 slice 报错
+      setCustomers(Array.isArray(data) ? data : []);
     } catch (err) {
       console.error('加载客户列表失败:', err);
       alert('加载失败，请刷新页面重试');
+      setCustomers([]); // 失败时置为空数组
     } finally {
       setLoading(false);
     }
@@ -35,11 +37,13 @@ export default function CRMListPage() {
 
   // 搜索过滤
   useEffect(() => {
+    // 确保 customers 是数组
+    const customersArray = Array.isArray(customers) ? customers : [];
     if (!searchTerm.trim()) {
-      setFilteredCustomers(customers);
+      setFilteredCustomers(customersArray);
     } else {
       const term = searchTerm.toLowerCase();
-      const filtered = customers.filter(c =>
+      const filtered = customersArray.filter(c =>
         c.name?.toLowerCase().includes(term) ||
         c.companyName?.toLowerCase().includes(term) ||
         c.email?.toLowerCase().includes(term) ||
@@ -95,8 +99,10 @@ export default function CRMListPage() {
     setEditValue('');
   };
 
-  const totalPages = Math.ceil(filteredCustomers.length / pageSize);
-  const paginatedCustomers = filteredCustomers.slice((currentPage - 1) * pageSize, currentPage * pageSize);
+  // 确保 filteredCustomers 是数组再调用 slice
+  const safeFilteredCustomers = Array.isArray(filteredCustomers) ? filteredCustomers : [];
+  const totalPages = Math.ceil(safeFilteredCustomers.length / pageSize);
+  const paginatedCustomers = safeFilteredCustomers.slice((currentPage - 1) * pageSize, currentPage * pageSize);
 
   // 星星渲染组件
   const renderStars = (importance: number, isEditing: boolean, onChange?: (val: number) => void) => {

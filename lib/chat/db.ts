@@ -1,38 +1,11 @@
-// lib/chat/db.ts
-import Database from 'better-sqlite3';
-import path from 'path';
-import fs from 'fs';
+import { supabase } from '@/lib/supabase/client';
 
-const dataDir = path.join(process.cwd(), 'data', 'chat');
-if (!fs.existsSync(dataDir)) fs.mkdirSync(dataDir, { recursive: true });
-
-const dbPath = path.join(dataDir, 'chat.db');
-const db = new Database(dbPath);
-
-// 初始化表结构
-db.exec(`
-  CREATE TABLE IF NOT EXISTS conversations (
-    id TEXT PRIMARY KEY,
-    contact TEXT NOT NULL,
-    created_at INTEGER NOT NULL
-  );
-
-  CREATE TABLE IF NOT EXISTS messages (
-    id TEXT PRIMARY KEY,
-    conversation_id TEXT NOT NULL,
-    content TEXT NOT NULL,
-    is_admin INTEGER NOT NULL DEFAULT 0,
-    created_at INTEGER NOT NULL,
-    FOREIGN KEY (conversation_id) REFERENCES conversations(id) ON DELETE CASCADE
-  );
-
-  CREATE INDEX IF NOT EXISTS idx_conversations_contact ON conversations(contact);
-  CREATE INDEX IF NOT EXISTS idx_messages_conversation ON messages(conversation_id);
-`);
+const DEFAULT_SITE_ID = process.env.NEXT_PUBLIC_SITE_ID || '000001';
 
 // 类型定义
 export interface Conversation {
   id: string;
+  site_id: string;
   contact: string;
   created_at: number;
 }
@@ -46,46 +19,104 @@ export interface Message {
 }
 
 // 根据联系方式获取会话
-export function getConversationByContact(contact: string): Conversation | undefined {
-  const stmt = db.prepare('SELECT * FROM conversations WHERE contact = ? ORDER BY created_at DESC LIMIT 1');
-  return stmt.get(contact) as Conversation | undefined;
+export async function getConversationByContact(contact: string): Promise<Conversation | undefined> {
+  const { data, error } = await supabase
+    .from('conversations')
+    .select('*')
+    .eq('site_id', DEFAULT_SITE_ID)
+    .eq('contact', contact)
+    .order('created_at', { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (error) throw new Error(`getConversationByContact failed: ${error.message}`);
+  return data || undefined;
 }
 
 // 创建新会话
-export function createConversation(contact: string, id?: string): Conversation {
+export async function createConversation(contact: string, id?: string): Promise<Conversation> {
   const convId = id || crypto.randomUUID();
   const now = Date.now();
-  const stmt = db.prepare('INSERT INTO conversations (id, contact, created_at) VALUES (?, ?, ?)');
-  stmt.run(convId, contact, now);
-  return { id: convId, contact, created_at: now };
+  const { data, error } = await supabase
+    .from('conversations')
+    .insert({
+      id: convId,
+      site_id: DEFAULT_SITE_ID,
+      contact,
+      created_at: now,
+    })
+    .select()
+    .single();
+  if (error) throw new Error(`createConversation failed: ${error.message}`);
+  return data as Conversation;
 }
 
 // 获取会话的所有消息
-export function getMessages(conversationId: string): Message[] {
-  const stmt = db.prepare('SELECT * FROM messages WHERE conversation_id = ? ORDER BY created_at ASC');
-  return stmt.all(conversationId) as Message[];
+export async function getMessages(conversationId: string): Promise<Message[]> {
+  const { data, error } = await supabase
+    .from('messages')
+    .select('*')
+    .eq('conversation_id', conversationId)
+    .order('created_at', { ascending: true });
+  if (error) throw new Error(`getMessages failed: ${error.message}`);
+  return (data || []).map(item => ({
+    id: item.id,
+    conversation_id: item.conversation_id,
+    content: item.content,
+    is_admin: item.is_admin === 1,
+    created_at: item.created_at,
+  }));
 }
 
 // 添加消息
-export function addMessage(conversationId: string, content: string, isAdmin: boolean): Message {
+export async function addMessage(conversationId: string, content: string, isAdmin: boolean): Promise<Message> {
   const id = crypto.randomUUID();
   const now = Date.now();
-  const stmt = db.prepare('INSERT INTO messages (id, conversation_id, content, is_admin, created_at) VALUES (?, ?, ?, ?, ?)');
-  stmt.run(id, conversationId, content, isAdmin ? 1 : 0, now);
-  return { id, conversation_id: conversationId, content, is_admin: isAdmin, created_at: now };
+  const { data, error } = await supabase
+    .from('messages')
+    .insert({
+      id,
+      conversation_id: conversationId,
+      content,
+      is_admin: isAdmin ? 1 : 0,
+      created_at: now,
+    })
+    .select()
+    .single();
+  if (error) throw new Error(`addMessage failed: ${error.message}`);
+  return {
+    id: data.id,
+    conversation_id: data.conversation_id,
+    content: data.content,
+    is_admin: data.is_admin === 1,
+    created_at: data.created_at,
+  };
 }
 
 // 获取所有会话（按最近消息时间排序，用于后台）
-export function getAllConversations(): (Conversation & { last_message_at: number; last_message_preview: string })[] {
-  const stmt = db.prepare(`
-    SELECT 
-      c.id, c.contact, c.created_at,
-      MAX(m.created_at) as last_message_at,
-      (SELECT content FROM messages WHERE conversation_id = c.id ORDER BY created_at DESC LIMIT 1) as last_message_preview
-    FROM conversations c
-    LEFT JOIN messages m ON c.id = m.conversation_id
-    GROUP BY c.id
-    ORDER BY last_message_at DESC
-  `);
-  return stmt.all() as any;
+export async function getAllConversations(): Promise<(Conversation & { last_message_at: number; last_message_preview: string })[]> {
+  const { data: convs, error: convError } = await supabase
+    .from('conversations')
+    .select('*')
+    .eq('site_id', DEFAULT_SITE_ID)
+    .order('created_at', { ascending: false });
+  if (convError) throw new Error(`getAllConversations convError: ${convError.message}`);
+
+  const result = [];
+  for (const conv of convs || []) {
+    const { data: lastMsg, error: msgError } = await supabase
+      .from('messages')
+      .select('content, created_at')
+      .eq('conversation_id', conv.id)
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    if (msgError) console.error(`获取会话 ${conv.id} 最后消息失败:`, msgError);
+    result.push({
+      ...conv,
+      last_message_at: lastMsg?.created_at || conv.created_at,
+      last_message_preview: lastMsg?.content?.slice(0, 50) || '',
+    });
+  }
+  result.sort((a, b) => b.last_message_at - a.last_message_at);
+  return result;
 }

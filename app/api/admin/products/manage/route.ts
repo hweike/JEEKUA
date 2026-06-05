@@ -9,13 +9,17 @@ import {
   getChildrenProducts,
   getProductLineIdFromCategory,
   searchAllProducts,
+  getAllProductIds as getAllProductIdsFromIndex,
 } from '@/lib/products/indexDb';
 import { getProductSettings } from '@/lib/products/productSettings';
 import { generateSlug, generateSeoTitle, generateSeoDescription } from '@/lib/products/seoGenerator';
 import { generateUniqueProductId } from '@/lib/utils/idGenerator';
 import fs from 'fs';
 import path from 'path';
-import { getDb } from '@/lib/db';
+import { supabase } from '@/lib/supabase/client';
+
+// ✅ 固定站点 ID（按修改意见）
+const DEFAULT_SITE_ID = '000001';
 
 // ==================== 辅助函数 ====================
 async function getSiteSettings() {
@@ -63,9 +67,7 @@ function processMpn(defaultMpn: string, sku: string): string {
 }
 
 async function getAllProductIds(locale: string): Promise<string[]> {
-  const db = getDb();
-  const rows = db.prepare(`SELECT productId FROM products WHERE locale = ?`).all(locale) as any[];
-  return rows.map(row => row.productId);
+  return getAllProductIdsFromIndex(locale);
 }
 
 async function updateParentVariants(locale: string, parentId: string, variants: any[]) {
@@ -75,9 +77,7 @@ async function updateParentVariants(locale: string, parentId: string, variants: 
   await writeProduct(locale, parentId, updated, parentMd.content || '');
 }
 
-// 根据基本设置中的规则生成 SKU
 function generateSkuFromRule(rule: string): string {
-  // 生成8位随机数字（范围 10000000 到 99999999）
   const randomNum = Math.floor(10000000 + Math.random() * 90000000);
   return rule.replace(/\{timestamp\}/g, randomNum.toString());
 }
@@ -98,36 +98,40 @@ export async function GET(request: NextRequest) {
     const uncategorized = searchParams.get('uncategorized') === 'true';
 
     if (uncategorized) {
-      const db = getDb();
-      let sql = `SELECT * FROM products WHERE locale = ? AND categoryId = '__UNCATEGORIZED__' AND (parent_product_id IS NULL OR parent_product_id = '')`;
-      const params: any[] = [locale];
+      // 直接从 Supabase 查询未分类产品
+      let query = supabase
+        .from('products')
+        .select('*', { count: 'exact' })
+        .eq('site_id', DEFAULT_SITE_ID)
+        .eq('locale', locale)
+        .eq('categoryId', '__UNCATEGORIZED__')
+        .or('parent_product_id.is.null,parent_product_id.eq.');
       if (status !== 'all') {
-        sql += ` AND status = ?`;
-        params.push(status);
+        query = query.eq('status', status);
       }
       if (keyword) {
-        sql += ` AND (product_name LIKE ? OR sku LIKE ?)`;
-        params.push(`%${keyword}%`, `%${keyword}%`);
+        query = query.or(`product_name.ilike.%${keyword}%,sku.ilike.%${keyword}%`);
       }
-      const countSql = sql.replace('SELECT *', 'SELECT COUNT(*) as total');
-      const totalRow = db.prepare(countSql).get(params) as any;
-      const total = totalRow?.total || 0;
-      sql += ` ORDER BY updatedAt DESC LIMIT ? OFFSET ?`;
-      params.push(size, (page - 1) * size);
-      const items = db.prepare(sql).all(params) as any[];
-      const statusCount = getProductStatusCount(locale);
-      return NextResponse.json({ items, total, statusCount, page, size });
+      const from = (page - 1) * size;
+      const to = from + size - 1;
+      const { data, error, count } = await query
+        .order('updatedAt', { ascending: false })
+        .range(from, to);
+      if (error) throw new Error(`uncategorized query failed: ${error.message}`);
+      const items = data || [];
+      const statusCount = await getProductStatusCount(locale);
+      return NextResponse.json({ items, total: count || 0, statusCount, page, size });
     }
 
     const searchAll = searchParams.get('searchAll') === 'true';
     if (searchAll) {
-      const { items, total } = searchAllProducts(locale, keyword, categoryId, seriesId, page, size);
-      const statusCount = getProductStatusCount(locale);
+      const { items, total } = await searchAllProducts(locale, keyword, categoryId, seriesId, page, size);
+      const statusCount = await getProductStatusCount(locale);
       return NextResponse.json({ items, total, statusCount, page, size });
     }
 
     if (productId) {
-      const index = getProductIndex(productId);
+      const index = await getProductIndex(productId);
       if (index?.parent_product_id) {
         const parentMd = await readProduct(locale, index.parent_product_id);
         const variant = parentMd?.variants?.find((v: any) => v.id === productId);
@@ -139,12 +143,12 @@ export async function GET(request: NextRequest) {
     }
 
     if (parentId) {
-      const children = getChildrenProducts(parentId);
+      const children = await getChildrenProducts(parentId);
       return NextResponse.json(children);
     }
 
-    const statusCount = getProductStatusCount(locale);
-    const { items, total } = searchProducts(
+    const statusCount = await getProductStatusCount(locale);
+    const { items, total } = await searchProducts(
       locale,
       status === 'all' ? undefined : status,
       keyword,
@@ -167,7 +171,6 @@ export async function POST(request: NextRequest) {
     const locale = body.locale || 'zh';
     const isVariant = !!body.parent_product_id;
 
-    // 加载系统设置，用于获取 SKU 生成规则
     const productSettings = await getProductSettings(locale);
     const defaultSettings = (productSettings as any).defaultSettings || {};
     const skuRule = defaultSettings.sku_rule ?? 'P-{timestamp}';
@@ -180,10 +183,8 @@ export async function POST(request: NextRequest) {
       const existingIds = await getAllProductIds(locale);
       const variantId = await generateUniqueProductId(async () => existingIds);
 
-      // 处理 SKU：若前端未传则根据规则生成
       let sku = body.sku?.trim();
       if (!sku) {
-        // 使用非空断言：skuRule 不会为 null/undefined（因为有默认值）
         sku = generateSkuFromRule(skuRule!);
       }
 
@@ -206,19 +207,19 @@ export async function POST(request: NextRequest) {
       await updateParentVariants(locale, parentId, variants);
 
       const now = new Date().toISOString();
-      upsertProductIndex({
+      await upsertProductIndex({
         productId: variantId,
         locale,
-        productLineId: parentMd.productLineId,
-        categoryId: parentMd.categoryId,
-        seriesId: parentMd.seriesId || null,
+        productLineId: parentMd.productLineId || '',
+        categoryId: parentMd.categoryId || '',
+        seriesId: parentMd.seriesId || '',
         parent_product_id: parentId,
         sku: sku,
         product_name: body.product_name,
-        brand: parentMd.brand,
+        brand: parentMd.brand || '',
         price_tiers: [],
-        currency: parentMd.currency,
-        availability: 'in_stock',
+        currency: parentMd.currency || 'USD',
+        availability: parentMd.availability || 'in_stock',
         min_order_quantity: 1,
         main_image_url: body.main_image_url || '',
         attributes: body.attributes || {},
@@ -245,7 +246,6 @@ export async function POST(request: NextRequest) {
     const existingIds = await getAllProductIds(locale);
     const productId = await generateUniqueProductId(async () => existingIds);
 
-    // 处理 SKU：若前端未传则根据规则生成
     let sku = body.sku?.trim();
     if (!sku) {
       sku = generateSkuFromRule(skuRule!);
@@ -321,12 +321,12 @@ export async function POST(request: NextRequest) {
     await writeProduct(locale, productId, frontMatter, body.content || '');
 
     const now = new Date().toISOString();
-    upsertProductIndex({
+    await upsertProductIndex({
       productId,
       locale,
-      productLineId,
+      productLineId: productLineId || '',
       categoryId,
-      seriesId: seriesId || null,
+      seriesId: seriesId || '',
       parent_product_id: body.parent_product_id || null,
       sku,
       product_name: body.product_name,
@@ -360,10 +360,9 @@ export async function PUT(request: NextRequest) {
     const body = await request.json();
     const locale = body.locale || 'zh';
 
-    const existingIndex = getProductIndex(productId);
+    const existingIndex = await getProductIndex(productId);
     const isVariant = existingIndex?.parent_product_id && existingIndex.parent_product_id !== '';
 
-    // 加载系统设置，用于获取 SKU 生成规则（仅在需要生成新 SKU 时使用）
     const productSettings = await getProductSettings(locale);
     const defaultSettings = (productSettings as any).defaultSettings || {};
     const skuRule = defaultSettings.sku_rule ?? 'P-{timestamp}';
@@ -377,7 +376,6 @@ export async function PUT(request: NextRequest) {
       const variantIndex = variants.findIndex((v: any) => v.id === productId);
       if (variantIndex === -1) return NextResponse.json({ error: '变体不存在' }, { status: 404 });
 
-      // 处理 SKU：若前端传了非空新值则使用，否则保留原 SKU（若原 SKU 为空则根据规则生成）
       let sku = body.sku?.trim();
       if (!sku) {
         if (!variants[variantIndex].sku) {
@@ -404,8 +402,8 @@ export async function PUT(request: NextRequest) {
       await updateParentVariants(locale, parentId, variants);
 
       const now = new Date().toISOString();
-      upsertProductIndex({
-        ...existingIndex!,
+      await upsertProductIndex({
+        ...existingIndex,
         sku: sku,
         product_name: body.product_name,
         main_image_url: body.main_image_url || '',
@@ -437,7 +435,6 @@ export async function PUT(request: NextRequest) {
       updatedAt: new Date().toISOString(),
     };
 
-    // 处理 SKU：若前端未传或为空，则保留原有 SKU（如果原有也为空则根据规则生成）
     let sku = body.sku?.trim();
     if (!sku) {
       if (!final.sku) {
@@ -526,12 +523,12 @@ export async function PUT(request: NextRequest) {
     await writeProduct(locale, productId, orderedFinal, body.content || existingMd.content || '');
 
     const now = new Date().toISOString();
-    upsertProductIndex({
+    await upsertProductIndex({
       productId,
       locale,
-      productLineId,
+      productLineId: productLineId || '',
       categoryId,
-      seriesId: seriesId || null,
+      seriesId: seriesId || '',
       parent_product_id: final.parent_product_id || null,
       sku: final.sku,
       product_name: final.product_name,
@@ -565,7 +562,23 @@ export async function DELETE(request: NextRequest) {
     const productId = searchParams.get('productId');
     const locale = searchParams.get('locale') || 'zh';
     if (!productId) return NextResponse.json({ error: 'productId required' }, { status: 400 });
-    
+
+    // 1. 查询并删除所有变体（子产品）
+    const { data: variants, error: variantsError } = await supabase
+      .from('products')
+      .select('productId')
+      .eq('site_id', DEFAULT_SITE_ID)
+      .eq('parent_product_id', productId);
+    if (variantsError) {
+      console.error('查询变体失败:', variantsError);
+    } else if (variants && variants.length > 0) {
+      for (const variant of variants) {
+        await deleteProductIndex(variant.productId);
+        console.log(`已删除变体索引: ${variant.productId}`);
+      }
+    }
+
+    // 2. 删除父产品的物理 MD 文件
     const filePath = path.join(process.cwd(), 'data', 'products', locale, 'products', `${productId}.md`);
     let fileDeleted = false;
     try {
@@ -580,26 +593,34 @@ export async function DELETE(request: NextRequest) {
       console.error(`删除产品文件失败: ${filePath}`, err);
     }
 
+    // 3. 调用原有的 deleteProduct（兼容）
     try {
       await deleteProduct(locale, productId);
     } catch (err: any) {
       console.warn(`deleteProduct 调用失败（可忽略）: ${err.message}`);
     }
-    
+
+    // 4. 删除父产品索引
     try {
-      deleteProductIndex(productId);
+      await deleteProductIndex(productId);
     } catch (err: any) {
       console.error(`删除产品索引失败: ${productId}`, err);
       return NextResponse.json({ error: `删除索引失败: ${err.message}` }, { status: 500 });
     }
-    
+
+    // 5. 删除产品与资源的关联记录
     try {
-      const db = getDb();
-      db.prepare(`DELETE FROM resource_product WHERE product_id = ?`).run(productId);
+      const { error: resourceError } = await supabase
+        .from('resource_product')
+        .delete()
+        .eq('product_id', productId);
+      if (resourceError) {
+        console.error(`删除产品关联资源失败: ${productId}`, resourceError);
+      }
     } catch (err: any) {
       console.error(`删除产品关联资源失败: ${productId}`, err);
     }
-    
+
     return NextResponse.json({ success: true, fileDeleted });
   } catch (error) {
     console.error('DELETE /products/manage error:', error);

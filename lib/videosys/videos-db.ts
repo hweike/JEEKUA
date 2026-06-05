@@ -1,94 +1,128 @@
-import { getDb } from '@/lib/db';
+import { supabase } from '@/lib/supabase/client';
 import { VideoIndex } from './types';
 
-export function insertVideo(video: VideoIndex): void {
-  const db = getDb();
-  const stmt = db.prepare(`
-    INSERT INTO videos (
-      id, locale, title, slug, category_key, source_type, video_url, video_id,
-      thumbnail, duration, visible, flagged, template, seo_keywords, seo_title,
-      seo_description, order_index, published_at, updated_at, created_at, tags
-    ) VALUES (
-      @id, @locale, @title, @slug, @category_key, @source_type, @video_url, @video_id,
-      @thumbnail, @duration, @visible, @flagged, @template, @seo_keywords, @seo_title,
-      @seo_description, @order_index, @published_at, @updated_at, @created_at, @tags
-    )
-  `);
-  stmt.run(video);
+const DEFAULT_SITE_ID = process.env.NEXT_PUBLIC_SITE_ID || '000001';
+
+export async function insertVideo(video: VideoIndex): Promise<void> {
+  const { error } = await supabase
+    .from('videos')
+    .insert({
+      site_id: DEFAULT_SITE_ID,
+      id: video.id,
+      locale: video.locale,
+      title: video.title,
+      slug: video.slug,
+      category_key: video.category_key,
+      source_type: video.source_type,
+      video_url: video.video_url,
+      video_id: video.video_id,
+      thumbnail: video.thumbnail,
+      duration: video.duration,
+      visible: video.visible ? 1 : 0,
+      flagged: video.flagged ? 1 : 0,
+      template: video.template,
+      seo_keywords: video.seo_keywords,
+      seo_title: video.seo_title,
+      seo_description: video.seo_description,
+      order_index: video.order_index,
+      published_at: video.published_at,
+      updated_at: video.updated_at,
+      created_at: video.created_at,
+      tags: video.tags,
+    });
+  if (error) throw new Error(`insertVideo failed: ${error.message}`);
 }
 
-export function updateVideo(video: VideoIndex): void {
-  const db = getDb();
-  const stmt = db.prepare(`
-    UPDATE videos SET
-      title = @title,
-      slug = @slug,
-      category_key = @category_key,
-      source_type = @source_type,
-      video_url = @video_url,
-      video_id = @video_id,
-      thumbnail = @thumbnail,
-      duration = @duration,
-      visible = @visible,
-      flagged = @flagged,
-      template = @template,
-      seo_keywords = @seo_keywords,
-      seo_title = @seo_title,
-      seo_description = @seo_description,
-      order_index = @order_index,
-      updated_at = @updated_at,
-      tags = @tags
-    WHERE id = @id AND locale = @locale
-  `);
-  stmt.run(video);
+export async function updateVideo(video: VideoIndex): Promise<void> {
+  const { error } = await supabase
+    .from('videos')
+    .update({
+      title: video.title,
+      slug: video.slug,
+      category_key: video.category_key,
+      source_type: video.source_type,
+      video_url: video.video_url,
+      video_id: video.video_id,
+      thumbnail: video.thumbnail,
+      duration: video.duration,
+      visible: video.visible ? 1 : 0,
+      flagged: video.flagged ? 1 : 0,
+      template: video.template,
+      seo_keywords: video.seo_keywords,
+      seo_title: video.seo_title,
+      seo_description: video.seo_description,
+      order_index: video.order_index,
+      updated_at: video.updated_at,
+      tags: video.tags,
+    })
+    .eq('site_id', DEFAULT_SITE_ID)
+    .eq('id', video.id)
+    .eq('locale', video.locale);
+  if (error) throw new Error(`updateVideo failed: ${error.message}`);
 }
 
-export function deleteVideo(id: string, locale: string): void {
-  const db = getDb();
-  const stmt = db.prepare(`DELETE FROM videos WHERE id = ? AND locale = ?`);
-  stmt.run(id, locale);
+export async function deleteVideo(id: string, locale: string): Promise<void> {
+  const { error } = await supabase
+    .from('videos')
+    .delete()
+    .eq('site_id', DEFAULT_SITE_ID)
+    .eq('id', id)
+    .eq('locale', locale);
+  if (error) throw new Error(`deleteVideo failed: ${error.message}`);
 }
 
-export function getVideoById(id: string, locale: string): VideoIndex | undefined {
-  const db = getDb();
-  const stmt = db.prepare(`SELECT * FROM videos WHERE id = ? AND locale = ?`);
-  return stmt.get(id, locale) as VideoIndex | undefined;
+export async function getVideoById(id: string, locale: string): Promise<VideoIndex | undefined> {
+  const { data, error } = await supabase
+    .from('videos')
+    .select('*')
+    .eq('site_id', DEFAULT_SITE_ID)
+    .eq('id', id)
+    .eq('locale', locale)
+    .maybeSingle();
+  if (error) throw new Error(`getVideoById failed: ${error.message}`);
+  if (!data) return undefined;
+  return {
+    ...data,
+    visible: data.visible === 1,
+    flagged: data.flagged === 1,
+  } as VideoIndex;
 }
 
-export function listVideos(params: {
+export async function listVideos(params: {
   locale: string;
   title?: string;
   category?: string;
   visible?: boolean;
   page?: number;
   limit?: number;
-}): { items: VideoIndex[]; total: number } {
-  const db = getDb();
+}): Promise<{ items: VideoIndex[]; total: number }> {
   const { locale, title, category, visible = true, page = 1, limit = 20 } = params;
-  let sql = `SELECT * FROM videos WHERE locale = ? AND visible = ?`;
-  const values: any[] = [locale, visible ? 1 : 0];
+  let query = supabase
+    .from('videos')
+    .select('*', { count: 'exact' })
+    .eq('site_id', DEFAULT_SITE_ID)
+    .eq('locale', locale)
+    .eq('visible', visible ? 1 : 0);
+
   if (title) {
-    sql += ` AND title LIKE ?`;
-    values.push(`%${title}%`);
+    query = query.ilike('title', `%${title}%`);
   }
   if (category) {
-    sql += ` AND category_key = ?`;
-    values.push(category);
+    query = query.eq('category_key', category);
   }
-  sql += ` ORDER BY order_index ASC, published_at DESC LIMIT ? OFFSET ?`;
-  values.push(limit, (page - 1) * limit);
-  const items = db.prepare(sql).all(...values) as VideoIndex[];
-  // 获取总数
-  let countSql = `SELECT COUNT(*) as total FROM videos WHERE locale = ? AND visible = ?`;
-  const countValues: any[] = [locale, visible ? 1 : 0];
-  if (title) {
-    countSql += ` AND title LIKE ?`;
-    countValues.push(`%${title}%`);
-  }
-  if (category) {
-    countSql += ` AND category_key = ?`;
-    countValues.push(category);
-  }
-  const total = db.prepare(countSql).get(...countValues) as { total: number };
-  return { items, total: total.total };
+
+  const from = (page - 1) * limit;
+  const to = from + limit - 1;
+  const { data, error, count } = await query
+    .order('order_index', { ascending: true })
+    .order('published_at', { ascending: false })
+    .range(from, to);
+
+  if (error) throw new Error(`listVideos failed: ${error.message}`);
+  const items = (data || []).map(item => ({
+    ...item,
+    visible: item.visible === 1,
+    flagged: item.flagged === 1,
+  })) as VideoIndex[];
+  return { items, total: count || 0 };
 }

@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getDb } from '@/lib/db';
+import { supabase } from '@/lib/supabase/client';
 
-const SITE_ID = '000001';
+const SITE_ID = process.env.NEXT_PUBLIC_SITE_ID || '000001';
 
 // 定义页面类型到显示名称和父级分组映射
 const typeConfig: Record<string, { groupLabel: string; groupKey: string; leaf?: boolean }> = {
@@ -21,7 +21,7 @@ const typeConfig: Record<string, { groupLabel: string; groupKey: string; leaf?: 
   policy: { groupLabel: '政策', groupKey: 'policy' },
 };
 
-// 定义分组顺序（可选，影响返回顺序）
+// 定义分组顺序
 const groupOrder = [
   'home',
   'productLine',
@@ -43,23 +43,24 @@ export async function GET(req: NextRequest) {
   const searchParams = req.nextUrl.searchParams;
   const locale = searchParams.get('locale') || 'zh';
 
-  const db = getDb();
-  const rows = db.prepare(`
-    SELECT id, title, url, type
-    FROM pages
-    WHERE site_id = ? AND locale = ?
-    ORDER BY type, title
-  `).all(SITE_ID, locale) as Array<{
-    id: string;
-    title: string;
-    url: string;
-    type: string;
-  }>;
+  // 从 Supabase 查询页面数据
+  const { data: rows, error } = await supabase
+    .from('pages')
+    .select('id, title, url, type')
+    .eq('site_id', SITE_ID)
+    .eq('locale', locale)
+    .order('type', { ascending: true })
+    .order('title', { ascending: true });
+
+  if (error) {
+    console.error('GET /api/discovery/link-tree error:', error);
+    return NextResponse.json({ error: 'Failed to fetch pages' }, { status: 500 });
+  }
 
   // 按分组整理
   const groups: Record<string, Array<{ id: string; label: string; url: string; type: string }>> = {};
 
-  for (const row of rows) {
+  for (const row of rows || []) {
     const config = typeConfig[row.type];
     if (!config) continue; // 忽略未配置的类型
     const groupKey = config.groupKey;
@@ -75,8 +76,8 @@ export async function GET(req: NextRequest) {
   // 构建树形结构
   const tree: any[] = [];
   for (const key of groupOrder) {
-    // 查找该 key 对应的分组信息（从 typeConfig 中任意一个匹配 groupKey 的条目获取 label）
     let label = key;
+    // 查找该 key 对应的分组信息（从 typeConfig 中任意一个匹配 groupKey 的条目获取 label）
     for (const [type, cfg] of Object.entries(typeConfig)) {
       if (cfg.groupKey === key) {
         label = cfg.groupLabel;
@@ -97,10 +98,6 @@ export async function GET(req: NextRequest) {
       });
     }
   }
-
-  // 处理特殊：主页、询盘可能已经包含在 groups 中，但它们是独立叶子节点，不需要 children
-  // 如果希望主页和询盘作为独立叶子直接出现在根，可特殊处理，但通常作为分组更合理。
-  // 这里为了简单，所有页面都分组显示。
 
   return NextResponse.json(tree);
 }

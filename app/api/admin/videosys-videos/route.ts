@@ -26,7 +26,8 @@ export async function GET(req: NextRequest) {
   const category = searchParams.get('category') || undefined;
   const page = parseInt(searchParams.get('page') || '1');
   const limit = parseInt(searchParams.get('limit') || '20');
-  const data = listVideos({ locale, title, category, visible: true, page, limit });
+  // 后台管理列表显示所有视频，不传 visible 参数（即不过滤可见性）
+  const data = await listVideos({ locale, title, category, page, limit });
   return NextResponse.json(data);
 }
 
@@ -34,7 +35,6 @@ export async function POST(req: NextRequest) {
   const body = await req.json();
   const { locale, ...videoData } = body;
   if (!locale) return NextResponse.json({ error: 'Missing locale' }, { status: 400 });
-  // 自动解析视频源URL
   if (videoData.video_url) {
     const parsed = parseVideoUrl(videoData.video_url);
     if (!parsed) return NextResponse.json({ error: 'Invalid video URL' }, { status: 400 });
@@ -43,7 +43,6 @@ export async function POST(req: NextRequest) {
   } else {
     return NextResponse.json({ error: 'Video URL is required' }, { status: 400 });
   }
-  // 生成ID
   const id = Math.floor(10000000 + Math.random() * 90000000).toString();
   const now = new Date().toISOString();
   const fullVideo: VideoData = {

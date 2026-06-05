@@ -1,12 +1,13 @@
-// app/[locale]/page.tsx
 import { notFound } from 'next/navigation';
 import { getTemplateById } from '@/lib/webbuilder/template-manager';
 import { injectRuntimeDataSafe } from '@/lib/webbuilder/runtime-injector';
 import { TemplateRenderer } from '@/components/webbuilder/TemplateRenderer';
 import { generatePageMetadata } from '@/lib/seo';
 import { getSeoInput } from '@/lib/seo/getSeoInput';
-import { getDb } from '@/lib/db';                          // 新增
-import { extractAllTextIds } from '@/lib/webbuilder/text-utils'; // 新增
+import { supabase } from '@/lib/supabase/client';
+import { extractAllTextIds } from '@/lib/webbuilder/text-utils';
+
+const DEFAULT_SITE_ID = process.env.NEXT_PUBLIC_SITE_ID || '000001'; // 与原硬编码 siteId = '100001' 保持一致
 
 interface HomePageProps {
   params: Promise<{ locale: string }>;
@@ -26,23 +27,26 @@ export default async function HomePage({ params }: HomePageProps) {
   const template = await getTemplateById('default_homepage_published');
   if (!template) notFound();
 
-  // ========== 新增：多语言文本注入 ==========
+  // ========== 多语言文本注入 ==========
   const textIds = extractAllTextIds(template.data);
   let texts: Record<string, string> = {};
   if (textIds.length > 0) {
-    const db = getDb();
-    const siteId = '100001';
-    const templateId = template.id; // 例如 "default_homepage_published"
-    const placeholders = textIds.map(() => '?').join(',');
-    const rows = db.prepare(`
-      SELECT text_id, text FROM component_texts
-      WHERE site_id = ? AND template_id = ? AND locale = ? AND text_id IN (${placeholders})
-    `).all(siteId, templateId, locale, ...textIds) as { text_id: string; text: string }[];
-    texts = rows.reduce((acc, row) => ({ ...acc, [row.text_id]: row.text }), {});
+    const { data, error } = await supabase
+      .from('component_texts')
+      .select('text_id, text')
+      .eq('site_id', DEFAULT_SITE_ID)
+      .eq('template_id', template.id)
+      .eq('locale', locale)
+      .in('text_id', textIds);
+    if (!error && data) {
+      texts = data.reduce((acc, row) => ({ ...acc, [row.text_id]: row.text }), {});
+    } else {
+      console.error('Failed to fetch component texts:', error);
+    }
   }
   const runtime = { texts, locale };
   const finalData = injectRuntimeDataSafe(template.data, runtime);
-  // =======================================
+  // ===================================
 
   const seoInput = await getSeoInput('home', 'home', locale);
   let jsonLdScripts: string[] = [];
@@ -62,7 +66,7 @@ export default async function HomePage({ params }: HomePageProps) {
       ))}
       <main className="flex-grow">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 w-full">
-          <TemplateRenderer data={finalData} /> {/* 使用注入后的数据 */}
+          <TemplateRenderer data={finalData} />
         </div>
       </main>
     </>

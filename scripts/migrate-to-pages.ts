@@ -1,20 +1,18 @@
-// scripts/migrate-to-pages.ts
 import fs from 'fs/promises';
 import path from 'path';
 import matter from 'gray-matter';
 import crypto from 'crypto';
-import { getDb } from '../lib/db';
+import { supabase } from '../lib/supabase/client';
 
-const db = getDb();
 const DATA_ROOT = path.join(process.cwd(), 'data');
-const SITE_ID = '000001';
+const SITE_ID = process.env.NEXT_PUBLIC_SITE_ID || '000001';
 
 function computeHash(data: any): string {
   const str = typeof data === 'string' ? data : JSON.stringify(data);
   return crypto.createHash('md5').update(str).digest('hex');
 }
 
-function upsertPage(page: any, locale: string) {
+async function upsertPage(page: any, locale: string) {
   const contentHash = computeHash({
     title: page.title,
     full_content: page.content_full || '',
@@ -23,66 +21,55 @@ function upsertPage(page: any, locale: string) {
     seo_keywords: page.seo_keywords || '',
   });
 
-  db.prepare(`
-    INSERT OR REPLACE INTO pages (
-      id, site_id, locale, type, title, slug, url, cover_image,
-      seo_title, seo_description, seo_keywords, canonical,
-      noindex, nofollow, priority, changefreq, content_summary,
-      content_hash, last_synced_at, synced_locales, source_hash,
-      translated_by_ai, updatedAt
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-  `).run(
-    page.id, SITE_ID, locale, page.type, page.title, page.slug || null, page.url, page.cover_image || null,
-    page.seo_title || null, page.seo_description || null, page.seo_keywords || null, page.canonical || null,
-    page.noindex ? 1 : 0, page.nofollow ? 1 : 0, page.priority ?? 0.5, page.changefreq || 'weekly',
-    page.content_summary || null,
-    contentHash,
-    null, null, null,
-    page.translated_by_ai ? 1 : 0,
-    page.updatedAt || new Date().toISOString()
-  );
+  const { error: pageError } = await supabase
+    .from('pages')
+    .upsert({
+      id: page.id,
+      site_id: SITE_ID,
+      locale: locale,
+      type: page.type,
+      title: page.title,
+      slug: page.slug || null,
+      url: page.url,
+      cover_image: page.cover_image || null,
+      seo_title: page.seo_title || null,
+      seo_description: page.seo_description || null,
+      seo_keywords: page.seo_keywords || null,
+      canonical: page.canonical || null,
+      noindex: page.noindex ? 1 : 0,
+      nofollow: page.nofollow ? 1 : 0,
+      priority: page.priority ?? 0.5,
+      changefreq: page.changefreq || 'weekly',
+      content_summary: page.content_summary || null,
+      content_hash: contentHash,
+      last_synced_at: null,
+      synced_locales: null,
+      source_hash: null,
+      translated_by_ai: page.translated_by_ai ? 1 : 0,
+      updatedAt: page.updatedAt || new Date().toISOString(),
+    }, {
+      onConflict: 'id, site_id, locale',
+    });
+  if (pageError) {
+    console.error(`Upsert page ${page.id} (${locale}) failed:`, pageError);
+    throw pageError;
+  }
 
-  db.prepare(`
-    INSERT OR REPLACE INTO page_contents (page_id, site_id, locale, full_content, content_hash, updatedAt)
-    VALUES (?, ?, ?, ?, ?, ?)
-  `).run(
-    page.id, SITE_ID, locale, page.content_full || null, contentHash, page.updatedAt || new Date().toISOString()
-  );
-}
-
-// ==================== 通用 Markdown 扫描 ====================
-async function scanMarkdown(type: string, dir: string, urlPrefix: string, locale: string) {
-  const sourceDir = path.join(DATA_ROOT, dir, locale);
-  const files = await fs.readdir(sourceDir).catch(() => []);
-  for (const file of files) {
-    if (!file.endsWith('.md')) continue;
-    const fullPath = path.join(sourceDir, file);
-    const stat = await fs.stat(fullPath);
-    const fileContent = await fs.readFile(fullPath, 'utf-8');
-    const { data, content } = matter(fileContent);
-    const slug = data.slug || file.replace(/\.md$/, '');
-    const title = data.title?.[locale] || data.title || slug;
-    const url = `${urlPrefix}/${slug}`;
-    upsertPage({
-      id: `${type}:${slug}`,
-      type,
-      title,
-      slug,
-      url,
-      cover_image: data.cover_image || null,
-      seo_title: data.seo_title?.[locale] || data.seo_title || null,
-      seo_description: data.seo_description?.[locale] || data.seo_description || null,
-      seo_keywords: data.seo_keywords?.[locale] || data.seo_keywords || null,
-      canonical: data.canonical_url || null,
-      noindex: data.noindex || false,
-      nofollow: data.nofollow || false,
-      priority: data.priority ?? 0.5,
-      changefreq: data.changefreq || 'weekly',
-      content_summary: content.slice(0, 5000),
-      content_full: content,
-      updatedAt: data.updatedAt || stat.mtime.toISOString(),
-      translated_by_ai: false,
-    }, locale);
+  const { error: contentError } = await supabase
+    .from('page_contents')
+    .upsert({
+      page_id: page.id,
+      site_id: SITE_ID,
+      locale: locale,
+      full_content: page.content_full || null,
+      content_hash: contentHash,
+      updatedAt: page.updatedAt || new Date().toISOString(),
+    }, {
+      onConflict: 'page_id, site_id, locale',
+    });
+  if (contentError) {
+    console.error(`Upsert page_contents for ${page.id} (${locale}) failed:`, contentError);
+    throw contentError;
   }
 }
 
@@ -96,7 +83,7 @@ async function scanProductLines(locale: string) {
     const id = line.id;
     if (!id) continue;
     const slug = line.slug || id;
-    upsertPage({
+    await upsertPage({
       id: `productLine:${id}`,
       type: 'productLine',
       title: line.name,
@@ -125,7 +112,6 @@ async function scanProducts(locale: string) {
     const { data, content } = matter(fileContent);
     const variants = data.variants || [];
 
-    // 使用产品唯一 ID（frontmatter 中的 id 字段）
     const productId = data.id;
     if (!productId) {
       console.warn(`产品文件 ${file} 缺少 id 字段，将使用文件名作为 ID（不推荐）`);
@@ -138,7 +124,7 @@ async function scanProducts(locale: string) {
     const shortDesc = data.short_description || '';
 
     // 主产品
-    upsertPage({
+    await upsertPage({
       id: mainId,
       type: 'product',
       title: mainTitle,
@@ -153,7 +139,7 @@ async function scanProducts(locale: string) {
       updatedAt: data.updatedAt || stat.mtime.toISOString(),
     }, locale);
 
-    // 变体（变体也有自己的 id）
+    // 变体
     for (const variant of variants) {
       const varId = variant.id;
       if (!varId) {
@@ -163,7 +149,7 @@ async function scanProducts(locale: string) {
       const varTitle = variant.product_name || `${mainTitle} (${variant.sku || '变体'})`;
       const varUrl = `/product/${varSlug}`;
       const varShortDesc = variant.short_description || shortDesc;
-      upsertPage({
+      await upsertPage({
         id: `product:${varId || `${productId}-${varSlug}`}`,
         type: 'product',
         title: varTitle,
@@ -190,7 +176,7 @@ async function scanProductCategories(locale: string) {
   for (const cat of categories) {
     const catId = cat.id;
     if (!catId) continue;
-    upsertPage({
+    await upsertPage({
       id: `productCollection:${catId}`,
       type: 'productCollection',
       title: cat.name,
@@ -208,7 +194,7 @@ async function scanProductCategories(locale: string) {
     for (const sub of series) {
       const subId = sub.id;
       if (!subId) continue;
-      upsertPage({
+      await upsertPage({
         id: `productCollection:${catId}/${subId}`,
         type: 'productCollection',
         title: sub.name,
@@ -226,31 +212,6 @@ async function scanProductCategories(locale: string) {
   }
 }
 
-// ==================== 博客文章（从 SQLite 表读取） ====================
-async function scanBlogPosts(locale: string) {
-  const rows = db.prepare(`
-    SELECT id, title, slug, excerpt, featured_image, seo_title, seo_description, seo_keywords, updated_at
-    FROM blog_posts
-    WHERE locale = ? AND visibility = 'visible'
-  `).all(locale) as any[];
-  for (const row of rows) {
-    upsertPage({
-      id: `blogPost:${row.id}`,
-      type: 'blogPost',
-      title: row.title,
-      slug: row.slug,
-      url: `/blog/${row.slug}`,
-      cover_image: row.featured_image || null,
-      seo_title: row.seo_title || null,
-      seo_description: row.seo_description || null,
-      seo_keywords: row.seo_keywords || null,
-      content_summary: row.excerpt || '',
-      content_full: '',
-      updatedAt: row.updated_at || new Date().toISOString(),
-    }, locale);
-  }
-}
-
 // ==================== 博客合集（博客分类） ====================
 async function scanBlogCategories(locale: string) {
   const jsonPath = path.join(DATA_ROOT, 'blog', locale, 'categories.json');
@@ -259,7 +220,7 @@ async function scanBlogCategories(locale: string) {
   for (const cat of categories) {
     const id = cat.id;
     if (!id) continue;
-    upsertPage({
+    await upsertPage({
       id: `blogCategory:${id}`,
       type: 'blogCategory',
       title: cat.title,
@@ -285,7 +246,7 @@ async function scanDocLibraries(locale: string) {
     const id = lib.id;
     if (!id) continue;
     const slug = lib.slug || id;
-    upsertPage({
+    await upsertPage({
       id: `docLibrary:${id}`,
       type: 'docLibrary',
       title: lib.name,
@@ -317,7 +278,7 @@ async function scanDocs(locale: string) {
       if (!id) continue;
       const slug = doc.slug;
       if (!slug) continue;
-      upsertPage({
+      await upsertPage({
         id: `doc:${id}`,
         type: 'doc',
         title: doc.title,
@@ -343,7 +304,7 @@ async function scanVideoCategories(locale: string) {
   for (const [id, cat] of Object.entries(categories) as any) {
     const slug = cat.slug;
     if (!slug) continue;
-    upsertPage({
+    await upsertPage({
       id: `videoCategory:${id}`,
       type: 'videoCategory',
       title: cat.name,
@@ -377,7 +338,7 @@ async function scanVideos(locale: string) {
     const slug = data.slug || file.replace(/\.md$/, '');
     const title = data.title || slug;
     const url = `/video/${data.category_key}/${slug}`;
-    upsertPage({
+    await upsertPage({
       id: `video:${id || slug}`,
       type: 'video',
       title,
@@ -425,7 +386,7 @@ async function scanStaticPages(locale: string) {
       // 没有对应的 md 文件则留空
     }
 
-    upsertPage({
+    await upsertPage({
       id: `page:${id}`,
       type: isPolicy ? 'policy' : 'page',
       title,
@@ -453,7 +414,7 @@ async function addFixedPages(locale: string) {
     { id: 'blog', type: 'blog', title: locale === 'zh' ? '博客' : 'Blog', slug: 'blog', url: '/blog' },
   ];
   for (const page of fixed) {
-    upsertPage({ ...page, content_summary: '', content_full: '', updatedAt: new Date().toISOString() }, locale);
+    await upsertPage({ ...page, content_summary: '', content_full: '', updatedAt: new Date().toISOString() }, locale);
   }
 }
 
@@ -468,16 +429,26 @@ async function scanSiteConfigs(locale: string) {
     const content = await fs.readFile(filePath, 'utf-8').catch(() => '{}');
     const config = JSON.parse(content);
     const hash = computeHash(config);
-    db.prepare(`
-      INSERT OR REPLACE INTO site_configs (
-        id, site_id, locale, config, content_hash,
-        last_synced_at, synced_locales, source_hash, translated_by_ai, updatedAt
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `).run(
-      cfg.id, SITE_ID, locale, JSON.stringify(config), hash,
-      null, null, null, 0,
-      new Date().toISOString()
-    );
+    const { error } = await supabase
+      .from('site_configs')
+      .upsert({
+        id: cfg.id,
+        site_id: SITE_ID,
+        locale: locale,
+        config: JSON.stringify(config),
+        content_hash: hash,
+        last_synced_at: null,
+        synced_locales: null,
+        source_hash: null,
+        translated_by_ai: 0,
+        updatedAt: new Date().toISOString(),
+      }, {
+        onConflict: 'id, site_id, locale',
+      });
+    if (error) {
+      console.error(`Upsert site_config ${cfg.id} (${locale}) failed:`, error);
+      throw error;
+    }
   }
 }
 
@@ -489,7 +460,7 @@ async function main() {
     await scanProductLines(locale);
     await scanProducts(locale);
     await scanProductCategories(locale);
-    await scanBlogPosts(locale);
+    // 博客文章迁移已移除（旧数据库已清除）
     await scanBlogCategories(locale);
     await scanDocLibraries(locale);
     await scanDocs(locale);

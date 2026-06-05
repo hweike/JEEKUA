@@ -1,8 +1,9 @@
-import { getDb } from '@/lib/db';
+import { supabase } from '@/lib/supabase/client';
 import fs from 'fs';
 import path from 'path';
 import { LRUCache } from 'lru-cache';
 
+const DEFAULT_SITE_ID = process.env.NEXT_PUBLIC_SITE_ID || '000001';
 const categoryCache = new LRUCache<string, any>({ max: 10, ttl: 60_000 });
 
 export interface ProductIndexItem {
@@ -25,160 +26,10 @@ export interface ProductIndexItem {
   status: string;
   updatedAt: string;
   createdAt: string;
-  templateId?: string;  // ✅ 添加产品详情页模板ID（可选，因为旧数据可能没有）
+  templateId?: string;
 }
 
-export function upsertProductIndex(item: ProductIndexItem) {
-  const db = getDb();
-  const stmt = db.prepare(`
-    INSERT OR REPLACE INTO products (
-      productId, locale, productLineId, categoryId, seriesId, parent_product_id,
-      sku, product_name, brand, price_tiers, currency, availability,
-      min_order_quantity, main_image_url, attributes, slug, status,
-      updatedAt, createdAt, templateId
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-  `);
-  stmt.run(
-    item.productId,
-    item.locale,
-    item.productLineId,
-    item.categoryId,
-    item.seriesId,
-    item.parent_product_id,
-    item.sku,
-    item.product_name,
-    item.brand,
-    JSON.stringify(item.price_tiers),
-    item.currency,
-    item.availability,
-    item.min_order_quantity,
-    item.main_image_url,
-    JSON.stringify(item.attributes),
-    item.slug,
-    item.status,
-    item.updatedAt,
-    item.createdAt,
-    item.templateId || ''   // 默认空字符串
-  );
-}
-
-export function deleteProductIndex(productId: string) {
-  const db = getDb();
-  const stmt = db.prepare(`DELETE FROM products WHERE productId = ?`);
-  stmt.run(productId);
-}
-
-export function getProductIndex(productId: string): ProductIndexItem | null {
-  const db = getDb();
-  const stmt = db.prepare(`SELECT * FROM products WHERE productId = ?`);
-  const row = stmt.get(productId) as any;
-  if (!row) return null;
-  return {
-    ...row,
-    price_tiers: JSON.parse(row.price_tiers || '[]'),
-    attributes: JSON.parse(row.attributes || '{}'),
-  };
-}
-
-export function getProductStatusCount(locale: string): { published: number; draft: number; offline: number } {
-  const db = getDb();
-  const stmt = db.prepare(`
-    SELECT status, COUNT(*) as count FROM products
-    WHERE locale = ? AND (parent_product_id IS NULL OR parent_product_id = '')
-    GROUP BY status
-  `);
-  const rows = stmt.all(locale) as any[];
-  const counts = { published: 0, draft: 0, offline: 0 };
-  rows.forEach(row => {
-    if (row.status === 'published') counts.published = row.count;
-    else if (row.status === 'draft') counts.draft = row.count;
-    else if (row.status === 'offline') counts.offline = row.count;
-  });
-  return counts;
-}
-
-// ========== 搜索产品列表（仅父产品，支持二级分类） ==========
-export function searchProducts(
-  locale: string,
-  status?: string,
-  keyword?: string,
-  categoryId?: string,
-  seriesId?: string,        // ✅ 新增参数
-  page: number = 1,
-  size: number = 20
-): { items: ProductIndexItem[]; total: number } {
-  const db = getDb();
-  let sql = `SELECT * FROM products WHERE locale = ? AND (parent_product_id IS NULL OR parent_product_id = '')`;
-  const params: any[] = [locale];
-  if (status && status !== 'all') {
-    sql += ` AND status = ?`;
-    params.push(status);
-  }
-  if (keyword) {
-    sql += ` AND (product_name LIKE ? OR sku LIKE ?)`;
-    params.push(`%${keyword}%`, `%${keyword}%`);
-  }
-  if (categoryId) {
-    sql += ` AND categoryId = ?`;
-    params.push(categoryId);
-  }
-  // ✅ 二级分类过滤
-  if (seriesId) {
-    sql += ` AND seriesId = ?`;
-    params.push(seriesId);
-  }
-
-  const countStmt = db.prepare(`SELECT COUNT(*) as total FROM (${sql})`);
-  const total = countStmt.get(...params) as { total: number };
-  const dataStmt = db.prepare(`${sql} ORDER BY updatedAt DESC LIMIT ? OFFSET ?`);
-  const rows = dataStmt.all(...params, size, (page - 1) * size) as any[];
-  const items = rows.map(parseProductRow);
-  return { items, total: total.total };
-}
-
-export function getChildrenProducts(parentId: string): ProductIndexItem[] {
-  const db = getDb();
-  const stmt = db.prepare(`
-    SELECT * FROM products WHERE parent_product_id = ? ORDER BY updatedAt DESC
-  `);
-  const rows = stmt.all(parentId) as any[];
-  return rows.map(parseProductRow);
-}
-
-// ========== 搜索所有产品（包括变体，支持二级分类） ==========
-export function searchAllProducts(
-  locale: string,
-  keyword?: string,
-  categoryId?: string,
-  seriesId?: string,        // ✅ 新增参数
-  page: number = 1,
-  size: number = 20
-): { items: ProductIndexItem[]; total: number } {
-  const db = getDb();
-  let sql = `SELECT * FROM products WHERE locale = ?`;
-  const params: any[] = [locale];
-  if (keyword) {
-    sql += ` AND (product_name LIKE ? OR sku LIKE ?)`;
-    params.push(`%${keyword}%`, `%${keyword}%`);
-  }
-  if (categoryId) {
-    sql += ` AND categoryId = ?`;
-    params.push(categoryId);
-  }
-  // ✅ 二级分类过滤
-  if (seriesId) {
-    sql += ` AND seriesId = ?`;
-    params.push(seriesId);
-  }
-
-  const countStmt = db.prepare(`SELECT COUNT(*) as total FROM (${sql})`);
-  const total = countStmt.get(...params) as { total: number };
-  const dataStmt = db.prepare(`${sql} ORDER BY updatedAt DESC LIMIT ? OFFSET ?`);
-  const rows = dataStmt.all(...params, size, (page - 1) * size) as any[];
-  const items = rows.map(parseProductRow);
-  return { items, total: total.total };
-}
-
+// 解析数据库行
 function parseProductRow(row: any): ProductIndexItem {
   return {
     productId: row.productId,
@@ -200,10 +51,342 @@ function parseProductRow(row: any): ProductIndexItem {
     status: row.status,
     updatedAt: row.updatedAt,
     createdAt: row.createdAt,
-    templateId: row.templateId || ''
+    templateId: row.templateId || '',
   };
 }
 
+// 插入或更新产品索引
+export async function upsertProductIndex(item: ProductIndexItem) {
+  const { error } = await supabase
+    .from('products')
+    .upsert({
+      site_id: DEFAULT_SITE_ID,
+      productId: item.productId,
+      locale: item.locale,
+      productLineId: item.productLineId,
+      categoryId: item.categoryId,
+      seriesId: item.seriesId,
+      parent_product_id: item.parent_product_id,
+      sku: item.sku,
+      product_name: item.product_name,
+      brand: item.brand,
+      price_tiers: JSON.stringify(item.price_tiers),
+      currency: item.currency,
+      availability: item.availability,
+      min_order_quantity: item.min_order_quantity,
+      main_image_url: item.main_image_url,
+      attributes: JSON.stringify(item.attributes),
+      slug: item.slug,
+      status: item.status,
+      templateId: item.templateId || '',
+      updatedAt: item.updatedAt,
+      createdAt: item.createdAt,
+    });
+  if (error) throw new Error(`upsertProductIndex failed: ${error.message}`);
+}
+
+// 删除产品索引
+export async function deleteProductIndex(productId: string) {
+  const { error } = await supabase
+    .from('products')
+    .delete()
+    .eq('site_id', DEFAULT_SITE_ID)
+    .eq('productId', productId);
+  if (error) throw new Error(`deleteProductIndex failed: ${error.message}`);
+}
+
+// 获取单个产品索引
+export async function getProductIndex(productId: string): Promise<ProductIndexItem | null> {
+  const { data, error } = await supabase
+    .from('products')
+    .select('*')
+    .eq('site_id', DEFAULT_SITE_ID)
+    .eq('productId', productId)
+    .maybeSingle();
+  if (error) throw new Error(`getProductIndex failed: ${error.message}`);
+  if (!data) return null;
+  return parseProductRow(data);
+}
+
+// 获取状态计数（仅父产品）
+export async function getProductStatusCount(locale: string): Promise<{ published: number; draft: number; offline: number }> {
+  const { data, error } = await supabase
+    .from('products')
+    .select('status')
+    .eq('site_id', DEFAULT_SITE_ID)
+    .eq('locale', locale)
+    .or('parent_product_id.is.null,parent_product_id.eq.')
+    .in('status', ['published', 'draft', 'offline']);
+  if (error) throw new Error(`getProductStatusCount failed: ${error.message}`);
+
+  const counts = { published: 0, draft: 0, offline: 0 };
+  (data || []).forEach((row: any) => {
+    if (row.status === 'published') counts.published++;
+    else if (row.status === 'draft') counts.draft++;
+    else if (row.status === 'offline') counts.offline++;
+  });
+  return counts;
+}
+
+// 搜索产品列表（仅父产品，支持二级分类）
+export async function searchProducts(
+  locale: string,
+  status?: string,
+  keyword?: string,
+  categoryId?: string,
+  seriesId?: string,
+  page: number = 1,
+  size: number = 20
+): Promise<{ items: ProductIndexItem[]; total: number }> {
+  let query = supabase
+    .from('products')
+    .select('*', { count: 'exact' })
+    .eq('site_id', DEFAULT_SITE_ID)
+    .eq('locale', locale)
+    .or('parent_product_id.is.null,parent_product_id.eq.');
+
+  if (status && status !== 'all') {
+    query = query.eq('status', status);
+  }
+  if (keyword) {
+    query = query.or(`product_name.ilike.%${keyword}%,sku.ilike.%${keyword}%`);
+  }
+  if (categoryId) {
+    query = query.eq('categoryId', categoryId);
+  }
+  if (seriesId) {
+    query = query.eq('seriesId', seriesId);
+  }
+
+  const from = (page - 1) * size;
+  const to = from + size - 1;
+  const { data, error, count } = await query
+    .order('updatedAt', { ascending: false })
+    .range(from, to);
+  if (error) throw new Error(`searchProducts failed: ${error.message}`);
+  const items = (data || []).map(parseProductRow);
+  return { items, total: count || 0 };
+}
+
+// 获取子产品（变体）
+export async function getChildrenProducts(parentId: string): Promise<ProductIndexItem[]> {
+  const { data, error } = await supabase
+    .from('products')
+    .select('*')
+    .eq('site_id', DEFAULT_SITE_ID)
+    .eq('parent_product_id', parentId)
+    .order('updatedAt', { ascending: false });
+  if (error) throw new Error(`getChildrenProducts failed: ${error.message}`);
+  return (data || []).map(parseProductRow);
+}
+
+// 搜索所有产品（包括变体）
+export async function searchAllProducts(
+  locale: string,
+  keyword?: string,
+  categoryId?: string,
+  seriesId?: string,
+  page: number = 1,
+  size: number = 20
+): Promise<{ items: ProductIndexItem[]; total: number }> {
+  let query = supabase
+    .from('products')
+    .select('*', { count: 'exact' })
+    .eq('site_id', DEFAULT_SITE_ID)
+    .eq('locale', locale);
+
+  if (keyword) {
+    query = query.or(`product_name.ilike.%${keyword}%,sku.ilike.%${keyword}%`);
+  }
+  if (categoryId) {
+    query = query.eq('categoryId', categoryId);
+  }
+  if (seriesId) {
+    query = query.eq('seriesId', seriesId);
+  }
+
+  const from = (page - 1) * size;
+  const to = from + size - 1;
+  const { data, error, count } = await query
+    .order('updatedAt', { ascending: false })
+    .range(from, to);
+  if (error) throw new Error(`searchAllProducts failed: ${error.message}`);
+  const items = (data || []).map(parseProductRow);
+  return { items, total: count || 0 };
+}
+
+// 根据 slug 获取产品
+export async function getProductBySlug(locale: string, slug: string): Promise<ProductIndexItem | null> {
+  const { data, error } = await supabase
+    .from('products')
+    .select('*')
+    .eq('site_id', DEFAULT_SITE_ID)
+    .eq('locale', locale)
+    .eq('slug', slug)
+    .maybeSingle();
+  if (error) throw new Error(`getProductBySlug failed: ${error.message}`);
+  if (!data) return null;
+  return parseProductRow(data);
+}
+
+// 根据 productId 获取产品（不推荐，建议使用 getProductIndex）
+export async function getProductById(locale: string, productId: string): Promise<ProductIndexItem | null> {
+  const { data, error } = await supabase
+    .from('products')
+    .select('*')
+    .eq('site_id', DEFAULT_SITE_ID)
+    .eq('locale', locale)
+    .eq('productId', productId)
+    .maybeSingle();
+  if (error) throw new Error(`getProductById failed: ${error.message}`);
+  if (!data) return null;
+  return parseProductRow(data);
+}
+
+// 根据分类ID获取产品（分页，仅父产品）
+export async function getProductsByCategoryId(
+  locale: string,
+  categoryId: string,
+  page: number = 1,
+  pageSize: number = 12
+): Promise<{ items: any[]; total: number }> {
+  let query = supabase
+    .from('products')
+    .select('productId, product_name, sku, main_image_url, price_tiers, currency, min_order_quantity, slug', { count: 'exact' })
+    .eq('site_id', DEFAULT_SITE_ID)
+    .eq('locale', locale)
+    .eq('categoryId', categoryId)
+    .or('parent_product_id.is.null,parent_product_id.eq.');
+
+  const from = (page - 1) * pageSize;
+  const to = from + pageSize - 1;
+  const { data, error, count } = await query
+    .order('updatedAt', { ascending: false })
+    .range(from, to);
+  if (error) throw new Error(`getProductsByCategoryId failed: ${error.message}`);
+  const items = (data || []).map((row: any) => ({
+    ...row,
+    price_tiers: JSON.parse(row.price_tiers || '[]'),
+  }));
+  return { items, total: count || 0 };
+}
+
+// 高级筛选（支持价格、可用性、排序）
+export async function getFilteredProducts(
+  locale: string,
+  categoryId: string,
+  seriesId?: string,
+  availability?: 'in-stock' | 'out-of-stock' | null,
+  minPrice?: number,
+  maxPrice?: number,
+  sortColumn: string = 'updatedAt',
+  sortOrder: 'ASC' | 'DESC' = 'DESC'
+): Promise<{ items: any[]; total: number }> {
+  let query = supabase
+    .from('products')
+    .select('*', { count: 'exact' })
+    .eq('site_id', DEFAULT_SITE_ID)
+    .eq('locale', locale)
+    .eq('categoryId', categoryId)
+    .or('parent_product_id.is.null,parent_product_id.eq.');
+
+  if (seriesId) {
+    query = query.eq('seriesId', seriesId);
+  }
+  if (availability === 'in-stock') {
+    query = query.eq('availability', 'in_stock');
+  } else if (availability === 'out-of-stock') {
+    query = query.eq('availability', 'out_of_stock');
+  }
+
+  // 价格过滤（JSON 字段）
+  if (minPrice !== undefined) {
+    query = query.gte('price_tiers->0->>price', minPrice);
+  }
+  if (maxPrice !== undefined) {
+    query = query.lte('price_tiers->0->>price', maxPrice);
+  }
+
+  // 排序
+  let orderField = sortColumn;
+  if (sortColumn === 'first_price') orderField = 'price_tiers->0->>price';
+  else if (sortColumn === 'product_name') orderField = 'product_name';
+  else if (sortColumn === 'createdAt') orderField = 'createdAt';
+  else orderField = 'updatedAt';
+
+  const { data, error, count } = await query
+    .order(orderField, { ascending: sortOrder === 'ASC' });
+  if (error) throw new Error(`getFilteredProducts failed: ${error.message}`);
+  const items = (data || []).map(parseProductRow);
+  return { items, total: count || 0 };
+}
+
+// 获取产品线下的所有产品（父产品）
+export async function getProductsByProductLine(
+  locale: string,
+  productLineId: string,
+  page: number,
+  pageSize: number
+): Promise<{ items: any[]; total: number }> {
+  let query = supabase
+    .from('products')
+    .select('*', { count: 'exact' })
+    .eq('site_id', DEFAULT_SITE_ID)
+    .eq('locale', locale)
+    .eq('productLineId', productLineId)
+    .or('parent_product_id.is.null,parent_product_id.eq.');
+
+  const from = (page - 1) * pageSize;
+  const to = from + pageSize - 1;
+  const { data, error, count } = await query
+    .order('updatedAt', { ascending: false })
+    .range(from, to);
+  if (error) throw new Error(`getProductsByProductLine failed: ${error.message}`);
+  const items = (data || []).map(parseProductRow);
+  return { items, total: count || 0 };
+}
+
+// 获取分类下的产品（支持二级分类）
+export async function getProductsByCategoryAndSeries(
+  locale: string,
+  categoryId: string,
+  seriesId: string | null,
+  page: number,
+  pageSize: number
+): Promise<{ items: any[]; total: number }> {
+  let query = supabase
+    .from('products')
+    .select('*', { count: 'exact' })
+    .eq('site_id', DEFAULT_SITE_ID)
+    .eq('locale', locale)
+    .eq('categoryId', categoryId)
+    .or('parent_product_id.is.null,parent_product_id.eq.');
+
+  if (seriesId) {
+    query = query.eq('seriesId', seriesId);
+  }
+
+  const from = (page - 1) * pageSize;
+  const to = from + pageSize - 1;
+  const { data, error, count } = await query
+    .order('updatedAt', { ascending: false })
+    .range(from, to);
+  if (error) throw new Error(`getProductsByCategoryAndSeries failed: ${error.message}`);
+  const items = (data || []).map(parseProductRow);
+  return { items, total: count || 0 };
+}
+
+// 简单获取分类下的产品（分页）
+export async function getProductsByCategory(
+  locale: string,
+  categoryId: string,
+  page: number,
+  pageSize: number
+): Promise<{ items: any[]; total: number }> {
+  return getProductsByCategoryAndSeries(locale, categoryId, null, page, pageSize);
+}
+
+// === 以下函数与分类缓存相关，保持不变（仅读取本地文件） ===
 function getCachedCategories(locale: string) {
   const cacheKey = `categories_${locale}`;
   let data = categoryCache.get(cacheKey);
@@ -226,173 +409,13 @@ export function getProductLineIdFromCategory(locale: string, categoryId: string)
   return cat?.productLineId || '';
 }
 
-export function getProductBySlug(locale: string, slug: string): ProductIndexItem | null {
-  const db = getDb();
-  const row = db.prepare(`SELECT * FROM products WHERE locale = ? AND slug = ?`).get(locale, slug) as any;
-  if (!row) return null;
-  return {
-    ...row,
-    price_tiers: JSON.parse(row.price_tiers || '[]'),
-    attributes: JSON.parse(row.attributes || '{}'),
-  };
-}
-
-export function getProductById(locale: string, productId: string): ProductIndexItem | null {
-  const db = getDb();
-  const row = db.prepare(`SELECT * FROM products WHERE locale = ? AND productId = ?`).get(locale, productId) as any;
-  if (!row) return null;
-  return {
-    ...row,
-    price_tiers: JSON.parse(row.price_tiers || '[]'),
-    attributes: JSON.parse(row.attributes || '{}'),
-  };
-}
-
-export function getProductsByCategoryId(
-  locale: string,
-  categoryId: string,
-  page: number = 1,
-  pageSize: number = 12
-): { items: any[]; total: number } {
-  const db = getDb();
-  const offset = (page - 1) * pageSize;
-  const countSql = `
-    SELECT COUNT(*) as total
-    FROM products
-    WHERE locale = ? AND categoryId = ? AND (parent_product_id IS NULL OR parent_product_id = '')
-  `;
-  const totalRow = db.prepare(countSql).get(locale, categoryId) as { total: number };
-  const dataSql = `
-    SELECT productId, product_name, sku, main_image_url, price_tiers, currency, min_order_quantity, slug
-    FROM products
-    WHERE locale = ? AND categoryId = ? AND (parent_product_id IS NULL OR parent_product_id = '')
-    ORDER BY updatedAt DESC
-    LIMIT ? OFFSET ?
-  `;
-  const rows = db.prepare(dataSql).all(locale, categoryId, pageSize, offset);
-  const items = rows.map((row: any) => ({
-    ...row,
-    price_tiers: JSON.parse(row.price_tiers || '[]'),
-  }));
-  return { items, total: totalRow.total };
-}
-
-
-// lib/products/indexDb.ts 中的 getFilteredProducts 函数
-export function getFilteredProducts(
-  locale: string,
-  categoryId: string,
-  seriesId?: string,
-  availability?: 'in-stock' | 'out-of-stock' | null,
-  minPrice?: number,
-  maxPrice?: number,
-  sortColumn: string = 'updatedAt',
-  sortOrder: 'ASC' | 'DESC' = 'DESC'
-): { items: any[]; total: number } {
-  const db = getDb();
-  let sql = `
-    SELECT * FROM products 
-    WHERE locale = ? 
-      AND categoryId = ? 
-      AND (parent_product_id IS NULL OR parent_product_id = '')
-  `;
-  const params: any[] = [locale, categoryId];
-
-  if (seriesId) {
-    sql += ` AND seriesId = ?`;
-    params.push(seriesId);
-  }
-
-  if (availability === 'in-stock') {
-    sql += ` AND availability = 'in_stock'`;
-  } else if (availability === 'out-of-stock') {
-    sql += ` AND availability = 'out_of_stock'`;
-  }
-
-  // 提取 price_tiers 中第一个价格（ JSON 数组的第一个元素的 price 字段）
-  if (minPrice !== undefined) {
-    sql += ` AND json_extract(price_tiers, '$[0].price') >= ?`;
-    params.push(minPrice);
-  }
-  if (maxPrice !== undefined) {
-    sql += ` AND json_extract(price_tiers, '$[0].price') <= ?`;
-    params.push(maxPrice);
-  }
-
-  // 排序
-  let orderBy = '';
-  switch (sortColumn) {
-    case 'product_name':
-      orderBy = `ORDER BY product_name ${sortOrder}`;
-      break;
-    case 'first_price':
-      orderBy = `ORDER BY json_extract(price_tiers, '$[0].price') ${sortOrder}`;
-      break;
-    case 'createdAt':
-      orderBy = `ORDER BY createdAt ${sortOrder}`;
-      break;
-    default:
-      orderBy = `ORDER BY updatedAt DESC`;
-  }
-
-  const countSql = `SELECT COUNT(*) as total FROM (${sql})`;
-  const totalRow = db.prepare(countSql).get(...params) as { total: number };
-  const dataSql = `${sql} ${orderBy}`;
-  const rows = db.prepare(dataSql).all(...params) as any[];
-  const items = rows.map(parseProductRow);
-  return { items, total: totalRow.total };
-}
-
-// 获取产品线下的所有产品（父产品）
-export function getProductsByProductLine(
-  locale: string,
-  productLineId: string,
-  page: number,
-  pageSize: number
-): { items: any[]; total: number } {
-  const db = getDb();
-  let sql = `SELECT * FROM products WHERE locale = ? AND productLineId = ? AND (parent_product_id IS NULL OR parent_product_id = '')`;
-  const params: any[] = [locale, productLineId];
-
-  const countStmt = db.prepare(`SELECT COUNT(*) as total FROM (${sql})`);
-  const totalRow = countStmt.get(...params) as { total: number };
-  const dataStmt = db.prepare(`${sql} ORDER BY updatedAt DESC LIMIT ? OFFSET ?`);
-  const rows = dataStmt.all(...params, pageSize, (page - 1) * pageSize);
-  const items = rows.map(parseProductRow);
-  return { items, total: totalRow.total };
-}
-
-// 获取分类（可能带二级分类）下的产品
-export function getProductsByCategoryAndSeries(
-  locale: string,
-  categoryId: string,
-  seriesId: string | null,
-  page: number,
-  pageSize: number
-): { items: any[]; total: number } {
-  const db = getDb();
-  let sql = `SELECT * FROM products WHERE locale = ? AND categoryId = ? AND (parent_product_id IS NULL OR parent_product_id = '')`;
-  const params: any[] = [locale, categoryId];
-  if (seriesId) {
-    sql += ` AND seriesId = ?`;
-    params.push(seriesId);
-  }
-
-  const countStmt = db.prepare(`SELECT COUNT(*) as total FROM (${sql})`);
-  const totalRow = countStmt.get(...params) as { total: number };
-  const dataStmt = db.prepare(`${sql} ORDER BY updatedAt DESC LIMIT ? OFFSET ?`);
-  const rows = dataStmt.all(...params, pageSize, (page - 1) * pageSize);
-  const items = rows.map(parseProductRow);
-  return { items, total: totalRow.total };
-}
-
-// Collections获取分类（可能带二级分类）下的产品
-export function getProductsByCategory(locale: string, categoryId: string, page: number, pageSize: number) {
-  const db = getDb();
-  const sql = `SELECT * FROM products WHERE locale = ? AND categoryId = ? AND (parent_product_id IS NULL OR parent_product_id = '') ORDER BY updatedAt DESC LIMIT ? OFFSET ?`;
-  const countSql = `SELECT COUNT(*) as total FROM products WHERE locale = ? AND categoryId = ? AND (parent_product_id IS NULL OR parent_product_id = '')`;
-  const totalRow = db.prepare(countSql).get(locale, categoryId) as { total: number };
-  const rows = db.prepare(sql).all(locale, categoryId, pageSize, (page - 1) * pageSize);
-  const items = rows.map(parseProductRow);
-  return { items, total: totalRow.total };
+// 获取所有产品ID（用于生成唯一ID）
+export async function getAllProductIds(locale: string): Promise<string[]> {
+  const { data, error } = await supabase
+    .from('products')
+    .select('productId')
+    .eq('site_id', DEFAULT_SITE_ID)
+    .eq('locale', locale);
+  if (error) throw new Error(`getAllProductIds failed: ${error.message}`);
+  return (data || []).map(row => row.productId);
 }

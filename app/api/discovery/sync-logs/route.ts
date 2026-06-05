@@ -1,29 +1,37 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getDb } from '@/lib/db';
+import { supabase } from '@/lib/supabase/client';
 
-const SITE_ID = '000001';
+const SITE_ID = process.env.NEXT_PUBLIC_SITE_ID || '000001';
 
 export async function GET(req: NextRequest) {
   const searchParams = req.nextUrl.searchParams;
   const status = searchParams.get('status');
   const sourceLocale = searchParams.get('sourceLocale');
   const targetLocale = searchParams.get('targetLocale');
-  const db = getDb();
-  let query = `SELECT * FROM sync_logs WHERE site_id = ?`;
-  const params: any[] = [SITE_ID];
+
+  let query = supabase
+    .from('sync_logs')
+    .select('*')
+    .eq('site_id', SITE_ID)
+    .order('created_at', { ascending: false })
+    .limit(500);
+
   if (status) {
-    query += ` AND status = ?`;
-    params.push(status);
+    query = query.eq('status', status);
   }
   if (sourceLocale) {
-    query += ` AND source_locale = ?`;
-    params.push(sourceLocale);
+    query = query.eq('source_locale', sourceLocale);
   }
   if (targetLocale) {
-    query += ` AND target_locale = ?`;
-    params.push(targetLocale);
+    query = query.eq('target_locale', targetLocale);
   }
-  query += ` ORDER BY created_at DESC LIMIT 500`;
-  const logs = db.prepare(query).all(...params);
-  return NextResponse.json(logs);
+
+  const { data: logs, error } = await query;
+
+  if (error) {
+    console.error('GET /api/discovery/sync-logs error:', error);
+    return NextResponse.json({ error: 'Failed to fetch sync logs' }, { status: 500 });
+  }
+
+  return NextResponse.json(logs || []);
 }

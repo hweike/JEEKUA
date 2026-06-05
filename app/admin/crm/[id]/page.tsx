@@ -5,7 +5,7 @@ import { Star, ArrowLeft } from 'lucide-react';
 
 export default async function CustomerDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
-  const customer = getCustomerById(id);
+  const customer = await getCustomerById(id);  // ✅ 添加 await
   if (!customer) notFound();
 
   const importance = customer.importance ?? 0;

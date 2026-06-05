@@ -1,8 +1,7 @@
-// app/api/webbuilder/route.ts
 import { NextRequest, NextResponse } from 'next/server';
 import fs from 'fs/promises';
 import path from 'path';
-import { getDb } from '@/lib/db';
+import { supabase } from '@/lib/supabase/client';
 
 const TEMPLATES_DIR = path.join(process.cwd(), 'data/webbuilder/templates');
 
@@ -29,23 +28,16 @@ export interface Template {
   updatedAt: string;
 }
 
-// ==================== 通用多语言提取逻辑 ====================
 interface I18nRecord {
   textId: string;
   locale: string;
   text: string;
 }
 
-/**
- * 递归遍历模板数据，提取所有多语言字段。
- * 识别规则：任何对象如果包含 textId 属性，则将其视为多语言字段，
- * 提取所有非 textId 的属性作为语言版本（如 zh, en）。
- */
 function extractI18nData(data: any): I18nRecord[] {
   const records: I18nRecord[] = [];
   if (!data || typeof data !== 'object') return records;
 
-  // 处理数组
   if (Array.isArray(data)) {
     for (const item of data) {
       records.push(...extractI18nData(item));
@@ -53,7 +45,6 @@ function extractI18nData(data: any): I18nRecord[] {
     return records;
   }
 
-  // 通用检测：如果对象包含 textId 且为字符串，则认为是多语言字段
   if (data.textId && typeof data.textId === 'string') {
     for (const [key, value] of Object.entries(data)) {
       if (key !== 'textId' && typeof value === 'string') {
@@ -62,7 +53,6 @@ function extractI18nData(data: any): I18nRecord[] {
     }
   }
 
-  // 递归处理所有子属性
   for (const key in data) {
     if (data[key] && typeof data[key] === 'object') {
       records.push(...extractI18nData(data[key]));
@@ -71,7 +61,6 @@ function extractI18nData(data: any): I18nRecord[] {
   return records;
 }
 
-// ==================== 文件操作辅助函数 ====================
 async function ensureDir(dir: string) {
   try {
     await fs.access(dir);
@@ -110,11 +99,9 @@ const ALL_CATEGORIES: TemplateCategory[] = [
   'video',
 ];
 
-// 列表：每个基础ID返回最新版本（草稿优先）
 export async function getAllTemplates(category?: TemplateCategory | null): Promise<Template[]> {
   await ensureDir(TEMPLATES_DIR);
   const categories = category ? [category] : ALL_CATEGORIES;
-
   const baseMap = new Map<string, Template>();
 
   for (const cat of categories) {
@@ -141,7 +128,6 @@ export async function getAllTemplates(category?: TemplateCategory | null): Promi
   return result;
 }
 
-// 增强版 getTemplateById：支持直接传入带 _draft/_published 后缀的完整 ID
 export async function getTemplateById(id: string): Promise<Template | null> {
   await ensureDir(TEMPLATES_DIR);
 
@@ -197,7 +183,7 @@ export async function deleteTemplate(baseId: string): Promise<boolean> {
   return deleted;
 }
 
-// ==================== API 路由处理 ====================
+// ==================== API 路由 ====================
 export async function GET(request: NextRequest) {
   const { searchParams } = new URL(request.url);
   const id = searchParams.get('id');
@@ -267,7 +253,6 @@ export async function POST(request: NextRequest) {
     const puckData = Object.keys(data).length > 0 ? data : getDefaultPuckData();
 
     if (action === 'publish') {
-      // 保存发布的模板文件
       const publishedTemplate: Template = {
         id: `${baseId}_published`,
         name: templateTitle,
@@ -287,37 +272,41 @@ export async function POST(request: NextRequest) {
         await fs.unlink(draftPath);
       } catch {}
 
-      // ========== 多语言数据全量替换 ==========
+      // ========== 多语言数据全量替换（Supabase） ==========
       try {
-        const db = getDb();
-        const siteId = '100001'; // 可根据需要从配置获取
+        const siteId = '100001';
         const templateId = publishedTemplate.id;
 
-        // 1. 删除该模板的所有旧数据
-        const deleteStmt = db.prepare(
-          `DELETE FROM component_texts WHERE site_id = ? AND template_id = ?`
-        );
-        deleteStmt.run(siteId, templateId);
+        // 删除旧记录
+        const { error: deleteError } = await supabase
+          .from('component_texts')
+          .delete()
+          .eq('site_id', siteId)
+          .eq('template_id', templateId);
+        if (deleteError) {
+          console.error('Failed to delete old i18n records:', deleteError);
+          throw deleteError;
+        }
         console.log(`[i18n] Deleted old records for template ${templateId}`);
 
-        // 2. 提取新数据（使用通用提取逻辑）
         const i18nRecords = extractI18nData(publishedTemplate.data);
         if (i18nRecords.length > 0) {
-          const insertStmt = db.prepare(`
-            INSERT INTO component_texts (site_id, template_id, text_id, locale, text, created_at, updated_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
-          `);
           const nowDate = new Date().toISOString();
-          for (const rec of i18nRecords) {
-            insertStmt.run(
-              siteId,
-              templateId,
-              rec.textId,
-              rec.locale,
-              rec.text,
-              nowDate,
-              nowDate
-            );
+          const insertData = i18nRecords.map(rec => ({
+            site_id: siteId,
+            template_id: templateId,
+            text_id: rec.textId,
+            locale: rec.locale,
+            text: rec.text,
+            created_at: nowDate,
+            updated_at: nowDate,
+          }));
+          const { error: insertError } = await supabase
+            .from('component_texts')
+            .insert(insertData);
+          if (insertError) {
+            console.error('Failed to insert i18n records:', insertError);
+            throw insertError;
           }
           console.log(`[i18n] Inserted ${i18nRecords.length} records for template ${templateId}`);
         } else {
@@ -325,7 +314,7 @@ export async function POST(request: NextRequest) {
         }
       } catch (err) {
         console.error('Failed to update i18n data during publish:', err);
-        // 不中断发布流程，仅记录错误
+        // 不中断发布流程
       }
 
       return NextResponse.json({
@@ -356,7 +345,7 @@ export async function POST(request: NextRequest) {
         version: 'draft',
       });
     } else {
-      // 无明确 action 时创建新模板（草稿）
+      // 新建模板（草稿）
       const newId = generateBaseId();
       const newTemplate: Template = {
         id: `${newId}_draft`,
@@ -431,15 +420,18 @@ export async function DELETE(request: NextRequest) {
       return NextResponse.json({ error: 'Failed to delete template' }, { status: 500 });
     }
 
-    // 可选：同时删除数据库中的多语言记录
+    // 删除数据库中的多语言记录
     try {
-      const db = getDb();
       const siteId = '100001';
       const templateIds = [`${baseId}_published`, `${baseId}_draft`];
-      const deleteStmt = db.prepare(
-        `DELETE FROM component_texts WHERE site_id = ? AND template_id IN (?, ?)`
-      );
-      deleteStmt.run(siteId, templateIds[0], templateIds[1]);
+      const { error } = await supabase
+        .from('component_texts')
+        .delete()
+        .eq('site_id', siteId)
+        .in('template_id', templateIds);
+      if (error) {
+        console.warn('Failed to delete i18n records for template:', error);
+      }
     } catch (err) {
       console.warn('Failed to delete i18n records for template:', err);
     }

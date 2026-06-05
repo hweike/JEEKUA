@@ -1,11 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getDb } from '@/lib/db';
+import { supabase } from '@/lib/supabase/client';
 import { saveMarkdownContent, readMarkdownContent, deleteMarkdownContent } from '@/lib/blog/blogStorage';
 import { generatePostId } from '@/lib/generateId';
-import { deleteResourceAssociations } from '@/lib/products/resourceRelations';
 
-const db = getDb();
+const DEFAULT_SITE_ID = process.env.NEXT_PUBLIC_SITE_ID || '000001';
 
+// 分类缓存（保持不变）
 let categoriesCache: { [locale: string]: { data: any[]; timestamp: number } } = {};
 const CACHE_TTL = 60 * 1000;
 
@@ -27,6 +27,16 @@ async function loadCategories(locale: string) {
   }
 }
 
+// 删除资源关联（blog 与 product 的关联）
+async function deleteResourceAssociations(resourceType: string, resourceId: string) {
+  const { error } = await supabase
+    .from('resource_product')
+    .delete()
+    .eq('resource_type', resourceType)
+    .eq('resource_id', resourceId);
+  if (error) console.error('删除资源关联失败:', error);
+}
+
 export async function GET(request: NextRequest) {
   const searchParams = request.nextUrl.searchParams;
   const locale = searchParams.get('locale');
@@ -41,45 +51,56 @@ export async function GET(request: NextRequest) {
   }
 
   if (id) {
-    const post = db.prepare(`
-      SELECT * FROM blog_posts WHERE id = ? AND locale = ?
-    `).get(id, locale) as any;
-    if (!post) {
+    // 获取单篇文章
+    const { data: post, error } = await supabase
+      .from('blog_posts')
+      .select('*')
+      .eq('site_id', DEFAULT_SITE_ID)
+      .eq('id', id)
+      .eq('locale', locale)
+      .maybeSingle();
+    if (error || !post) {
+      console.error('查询文章失败:', error);
       return NextResponse.json({ error: '文章不存在' }, { status: 404 });
     }
     const content = await readMarkdownContent(locale, post.id);
     return NextResponse.json({ ...post, content: content || '' });
   }
 
-  let query = 'SELECT * FROM blog_posts WHERE locale = ?';
-  const params: any[] = [locale];
+  // 列表查询
+  let query = supabase
+    .from('blog_posts')
+    .select('*', { count: 'exact' })
+    .eq('site_id', DEFAULT_SITE_ID)
+    .eq('locale', locale);
 
   if (search) {
-    query += ' AND title LIKE ?';
-    params.push(`%${search}%`);
+    query = query.ilike('title', `%${search}%`);
   }
   if (category) {
-    query += ' AND category_id = ?';
-    params.push(category);
+    query = query.eq('category_id', category);
   }
 
-  const countQuery = query.replace('SELECT *', 'SELECT COUNT(*) as total');
-  const { total } = db.prepare(countQuery).get(...params) as { total: number };
+  const from = (page - 1) * limit;
+  const to = from + limit - 1;
+  const { data: posts, error, count } = await query
+    .order('updated_at', { ascending: false })
+    .range(from, to);
 
-  const offset = (page - 1) * limit;
-  query += ' ORDER BY updated_at DESC LIMIT ? OFFSET ?';
-  params.push(limit, offset);
+  if (error) {
+    console.error('查询文章列表失败:', error);
+    return NextResponse.json({ error: '查询失败' }, { status: 500 });
+  }
 
-  const posts = db.prepare(query).all(...params) as any[];
   const categories = await loadCategories(locale);
-  const postsWithCategoryName = posts.map(post => {
+  const postsWithCategoryName = (posts || []).map(post => {
     const cat = categories.find((c: any) => c.id === post.category_id);
     return { ...post, category_name: cat ? cat.title : '' };
   });
 
   return NextResponse.json({
     data: postsWithCategoryName,
-    total,
+    total: count || 0,
     page,
     limit,
   });
@@ -100,40 +121,77 @@ export async function POST(request: NextRequest) {
   const hasContent = 'content' in body;
 
   if (id) {
-    const existing = db.prepare('SELECT id FROM blog_posts WHERE id = ? AND locale = ?').get(id, locale) as any;
-    if (!existing) {
+    // 更新现有文章
+    const { data: existing, error: findError } = await supabase
+      .from('blog_posts')
+      .select('id')
+      .eq('site_id', DEFAULT_SITE_ID)
+      .eq('id', id)
+      .eq('locale', locale)
+      .maybeSingle();
+    if (findError || !existing) {
       return NextResponse.json({ error: '文章不存在' }, { status: 404 });
     }
 
-    db.prepare(`
-      UPDATE blog_posts SET
-        slug = ?, title = ?, excerpt = ?, visibility = ?, featured_image = ?,
-        author = ?, category_id = ?, tags = ?, template = ?, seo_keywords = ?,
-        seo_title = ?, seo_description = ?, updated_at = ?
-      WHERE id = ? AND locale = ?
-    `).run(
-      slug, title, excerpt, visibility, featured_image, author, category_id,
-      JSON.stringify(tags || []), template, seo_keywords, seo_title, seo_description,
-      now, id, locale
-    );
+    const { error: updateError } = await supabase
+      .from('blog_posts')
+      .update({
+        slug,
+        title,
+        excerpt,
+        visibility,
+        featured_image,
+        author,
+        category_id,
+        tags: JSON.stringify(tags || []),
+        template,
+        seo_keywords,
+        seo_title,
+        seo_description,
+        updated_at: now,
+      })
+      .eq('site_id', DEFAULT_SITE_ID)
+      .eq('id', id)
+      .eq('locale', locale);
+
+    if (updateError) {
+      console.error('更新文章失败:', updateError);
+      return NextResponse.json({ error: '更新失败' }, { status: 500 });
+    }
 
     if (hasContent) {
       await saveMarkdownContent(locale, id, content || '');
     }
     return NextResponse.json({ success: true });
   } else {
+    // 创建新文章
     const newId = generatePostId();
-    db.prepare(`
-      INSERT INTO blog_posts (
-        id, locale, slug, title, excerpt, visibility, featured_image,
-        author, category_id, tags, template, seo_keywords, seo_title, seo_description,
-        created_at, updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `).run(
-      newId, locale, slug, title, excerpt, visibility, featured_image,
-      author, category_id, JSON.stringify(tags || []), template, seo_keywords, seo_title, seo_description,
-      now, now
-    );
+    const { error: insertError } = await supabase
+      .from('blog_posts')
+      .insert({
+        site_id: DEFAULT_SITE_ID,
+        id: newId,
+        locale,
+        slug,
+        title,
+        excerpt,
+        visibility: visibility || 'visible',
+        featured_image: featured_image || '',
+        author: author || '',
+        category_id: category_id || '',
+        tags: JSON.stringify(tags || []),
+        template: template || '',
+        seo_keywords: seo_keywords || '',
+        seo_title: seo_title || '',
+        seo_description: seo_description || '',
+        created_at: now,
+        updated_at: now,
+      });
+
+    if (insertError) {
+      console.error('创建文章失败:', insertError);
+      return NextResponse.json({ error: '创建失败' }, { status: 500 });
+    }
 
     await saveMarkdownContent(locale, newId, content || '');
     return NextResponse.json({ id: newId, success: true });
@@ -148,13 +206,34 @@ export async function DELETE(request: NextRequest) {
     return NextResponse.json({ error: '缺少参数' }, { status: 400 });
   }
 
-  const post = db.prepare('SELECT id FROM blog_posts WHERE id = ? AND locale = ?').get(id, locale) as any;
-  if (!post) {
+  // 检查文章是否存在
+  const { data: existing, error: findError } = await supabase
+    .from('blog_posts')
+    .select('id')
+    .eq('site_id', DEFAULT_SITE_ID)
+    .eq('id', id)
+    .eq('locale', locale)
+    .maybeSingle();
+  if (findError || !existing) {
     return NextResponse.json({ error: '文章不存在' }, { status: 404 });
   }
 
-  db.prepare('DELETE FROM blog_posts WHERE id = ? AND locale = ?').run(id, locale);
+  // 删除数据库记录
+  const { error: deleteError } = await supabase
+    .from('blog_posts')
+    .delete()
+    .eq('site_id', DEFAULT_SITE_ID)
+    .eq('id', id)
+    .eq('locale', locale);
+  if (deleteError) {
+    console.error('删除文章失败:', deleteError);
+    return NextResponse.json({ error: '删除失败' }, { status: 500 });
+  }
+
+  // 删除 Markdown 文件
   await deleteMarkdownContent(locale, id);
+
+  // 删除关联的产品关系
   await deleteResourceAssociations('blog', id);
 
   return NextResponse.json({ success: true });

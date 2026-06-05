@@ -1,4 +1,3 @@
-// app/[locale]/blog/[slug]/page.tsx
 import { getBlogPost } from '@/lib/blog';
 import { notFound } from 'next/navigation';
 import { Metadata } from 'next';
@@ -15,7 +14,7 @@ type Props = {
 export async function generateMetadata({ params }: Props): Promise<Metadata> {
   const { locale, slug } = await params;
   const decodedSlug = decodeURIComponent(slug);
-  const post = getBlogPost(locale, decodedSlug);
+  const post = await getBlogPost(locale, decodedSlug);
   if (!post) return { title: 'Not Found' };
   return {
     title: post.seo?.title || post.title,
@@ -27,7 +26,7 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
 export default async function BlogPostPage({ params }: Props) {
   const { locale, slug } = await params;
   const decodedSlug = decodeURIComponent(slug);
-  const post = getBlogPost(locale, decodedSlug);
+  const post = await getBlogPost(locale, decodedSlug);
   if (!post) notFound();
 
   return (
@@ -53,7 +52,7 @@ export default async function BlogPostPage({ params }: Props) {
         <div className="mt-8">
           <h3 className="text-lg font-semibold mb-2">标签</h3>
           <div className="flex flex-wrap gap-2">
-            {post.tags.map(tag => (
+            {post.tags.map((tag: string) => (
               <span key={tag} className="px-2 py-1 bg-muted rounded-md text-sm text-muted-foreground">
                 {tag}
               </span>

@@ -23,6 +23,60 @@
   ],
   "categories": [
     {
+      "id": "1777795326547",
+      "name": "tape 一级分类",
+      "slug": "tape-yi-ji-fen-lei",
+      "order": 0,
+      "productLineId": "1779864128281",
+      "templateId": "default_product_category_published",
+      "image": "",
+      "description": "",
+      "seoTitle": "",
+      "seoDescription": "",
+      "seoKeywords": "",
+      "attributeTemplateId": "",
+      "series": [
+        {
+          "id": "1777795571178",
+          "name": "二级分类",
+          "slug": "er-ji-fen-lei",
+          "order": 0,
+          "image": "",
+          "description": "",
+          "seoTitle": "",
+          "seoDescription": "",
+          "seoKeywords": ""
+        }
+      ]
+    },
+    {
+      "id": "1777795597324",
+      "name": "tape 一级分类2",
+      "slug": "tape-yi-ji-fen-lei-2",
+      "order": 0,
+      "productLineId": "1779864128281",
+      "templateId": "default_product_category_published",
+      "image": "",
+      "description": "",
+      "seoTitle": "",
+      "seoDescription": "",
+      "seoKeywords": "",
+      "attributeTemplateId": "",
+      "series": [
+        {
+          "id": "1777800570898",
+          "name": "tape 一级分类21",
+          "slug": "t-a-p-e-yi-ji-fen-lei-2-1",
+          "order": 0,
+          "image": "",
+          "description": "",
+          "seoTitle": "",
+          "seoDescription": "",
+          "seoKeywords": ""
+        }
+      ]
+    },
+    {
       "id": "1780304812504-gz7dvojz",
       "name": "AC/DC机壳开关电源(15-5000W)",
       "slug": "ac-dc-ji-ke-kai-guan-dian-yuan-1-5-5-0-0-0-w",
@@ -1566,60 +1620,6 @@
       "seoKeywords": "",
       "attributeTemplateId": "",
       "series": []
-    },
-    {
-      "id": "1777795326547",
-      "name": "tape 一级分类",
-      "slug": "tape-yi-ji-fen-lei",
-      "order": 0,
-      "productLineId": "1779864128281",
-      "templateId": "default_product_category_published",
-      "image": "",
-      "description": "",
-      "seoTitle": "",
-      "seoDescription": "",
-      "seoKeywords": "",
-      "attributeTemplateId": "",
-      "series": [
-        {
-          "id": "1777795571178",
-          "name": "二级分类",
-          "slug": "er-ji-fen-lei",
-          "order": 0,
-          "image": "",
-          "description": "",
-          "seoTitle": "",
-          "seoDescription": "",
-          "seoKeywords": ""
-        }
-      ]
-    },
-    {
-      "id": "1777795597324",
-      "name": "tape 一级分类2",
-      "slug": "tape-yi-ji-fen-lei-2",
-      "order": 0,
-      "productLineId": "1779864128281",
-      "templateId": "default_product_category_published",
-      "image": "",
-      "description": "",
-      "seoTitle": "",
-      "seoDescription": "",
-      "seoKeywords": "",
-      "attributeTemplateId": "",
-      "series": [
-        {
-          "id": "1777800570898",
-          "name": "tape 一级分类21",
-          "slug": "t-a-p-e-yi-ji-fen-lei-2-1",
-          "order": 0,
-          "image": "",
-          "description": "",
-          "seoTitle": "",
-          "seoDescription": "",
-          "seoKeywords": ""
-        }
-      ]
     }
   ]
 }

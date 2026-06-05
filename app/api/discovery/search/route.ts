@@ -1,8 +1,7 @@
-// app/api/discovery/search/route.ts
 import { NextRequest, NextResponse } from 'next/server';
-import { getDb } from '@/lib/db';
+import { supabase } from '@/lib/supabase/client';
 
-const SITE_ID = '000001';
+const SITE_ID = process.env.NEXT_PUBLIC_SITE_ID || '000001';
 
 export async function GET(req: NextRequest) {
   const searchParams = req.nextUrl.searchParams;
@@ -13,36 +12,52 @@ export async function GET(req: NextRequest) {
     return NextResponse.json([]);
   }
 
-  const db = getDb();
+  const searchTerm = `%${q}%`;
 
-  // 搜索 pages 表，匹配 title 或 content 字段
-  const rows = db.prepare(`
-    SELECT id, title, url, content_summary as content, updatedAt
-    FROM pages
-    WHERE site_id = ? AND locale = ?
-      AND (title LIKE ? OR content_summary LIKE ?)
-    ORDER BY 
-      CASE 
-        WHEN title LIKE ? THEN 1 
-        WHEN content_summary LIKE ? THEN 2 
-        ELSE 3 
-      END,
-      updatedAt DESC
-    LIMIT 50
-  `).all(
-    SITE_ID,
-    locale,
-    `%${q}%`,
-    `%${q}%`,
-    `%${q}%`,
-    `%${q}%`
-  ) as Array<{
-    id: string;
-    title: string;
-    url: string;
-    content: string;
-    updatedAt: string;
-  }>;
+  // 1. 标题匹配
+  const { data: titleMatches, error: titleError } = await supabase
+    .from('pages')
+    .select('id, title, url, content_summary, updatedAt')
+    .eq('site_id', SITE_ID)
+    .eq('locale', locale)
+    .ilike('title', searchTerm)
+    .limit(50);
+
+  if (titleError) {
+    console.error('Search title error:', titleError);
+    return NextResponse.json({ error: 'Search failed' }, { status: 500 });
+  }
+
+  // 2. 内容匹配（排除已标题匹配的）
+  const titleIds = titleMatches?.map(item => item.id) || [];
+  let contentQuery = supabase
+    .from('pages')
+    .select('id, title, url, content_summary, updatedAt')
+    .eq('site_id', SITE_ID)
+    .eq('locale', locale)
+    .ilike('content_summary', searchTerm);
+
+  if (titleIds.length > 0) {
+    contentQuery = contentQuery.not('id', 'in', `(${titleIds.join(',')})`);
+  }
+
+  const { data: contentMatches, error: contentError } = await contentQuery.limit(50);
+
+  if (contentError) {
+    console.error('Search content error:', contentError);
+    return NextResponse.json({ error: 'Search failed' }, { status: 500 });
+  }
+
+  // 合并结果，标题匹配在前，内容匹配在后
+  const allResults = [...(titleMatches || []), ...(contentMatches || [])].slice(0, 50);
+
+  const rows = allResults.map(row => ({
+    id: row.id,
+    title: row.title,
+    url: row.url,
+    content: row.content_summary || '',
+    updatedAt: row.updatedAt,
+  }));
 
   return NextResponse.json(rows);
 }

@@ -26,7 +26,7 @@ export async function createVideo(video: VideoData, locale: string): Promise<voi
     created_at: video.created_at,
     tags: video.tags,
   };
-  insertVideo(index);
+  await insertVideo(index);
   await saveVideoMarkdown(video, locale);
 }
 
@@ -54,17 +54,17 @@ export async function updateVideoService(video: VideoData, locale: string): Prom
     created_at: video.created_at,
     tags: video.tags,
   };
-  updateVideo(index);
+  await updateVideo(index);
   await saveVideoMarkdown(video, locale);
 }
 
 export async function deleteVideoService(id: string, locale: string): Promise<void> {
-  deleteVideo(id, locale);
+  await deleteVideo(id, locale);
   await deleteVideoMarkdown(id, locale);
 }
 
 export async function getFullVideo(id: string, locale: string): Promise<VideoData | null> {
-  const index = getVideoById(id, locale);
+  const index = await getVideoById(id, locale);
   if (!index) return null;
   const markdown = await loadVideoMarkdown(id, locale);
   return { ...index, content: markdown?.content || '' };

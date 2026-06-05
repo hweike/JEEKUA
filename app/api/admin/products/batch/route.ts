@@ -1,4 +1,3 @@
-// app/api/admin/products/batch/route.ts
 import { NextRequest, NextResponse } from 'next/server';
 import { readProduct, writeProduct, deleteProduct } from '@/lib/products/mdParser';
 import {
@@ -7,20 +6,29 @@ import {
   getProductLineIdFromCategory,
   deleteProductIndex,
   getChildrenProducts,
+  searchAllProducts,   // 用于获取所有产品ID（异步）
 } from '@/lib/products/indexDb';
 import { generateUniqueProductId } from '@/lib/utils/idGenerator';
 
-// 获取所有现存的 productId（用于唯一性校验）
+// 获取所有现存的 productId（用于唯一性校验）- 异步版本
 async function getAllExistingProductIds(locale: string): Promise<Set<string>> {
-  // 利用 searchAllProducts 获取所有产品（假设总数不超过 10000）
-  const { searchAllProducts } = await import('@/lib/products/indexDb');
-  const { items } = searchAllProducts(locale, undefined, undefined, 1, 10000);
-  return new Set(items.map(item => item.productId));
+  // 分页获取所有产品，最多 10000 条
+  let allItems: any[] = [];
+  let page = 1;
+  const size = 1000;
+  let hasMore = true;
+  while (hasMore) {
+    const { items, total } = await searchAllProducts(locale, undefined, undefined, undefined, page, size);
+    allItems = allItems.concat(items);
+    if (page * size >= total) hasMore = false;
+    page++;
+  }
+  return new Set(allItems.map(item => item.productId));
 }
 
 export async function PUT(request: NextRequest) {
   try {
-    const { action, ids, locale, status, categoryId, seriesId } = await request.json();
+    const { action, ids, locale, status, categoryId, seriesId, templateId } = await request.json();
     if (!ids || !Array.isArray(ids) || ids.length === 0) {
       return NextResponse.json({ error: 'ids required' }, { status: 400 });
     }
@@ -36,9 +44,9 @@ export async function PUT(request: NextRequest) {
         if (!product) continue;
         product.status = status;
         await writeProduct(locale, productId, product, product.content || '');
-        const index = getProductIndex(productId);
+        const index = await getProductIndex(productId);
         if (index) {
-          upsertProductIndex({
+          await upsertProductIndex({
             ...index,
             status,
             updatedAt: new Date().toISOString(),
@@ -60,9 +68,9 @@ export async function PUT(request: NextRequest) {
         product.seriesId = seriesId || '';
         product.productLineId = productLineId;
         await writeProduct(locale, productId, product, product.content || '');
-        const index = getProductIndex(productId);
+        const index = await getProductIndex(productId);
         if (index) {
-          upsertProductIndex({
+          await upsertProductIndex({
             ...index,
             categoryId,
             seriesId: seriesId || null,
@@ -72,6 +80,26 @@ export async function PUT(request: NextRequest) {
         }
       }
       return NextResponse.json({ message: '修改归属分类成功' });
+    }
+
+    // ==================== 批量修改页面模板 ====================
+    if (action === 'template') {
+      if (!templateId) return NextResponse.json({ error: 'templateId required' }, { status: 400 });
+      for (const productId of ids) {
+        const product = await readProduct(locale, productId);
+        if (!product) continue;
+        product.templateId = templateId;
+        await writeProduct(locale, productId, product, product.content || '');
+        const index = await getProductIndex(productId);
+        if (index) {
+          await upsertProductIndex({
+            ...index,
+            templateId,
+            updatedAt: new Date().toISOString(),
+          });
+        }
+      }
+      return NextResponse.json({ message: '页面模板更新成功' });
     }
 
     // ==================== 批量复制产品（父产品 + 所有变体） ====================
@@ -89,12 +117,12 @@ export async function PUT(request: NextRequest) {
 
         // 深拷贝父产品数据
         const newParent = JSON.parse(JSON.stringify(originalParent));
-        delete newParent.id; // 移除可能存在的旧 id 字段
+        delete newParent.id;
         newParent.productId = newParentId;
-        newParent.status = 'draft';          // 复制后默认为草稿
+        newParent.status = 'draft';
         newParent.createdAt = new Date().toISOString();
         newParent.updatedAt = new Date().toISOString();
-        newParent.parent_product_id = '';     // 清空父级关联
+        newParent.parent_product_id = '';
 
         // 复制 variants 数组：为每个变体生成新 ID
         if (newParent.variants && Array.isArray(newParent.variants)) {
@@ -104,8 +132,7 @@ export async function PUT(request: NextRequest) {
             existingIds.add(newVariantId);
             newVariants.push({
               ...variant,
-              id: newVariantId,   // 新变体ID
-              // SKU 保持不变
+              id: newVariantId,
             });
           }
           newParent.variants = newVariants;
@@ -115,7 +142,7 @@ export async function PUT(request: NextRequest) {
         await writeProduct(locale, newParentId, newParent, originalParent.content || '');
 
         // 复制父产品索引
-        const originalParentIndex = getProductIndex(productId);
+        const originalParentIndex = await getProductIndex(productId);
         if (originalParentIndex) {
           const newParentIndex = {
             ...originalParentIndex,
@@ -127,7 +154,7 @@ export async function PUT(request: NextRequest) {
             createdAt: newParent.createdAt,
             updatedAt: newParent.updatedAt,
           };
-          upsertProductIndex(newParentIndex);
+          await upsertProductIndex(newParentIndex);
         }
 
         // 复制每个变体的索引
@@ -135,7 +162,7 @@ export async function PUT(request: NextRequest) {
           for (let i = 0; i < originalParent.variants.length; i++) {
             const originalVariant = originalParent.variants[i];
             const newVariantId = newParent.variants[i].id;
-            const originalVariantIndex = getProductIndex(originalVariant.id);
+            const originalVariantIndex = await getProductIndex(originalVariant.id);
             if (originalVariantIndex) {
               const newVariantIndex = {
                 ...originalVariantIndex,
@@ -147,10 +174,10 @@ export async function PUT(request: NextRequest) {
                 createdAt: new Date().toISOString(),
                 updatedAt: new Date().toISOString(),
               };
-              upsertProductIndex(newVariantIndex);
+              await upsertProductIndex(newVariantIndex);
             } else {
-              // 如果原变体没有索引（理论上不应该），则手动创建基础索引
-              upsertProductIndex({
+              // 手动创建基础索引
+              await upsertProductIndex({
                 productId: newVariantId,
                 locale,
                 productLineId: newParent.productLineId,
@@ -189,14 +216,14 @@ export async function PUT(request: NextRequest) {
       let deletedCount = 0;
       for (const productId of ids) {
         // 删除变体索引（变体无独立 MD，仅删除索引）
-        const children = getChildrenProducts(productId);
+        const children = await getChildrenProducts(productId);
         for (const child of children) {
-          deleteProductIndex(child.productId);
+          await deleteProductIndex(child.productId);
           deletedCount++;
         }
         // 删除父产品 MD 文件和索引
         await deleteProduct(locale, productId);
-        deleteProductIndex(productId);
+        await deleteProductIndex(productId);
         deletedCount++;
       }
       return NextResponse.json({ message: `成功删除 ${deletedCount} 个产品` });

@@ -1,7 +1,8 @@
-// lib/videosys/index.ts
-import { getDb } from '@/lib/db';
+import { supabase } from '@/lib/supabase/client';
 import type { VideoIndex, VideoData } from './types';
 import { getFullVideo } from './video-service'; // 复用已有的完整获取函数
+
+const DEFAULT_SITE_ID = process.env.NEXT_PUBLIC_SITE_ID || '000001';
 
 // 获取所有视频分类（包含 slug）
 export async function getVideoCategories(locale: string): Promise<{ key: string; name: string; slug: string }[]> {
@@ -23,25 +24,59 @@ export async function getVideoCategories(locale: string): Promise<{ key: string;
 
 // 获取视频列表（按分类 key 过滤）
 export async function getVideos(locale: string, categoryKey?: string): Promise<VideoIndex[]> {
-  const db = getDb();
-  let sql = `SELECT * FROM videos WHERE locale = ? AND visible = 1`;
-  const params: any[] = [locale];
+  let query = supabase
+    .from('videos')
+    .select('*')
+    .eq('site_id', DEFAULT_SITE_ID)
+    .eq('locale', locale)
+    .eq('visible', 1);
+
   if (categoryKey && categoryKey !== 'all') {
-    sql += ` AND category_key = ?`;
-    params.push(categoryKey);
+    query = query.eq('category_key', categoryKey);
   }
-  sql += ` ORDER BY order_index ASC, published_at DESC`;
-  return db.prepare(sql).all(...params) as VideoIndex[];
+
+  const { data, error } = await query
+    .order('order_index', { ascending: true })
+    .order('published_at', { ascending: false });
+
+  if (error) {
+    console.error('getVideos error:', error);
+    return [];
+  }
+
+  // 转换布尔字段（数据库中以 0/1 存储）
+  return (data || []).map(item => ({
+    ...item,
+    visible: item.visible === 1,
+    flagged: item.flagged === 1,
+  })) as VideoIndex[];
 }
 
 // 根据 slug 获取单个视频，并附加其分类 slug 和完整内容
 export async function getVideoBySlug(slug: string, locale: string): Promise<(VideoData & { categorySlug: string }) | null> {
-  const db = getDb();
-  const videoIndex = db.prepare(`SELECT * FROM videos WHERE slug = ? AND locale = ? AND visible = 1`).get(slug, locale) as VideoIndex | undefined;
-  if (!videoIndex) return null;
+  const { data: videoIndex, error } = await supabase
+    .from('videos')
+    .select('*')
+    .eq('site_id', DEFAULT_SITE_ID)
+    .eq('slug', slug)
+    .eq('locale', locale)
+    .eq('visible', 1)
+    .maybeSingle();
+
+  if (error || !videoIndex) {
+    if (error) console.error('getVideoBySlug error:', error);
+    return null;
+  }
+
+  // 转换布尔字段
+  const video: VideoIndex = {
+    ...videoIndex,
+    visible: videoIndex.visible === 1,
+    flagged: videoIndex.flagged === 1,
+  };
 
   // 复用已有函数：从数据库索引 + Markdown 文件获取完整数据（包含 content）
-  const fullVideo = await getFullVideo(videoIndex.id, locale);
+  const fullVideo = await getFullVideo(video.id, locale);
   if (!fullVideo) return null;
 
   const categories = await getVideoCategories(locale);

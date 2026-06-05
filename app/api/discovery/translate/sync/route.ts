@@ -1,8 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getDb } from '@/lib/db';
+import { supabase } from '@/lib/supabase/client';
 import { translatePage } from '@/modules/discovery/translate/core';
 
-const SITE_ID = '000001';
+const SITE_ID = process.env.NEXT_PUBLIC_SITE_ID || '000001';
+
 // 简单内存任务队列（生产环境建议使用 Redis 或 Bull）
 const tasks = new Map<string, { status: string; total: number; completed: number; failed: number; results: any[] }>();
 
@@ -11,28 +12,44 @@ export async function POST(req: NextRequest) {
   const taskId = crypto.randomUUID();
 
   // 获取需要同步的页面列表
-  const db = getDb();
-  let query = `SELECT id, title, type FROM pages WHERE site_id = ? AND locale = ?`;
-  const params: any[] = [SITE_ID, sourceLocale];
+  let query = supabase
+    .from('pages')
+    .select('id, title, type, content_hash')
+    .eq('site_id', SITE_ID)
+    .eq('locale', sourceLocale);
+
   if (contentTypes && contentTypes.length > 0) {
-    query += ` AND type IN (${contentTypes.map(() => '?').join(',')})`;
-    params.push(...contentTypes);
+    query = query.in('type', contentTypes);
   }
   if (pageIds && pageIds.length > 0) {
-    query += ` AND id IN (${pageIds.map(() => '?').join(',')})`;
-    params.push(...pageIds);
+    query = query.in('id', pageIds);
   }
-  const pages = db.prepare(query).all(...params) as any[];
+
+  const { data: pages, error } = await query;
+  if (error) {
+    console.error('获取页面失败:', error);
+    return NextResponse.json({ error: 'Failed to fetch pages' }, { status: 500 });
+  }
 
   // 过滤增量模式下的页面
-  let filteredPages = pages;
+  let filteredPages = pages || [];
   if (mode === 'incremental') {
     filteredPages = [];
-    for (const page of pages) {
+    for (const page of pages || []) {
       let needSync = false;
       for (const target of targetLocales) {
-        const targetPage = db.prepare(`SELECT source_hash, translated_by_ai FROM pages WHERE id = ? AND site_id = ? AND locale = ?`)
-          .get(page.id, SITE_ID, target) as any;
+        const { data: targetPage, error: targetError } = await supabase
+          .from('pages')
+          .select('source_hash, translated_by_ai')
+          .eq('id', page.id)
+          .eq('site_id', SITE_ID)
+          .eq('locale', target)
+          .maybeSingle();
+        if (targetError) {
+          console.error(`查询目标页面失败: ${page.id}, ${target}`, targetError);
+          needSync = true;
+          break;
+        }
         if (!targetPage || targetPage.source_hash !== page.content_hash || targetPage.translated_by_ai !== 1) {
           needSync = true;
           break;

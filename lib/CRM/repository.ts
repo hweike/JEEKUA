@@ -1,5 +1,7 @@
-import getDb from '@/lib/db';
+import { supabase } from '@/lib/supabase/client';
 import type { Customer, CustomerStage, CustomerScale } from './types';
+
+const DEFAULT_SITE_ID = process.env.NEXT_PUBLIC_SITE_ID || '000001';
 
 // 将数据库行（snake_case）转换为 Customer 对象（camelCase）
 function toCustomer(row: any): Customer {
@@ -23,92 +25,98 @@ function toCustomer(row: any): Customer {
   };
 }
 
-export function getAllCustomers(): Customer[] {
-  const db = getDb();
-  const stmt = db.prepare('SELECT * FROM customers ORDER BY created_at DESC');
-  const rows = stmt.all();
-  return rows.map(toCustomer);
+export async function getAllCustomers(): Promise<Customer[]> {
+  const { data, error } = await supabase
+    .from('customers')
+    .select('*')
+    .eq('site_id', DEFAULT_SITE_ID)
+    .order('created_at', { ascending: false });
+  if (error) throw new Error(`getAllCustomers failed: ${error.message}`);
+  return (data || []).map(toCustomer);
 }
 
-export function getCustomerById(id: string): Customer | null {
-  const db = getDb();
-  const stmt = db.prepare('SELECT * FROM customers WHERE id = ?');
-  const row = stmt.get(id);
-  return row ? toCustomer(row) : null;
+export async function getCustomerById(id: string): Promise<Customer | null> {
+  const { data, error } = await supabase
+    .from('customers')
+    .select('*')
+    .eq('site_id', DEFAULT_SITE_ID)
+    .eq('id', id)
+    .maybeSingle();
+  if (error) throw new Error(`getCustomerById failed: ${error.message}`);
+  return data ? toCustomer(data) : null;
 }
 
-export function getCustomerByEmail(email: string): Customer | null {
-  const db = getDb();
-  const stmt = db.prepare('SELECT * FROM customers WHERE email = ?');
-  const row = stmt.get(email);
-  return row ? toCustomer(row) : null;
+export async function getCustomerByEmail(email: string): Promise<Customer | null> {
+  const { data, error } = await supabase
+    .from('customers')
+    .select('*')
+    .eq('site_id', DEFAULT_SITE_ID)
+    .eq('email', email)
+    .maybeSingle();
+  if (error) throw new Error(`getCustomerByEmail failed: ${error.message}`);
+  return data ? toCustomer(data) : null;
 }
 
-export function createCustomer(customer: Customer): void {
-  const db = getDb();
-  const stmt = db.prepare(`
-    INSERT INTO customers (
-      id, name, country, email, phone, whatsapp, company_name,
-      address, stage, importance, scale, notes, website, flag,
-      email_subscribed, created_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-  `);
-  stmt.run(
-    customer.id,
-    customer.name || '',
-    customer.country || '',
-    customer.email || '',
-    customer.phone || '',
-    customer.whatsapp || '',
-    customer.companyName || '',
-    customer.address || '',
-    customer.stage ?? null,
-    customer.importance ?? null,
-    customer.scale ?? null,
-    customer.notes || '',
-    customer.website || '',
-    customer.flag || '',
-    customer.emailSubscribed,
-    customer.createdAt
-  );
+export async function createCustomer(customer: Customer): Promise<void> {
+  const { error } = await supabase
+    .from('customers')
+    .insert({
+      site_id: DEFAULT_SITE_ID,
+      id: customer.id,
+      name: customer.name || '',
+      country: customer.country || '',
+      email: customer.email || '',
+      phone: customer.phone || '',
+      whatsapp: customer.whatsapp || '',
+      company_name: customer.companyName || '',
+      address: customer.address || '',
+      stage: customer.stage ?? null,
+      importance: customer.importance ?? null,
+      scale: customer.scale ?? null,
+      notes: customer.notes || '',
+      website: customer.website || '',
+      flag: customer.flag || '',
+      email_subscribed: customer.emailSubscribed,
+      created_at: customer.createdAt,
+    });
+  if (error) throw new Error(`createCustomer failed: ${error.message}`);
 }
 
-export function updateCustomer(customer: Customer): void {
-  const db = getDb();
-  const stmt = db.prepare(`
-    UPDATE customers SET
-      name = ?, country = ?, email = ?, phone = ?, whatsapp = ?,
-      company_name = ?, address = ?, stage = ?, importance = ?,
-      scale = ?, notes = ?, website = ?, flag = ?, email_subscribed = ?
-    WHERE id = ?
-  `);
-  stmt.run(
-    customer.name || '',
-    customer.country || '',
-    customer.email || '',
-    customer.phone || '',
-    customer.whatsapp || '',
-    customer.companyName || '',
-    customer.address || '',
-    customer.stage ?? null,
-    customer.importance ?? null,
-    customer.scale ?? null,
-    customer.notes || '',
-    customer.website || '',
-    customer.flag || '',
-    customer.emailSubscribed,
-    customer.id
-  );
+export async function updateCustomer(customer: Customer): Promise<void> {
+  const { error } = await supabase
+    .from('customers')
+    .update({
+      name: customer.name || '',
+      country: customer.country || '',
+      email: customer.email || '',
+      phone: customer.phone || '',
+      whatsapp: customer.whatsapp || '',
+      company_name: customer.companyName || '',
+      address: customer.address || '',
+      stage: customer.stage ?? null,
+      importance: customer.importance ?? null,
+      scale: customer.scale ?? null,
+      notes: customer.notes || '',
+      website: customer.website || '',
+      flag: customer.flag || '',
+      email_subscribed: customer.emailSubscribed,
+    })
+    .eq('site_id', DEFAULT_SITE_ID)
+    .eq('id', customer.id);
+  if (error) throw new Error(`updateCustomer failed: ${error.message}`);
 }
 
-export function deleteCustomer(id: string): void {
-  const db = getDb();
-  const stmt = db.prepare('DELETE FROM customers WHERE id = ?');
-  stmt.run(id);
+export async function deleteCustomer(id: string): Promise<void> {
+  const { error } = await supabase
+    .from('customers')
+    .delete()
+    .eq('site_id', DEFAULT_SITE_ID)
+    .eq('id', id);
+  if (error) throw new Error(`deleteCustomer failed: ${error.message}`);
 }
 
 // 询盘相关（可选）
-export function createInquiry(inquiry: {
+export async function createInquiry(inquiry: {
   name: string;
   email: string;
   phone?: string;
@@ -117,42 +125,50 @@ export function createInquiry(inquiry: {
   product_id?: string;
   created_at: string;
   status?: string;
-}): void {
-  const db = getDb();
-  const stmt = db.prepare(`
-    INSERT INTO inquiries (name, email, phone, company, message, product_id, created_at, status)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-  `);
-  stmt.run(
-    inquiry.name,
-    inquiry.email,
-    inquiry.phone || '',
-    inquiry.company || '',
-    inquiry.message,
-    inquiry.product_id || null,
-    inquiry.created_at,
-    inquiry.status || '未处理'
-  );
+}): Promise<void> {
+  const { error } = await supabase
+    .from('inquiries')
+    .insert({
+      site_id: DEFAULT_SITE_ID,
+      name: inquiry.name,
+      email: inquiry.email,
+      phone: inquiry.phone || '',
+      company: inquiry.company || '',
+      message: inquiry.message,
+      product_id: inquiry.product_id || null,
+      created_at: inquiry.created_at,
+      status: inquiry.status || '未处理',
+    });
+  if (error) throw new Error(`createInquiry failed: ${error.message}`);
 }
 
-export function getAllInquiries(): any[] {
-  const db = getDb();
-  const stmt = db.prepare('SELECT * FROM inquiries ORDER BY created_at DESC');
-  return stmt.all();
+export async function getAllInquiries(): Promise<any[]> {
+  const { data, error } = await supabase
+    .from('inquiries')
+    .select('*')
+    .eq('site_id', DEFAULT_SITE_ID)
+    .order('created_at', { ascending: false });
+  if (error) throw new Error(`getAllInquiries failed: ${error.message}`);
+  return data || [];
 }
 
-// 根据 ID 获取单条询盘
-export function getInquiryById(id: number): any | null {
-  const db = getDb();
-  const stmt = db.prepare('SELECT * FROM inquiries WHERE id = ?');
-  const row = stmt.get(id);
-  return row || null;
+export async function getInquiryById(id: number): Promise<any | null> {
+  const { data, error } = await supabase
+    .from('inquiries')
+    .select('*')
+    .eq('site_id', DEFAULT_SITE_ID)
+    .eq('id', id)
+    .maybeSingle();
+  if (error) throw new Error(`getInquiryById failed: ${error.message}`);
+  return data || null;
 }
 
-// 更新询盘状态
-export function updateInquiryStatus(id: number, status: string): boolean {
-  const db = getDb();
-  const stmt = db.prepare('UPDATE inquiries SET status = ? WHERE id = ?');
-  const result = stmt.run(status, id);
-  return result.changes > 0;
+export async function updateInquiryStatus(id: number, status: string): Promise<boolean> {
+  const { error, count } = await supabase
+    .from('inquiries')
+    .update({ status })
+    .eq('site_id', DEFAULT_SITE_ID)
+    .eq('id', id);
+  if (error) throw new Error(`updateInquiryStatus failed: ${error.message}`);
+  return (count ?? 0) > 0;
 }

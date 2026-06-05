@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getDb } from '@/lib/db';
+import { supabase } from '@/lib/supabase/client';
+
+const DEFAULT_SITE_ID = process.env.NEXT_PUBLIC_SITE_ID || '000001';
 
 export async function GET(
   req: NextRequest,
@@ -13,41 +15,45 @@ export async function GET(
     return NextResponse.json({ error: 'Invalid resource type' }, { status: 400 });
   }
 
-  const db = getDb();
-
   try {
     // 1. 从 resource_product 表查询关联的产品 ID 及排序
-    const rows = db.prepare(`
-      SELECT product_id, sort_order
-      FROM resource_product
-      WHERE resource_type = ? AND resource_id = ?
-      ORDER BY sort_order ASC
-    `).all(resourceType, resourceId) as { product_id: string; sort_order: number }[];
+    const { data: relations, error: relError } = await supabase
+      .from('resource_product')
+      .select('product_id, sort_order')
+      .eq('site_id', DEFAULT_SITE_ID)
+      .eq('resource_type', resourceType)
+      .eq('resource_id', resourceId)
+      .order('sort_order', { ascending: true });
 
-    if (rows.length === 0) {
+    if (relError) {
+      console.error('查询 resource_product 失败:', relError);
+      return NextResponse.json({ error: 'Database query failed' }, { status: 500 });
+    }
+
+    if (!relations || relations.length === 0) {
       return NextResponse.json({ items: [] });
     }
 
-    const productIds = rows.map(row => `'${row.product_id}'`).join(',');
+    const productIds = relations.map(r => r.product_id);
+
     // 2. 从 products 索引表获取产品详细信息
-    const products = db.prepare(`
-      SELECT
-        productId as id,
-        product_name as name,
-        main_image_url as image,
-        slug,
-        price_tiers,
-        currency
-      FROM products
-      WHERE productId IN (${productIds})
-    `).all() as any[];
+    const { data: products, error: prodError } = await supabase
+      .from('products')
+      .select('productId, product_name, main_image_url, slug, price_tiers, currency')
+      .eq('site_id', DEFAULT_SITE_ID)
+      .in('productId', productIds);
+
+    if (prodError) {
+      console.error('查询 products 失败:', prodError);
+      return NextResponse.json({ error: 'Database query failed' }, { status: 500 });
+    }
 
     // 3. 按 sort_order 顺序组装结果，并生成价格显示
-    const items = rows.map(row => {
-      const product = products.find(p => p.id === row.product_id);
+    const items = relations.map(rel => {
+      const product = products?.find(p => p.productId === rel.product_id);
       if (!product) return null;
 
-      // 安全解析 price_tiers（可能是 JSON 字符串）
+      // 安全解析 price_tiers（可能是 JSON 字符串或已解析对象）
       let priceTiersArray: any[] = [];
       if (product.price_tiers) {
         try {
@@ -74,12 +80,12 @@ export async function GET(
       }
 
       return {
-        id: product.id,
-        name: product.name,
-        image: product.image,
+        id: product.productId,
+        name: product.product_name,
+        image: product.main_image_url,
         slug: product.slug,
         priceDisplay,
-        sortOrder: row.sort_order,
+        sortOrder: rel.sort_order,
       };
     }).filter(item => item !== null);
 

@@ -1,13 +1,12 @@
-// modules/discovery/translate/core.ts
 import fs from 'fs/promises';
 import path from 'path';
 import crypto from 'crypto';
 import matter from 'gray-matter';
-import { getDb } from '@/lib/db';
+import { supabase } from '@/lib/supabase/client';
 import { translateText } from '@/lib/discovery/deepseek';
 import translationConfig from '@/data/discovery/translation-config.json';
 
-const SITE_ID = '000001';
+const SITE_ID = process.env.NEXT_PUBLIC_SITE_ID || '000001';
 const DATA_ROOT = path.join(process.cwd(), 'data');
 
 function computeHash(data: any): string {
@@ -30,8 +29,7 @@ function setNestedValue(obj: any, path: string, value: string): void {
   if (last) target[last] = value;
 }
 
-function upsertPageToDb(pageData: any, locale: string) {
-  const db = getDb();
+async function upsertPageToDb(pageData: any, locale: string) {
   const contentHash = computeHash({
     title: pageData.title,
     full_content: pageData.content_full || '',
@@ -39,28 +37,59 @@ function upsertPageToDb(pageData: any, locale: string) {
     seo_description: pageData.seo_description || '',
     seo_keywords: pageData.seo_keywords || '',
   });
-  db.prepare(`
-    INSERT OR REPLACE INTO pages (
-      id, site_id, locale, type, title, slug, url, cover_image,
-      seo_title, seo_description, seo_keywords, canonical,
-      noindex, nofollow, priority, changefreq, content_summary,
-      content_hash, last_synced_at, synced_locales, source_hash,
-      translated_by_ai, updatedAt
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-  `).run(
-    pageData.id, SITE_ID, locale, pageData.type, pageData.title, pageData.slug || null, pageData.url, pageData.cover_image || null,
-    pageData.seo_title || null, pageData.seo_description || null, pageData.seo_keywords || null, pageData.canonical || null,
-    pageData.noindex ? 1 : 0, pageData.nofollow ? 1 : 0, pageData.priority ?? 0.5, pageData.changefreq || 'weekly',
-    pageData.content_summary || null,
-    contentHash,
-    null, null, pageData.source_hash || null,
-    pageData.translated_by_ai ? 1 : 0,
-    pageData.updatedAt
-  );
-  db.prepare(`
-    INSERT OR REPLACE INTO page_contents (page_id, site_id, locale, full_content, content_hash, updatedAt)
-    VALUES (?, ?, ?, ?, ?, ?)
-  `).run(pageData.id, SITE_ID, locale, pageData.content_full || null, contentHash, pageData.updatedAt);
+
+  // Upsert pages
+  const { error: pageError } = await supabase
+    .from('pages')
+    .upsert({
+      id: pageData.id,
+      site_id: SITE_ID,
+      locale: locale,
+      type: pageData.type,
+      title: pageData.title,
+      slug: pageData.slug || null,
+      url: pageData.url,
+      cover_image: pageData.cover_image || null,
+      seo_title: pageData.seo_title || null,
+      seo_description: pageData.seo_description || null,
+      seo_keywords: pageData.seo_keywords || null,
+      canonical: pageData.canonical || null,
+      noindex: pageData.noindex ? 1 : 0,
+      nofollow: pageData.nofollow ? 1 : 0,
+      priority: pageData.priority ?? 0.5,
+      changefreq: pageData.changefreq || 'weekly',
+      content_summary: pageData.content_summary || null,
+      content_hash: contentHash,
+      last_synced_at: null,
+      synced_locales: null,
+      source_hash: pageData.source_hash || null,
+      translated_by_ai: pageData.translated_by_ai ? 1 : 0,
+      updatedAt: pageData.updatedAt,
+    }, {
+      onConflict: 'id, site_id, locale',
+    });
+  if (pageError) {
+    console.error('Upsert pages failed:', pageError);
+    throw new Error(`Failed to upsert page: ${pageError.message}`);
+  }
+
+  // Upsert page_contents
+  const { error: contentError } = await supabase
+    .from('page_contents')
+    .upsert({
+      page_id: pageData.id,
+      site_id: SITE_ID,
+      locale: locale,
+      full_content: pageData.content_full || null,
+      content_hash: contentHash,
+      updatedAt: pageData.updatedAt,
+    }, {
+      onConflict: 'page_id, site_id, locale',
+    });
+  if (contentError) {
+    console.error('Upsert page_contents failed:', contentError);
+    throw new Error(`Failed to upsert page content: ${contentError.message}`);
+  }
 }
 
 async function writeTranslatedToFile(pageData: any, locale: string) {
@@ -198,21 +227,31 @@ export async function translatePage(
   targetLocale: string,
   pageId: string
 ): Promise<{ success: boolean; message?: string }> {
-  const db = getDb();
-  const sourcePage = db.prepare(`
-    SELECT p.*, pc.full_content
-    FROM pages p
-    LEFT JOIN page_contents pc ON p.id = pc.page_id AND p.site_id = pc.site_id AND p.locale = pc.locale
-    WHERE p.id = ? AND p.site_id = ? AND p.locale = ?
-  `).get(pageId, SITE_ID, sourceLocale) as any;
+  // 查询源页面（包含 page_contents）
+  const { data: sourcePage, error: sourceError } = await supabase
+    .from('pages')
+    .select(`
+      *,
+      page_contents!left (full_content)
+    `)
+    .eq('id', pageId)
+    .eq('site_id', SITE_ID)
+    .eq('locale', sourceLocale)
+    .maybeSingle();
 
-  if (!sourcePage) {
+  if (sourceError || !sourcePage) {
+    console.error('查询源页面失败:', sourceError);
     return { success: false, message: '源页面不存在' };
   }
 
-  const targetPage = db.prepare(`
-    SELECT * FROM pages WHERE id = ? AND site_id = ? AND locale = ?
-  `).get(pageId, SITE_ID, targetLocale) as any;
+  // 查询目标页面（判断是否需要翻译）
+  const { data: targetPage, error: targetError } = await supabase
+    .from('pages')
+    .select('*')
+    .eq('id', pageId)
+    .eq('site_id', SITE_ID)
+    .eq('locale', targetLocale)
+    .maybeSingle();
 
   const sourceHash = sourcePage.content_hash;
   if (targetPage && targetPage.source_hash === sourceHash && targetPage.translated_by_ai === 1) {
@@ -224,9 +263,10 @@ export async function translatePage(
     return { success: false, message: '该类型无需翻译字段' };
   }
 
+  // 提取需要翻译的源数据
   const sourceData: any = {
     title: sourcePage.title,
-    content: sourcePage.full_content || '',
+    content: sourcePage.page_contents?.full_content || '',
     seo_title: sourcePage.seo_title,
     seo_description: sourcePage.seo_description,
     seo_keywords: sourcePage.seo_keywords,
@@ -235,6 +275,7 @@ export async function translatePage(
     excerpt: sourcePage.excerpt || '',
   };
 
+  // 调用翻译接口
   const translatedData: any = {};
   for (const field of fields) {
     const text = getNestedValue(sourceData, field);
@@ -243,6 +284,7 @@ export async function translatePage(
     }
   }
 
+  // 准备目标页面数据
   const targetPageData = {
     id: pageId,
     type: sourcePage.type,
@@ -265,20 +307,45 @@ export async function translatePage(
     canonical: sourcePage.canonical,
   };
 
-  upsertPageToDb(targetPageData, targetLocale);
+  // 写入数据库
+  await upsertPageToDb(targetPageData, targetLocale);
+
+  // 写入物理文件
   await writeTranslatedToFile(targetPageData, targetLocale);
 
-  const synced = sourcePage.synced_locales ? JSON.parse(sourcePage.synced_locales) : [];
+  // 更新源页面的 synced_locales 字段
+  let synced = sourcePage.synced_locales ? JSON.parse(sourcePage.synced_locales) : [];
   if (!synced.includes(targetLocale)) {
     synced.push(targetLocale);
-    db.prepare(`UPDATE pages SET synced_locales = ?, last_synced_at = ? WHERE id = ? AND site_id = ? AND locale = ?`)
-      .run(JSON.stringify(synced), new Date().toISOString(), pageId, SITE_ID, sourceLocale);
+    const { error: updateError } = await supabase
+      .from('pages')
+      .update({
+        synced_locales: JSON.stringify(synced),
+        last_synced_at: new Date().toISOString(),
+      })
+      .eq('id', pageId)
+      .eq('site_id', SITE_ID)
+      .eq('locale', sourceLocale);
+    if (updateError) {
+      console.error('更新 synced_locales 失败:', updateError);
+    }
   }
 
-  db.prepare(`
-    INSERT INTO sync_logs (site_id, syncType, source_locale, target_locale, item_id, status, created_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?)
-  `).run(SITE_ID, 'page', sourceLocale, targetLocale, pageId, 'success', new Date().toISOString());
+  // 记录同步日志
+  const { error: logError } = await supabase
+    .from('sync_logs')
+    .insert({
+      site_id: SITE_ID,
+      syncType: 'page',
+      source_locale: sourceLocale,
+      target_locale: targetLocale,
+      item_id: pageId,
+      status: 'success',
+      created_at: new Date().toISOString(),
+    });
+  if (logError) {
+    console.error('记录同步日志失败:', logError);
+  }
 
   return { success: true };
 }

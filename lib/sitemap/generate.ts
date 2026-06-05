@@ -1,10 +1,9 @@
-// lib/sitemap/generate.ts
 import fs from 'fs/promises';
 import path from 'path';
-import { getDb } from '@/lib/db';
+import { supabase } from '@/lib/supabase/client';
 import { getSiteSettings } from '@/lib/getSiteSettings';
 
-const SITE_ID = '000001';
+const SITE_ID = process.env.NEXT_PUBLIC_SITE_ID || '000001';
 const CHUNK_SIZE = 45000;
 const SITEMAP_DIR = path.join(process.cwd(), 'public', 'sitemap');
 
@@ -28,21 +27,27 @@ async function getBaseUrl(): Promise<string> {
 export async function generateSitemaps() {
   // 验证 baseUrl
   const baseUrl = await getBaseUrl();
-  
+
   // 确保目录存在
   await fs.mkdir(SITEMAP_DIR, { recursive: true });
 
-  const db = getDb();
-  const rows = db.prepare(`
-    SELECT id, locale, url, updatedAt, priority, changefreq
-    FROM pages
-    WHERE site_id = ? AND noindex = 0
-    ORDER BY id, locale
-  `).all(SITE_ID) as any[];
+  // 查询所有需要包含的页面（noindex = 0）
+  const { data: rows, error } = await supabase
+    .from('pages')
+    .select('id, locale, url, updatedAt, priority, changefreq')
+    .eq('site_id', SITE_ID)
+    .eq('noindex', 0)
+    .order('id', { ascending: true })
+    .order('locale', { ascending: true });
+
+  if (error) {
+    console.error('Failed to fetch pages for sitemap:', error);
+    throw new Error('Database query failed');
+  }
 
   // 按 id 分组
   const groupMap = new Map<string, PageGroup>();
-  for (const row of rows) {
+  for (const row of rows || []) {
     if (!groupMap.has(row.id)) {
       const type = row.id.split(':')[0] || 'other';
       groupMap.set(row.id, {

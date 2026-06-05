@@ -3,13 +3,18 @@ import * as XLSX from 'xlsx';
 import fs from 'fs/promises';
 import { readFileSync } from 'fs';
 import path from 'path';
+import { nanoid } from 'nanoid'; // ✅ 新增 nanoid 导入
 import { getProductSettings } from '@/lib/products/productSettings';
-import { generateUniqueProductId } from '@/lib/utils/idGenerator';
-import { getProductLineIdFromCategory, getProductIndex, upsertProductIndex } from '@/lib/products/indexDb';
+// import { generateUniqueProductId } from '@/lib/utils/idGenerator'; // ❌ 已废弃，不再使用
+import {
+  getProductLineIdFromCategory,
+  getProductIndex,
+  upsertProductIndex,
+  getAllProductIds
+} from '@/lib/products/indexDb';
 import { writeProduct, readProduct } from '@/lib/products/mdParser';
 import { generateSlug, generateSeoTitle, generateSeoDescription } from '@/lib/products/seoGenerator';
 import { downloadImage, ensureDir } from '@/lib/imageUtils';
-import { getDb } from '@/lib/db';
 
 interface PriceTier {
   min_qty: number;
@@ -26,12 +31,6 @@ async function getSiteName(): Promise<string> {
   } catch {
     return '我的网站';
   }
-}
-
-async function getAllProductIds(locale: string): Promise<string[]> {
-  const db = getDb();
-  const rows = db.prepare(`SELECT productId FROM products WHERE locale = ?`).all(locale) as any[];
-  return rows.map(row => row.productId);
 }
 
 async function updateParentVariants(locale: string, parentId: string, variants: any[]) {
@@ -91,6 +90,22 @@ export async function POST(req: NextRequest) {
     if (rows.length === 0) {
       return NextResponse.json({ error: 'Excel 文件为空' }, { status: 400 });
     }
+
+    // ========== 全局 ID 生成机制：使用 nanoid(6)，保证不重复 ==========
+    // 1. 获取所有已存在的产品 ID（包括父产品和变体）
+    const existingIds = await getAllProductIds(locale);
+    // 2. 维护本次导入已使用的 ID 集合（初始化为已有 ID）
+    const usedIds = new Set(existingIds);
+    // 3. 生成唯一 ID 的函数（6 位随机字符串）
+    const generateUniqueId = (): string => {
+      let id: string;
+      do {
+        id = nanoid(6);
+      } while (usedIds.has(id));
+      usedIds.add(id);
+      return id;
+    };
+    // ============================================================
 
     const productSettings = await getProductSettings(locale);
     const defaultSettings = (productSettings as any).defaultSettings || {};
@@ -178,8 +193,8 @@ export async function POST(req: NextRequest) {
             }
           }
 
-          const existingIds = await getAllProductIds(locale);
-          const productId = await generateUniqueProductId(async () => existingIds);
+          // ✅ 使用统一的 generateUniqueId 生成父产品 ID（6 位随机字符串）
+          const productId = generateUniqueId();
 
           let sku = row['SKU']?.trim();
           if (!sku) {
@@ -210,8 +225,8 @@ export async function POST(req: NextRequest) {
           if (description && !description.includes('<')) {
             description = description
               .split(/\r?\n/)
-              .filter((p: string) => p.trim())   // 修复隐式 any
-              .map((p: string) => `<p>${p.trim()}</p>`) // 修复隐式 any
+              .filter((p: string) => p.trim())
+              .map((p: string) => `<p>${p.trim()}</p>`)
               .join('');
           }
 
@@ -292,7 +307,7 @@ export async function POST(req: NextRequest) {
           await writeProduct(locale, productId, productData, '');
 
           const now = new Date().toISOString();
-          upsertProductIndex({
+          await upsertProductIndex({
             productId,
             locale,
             productLineId: productLineId || '',
@@ -339,7 +354,8 @@ export async function POST(req: NextRequest) {
 
           const mainImageUrl = await downloadImage(row['主图URL']);
 
-          const variantId = `variant_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`;
+          // ✅ 使用统一的 generateUniqueId 生成变体 ID（6 位随机字符串，不再使用 variant_ 前缀）
+          const variantId = generateUniqueId();
 
           const variantData = {
             id: variantId,
@@ -359,11 +375,11 @@ export async function POST(req: NextRequest) {
           variants.push(variantData);
           await updateParentVariants(locale, parentProductId, variants);
 
-          const parentIndex = getProductIndex(parentProductId);
+          const parentIndex = await getProductIndex(parentProductId);
           if (!parentIndex) throw new Error('父产品索引不存在');
 
           const now = new Date().toISOString();
-          upsertProductIndex({
+          await upsertProductIndex({
             productId: variantId,
             locale,
             productLineId: parentIndex.productLineId,
@@ -390,7 +406,7 @@ export async function POST(req: NextRequest) {
             name: v.product_name,
             mainImage: v.main_image_url,
           }));
-          upsertProductIndex({
+          await upsertProductIndex({
             ...parentIndex,
             variants: updatedVariants,
             updatedAt: now,
