@@ -1,39 +1,53 @@
-import { notFound } from 'next/navigation'
-import { getAllVideos } from '@/lib/videosys/videos'
-import { getCategories, getCategory } from '@/lib/videosys/categories'
-import VideoCard from '@/components/videosys-front/VideoCard'
-import { Metadata } from 'next'
+import { notFound } from 'next/navigation';
+import { getAllVideos } from '@/lib/videosys/videos';
+import { getCategories, getCategory } from '@/lib/videosys/categories';
+import VideoCard from '@/components/videosys-front/VideoCard';
+import { Metadata } from 'next';
+import { withDynamicLocale } from '@/lib/withPageLocale';
+import { getEnabledLanguages } from '@/lib/languages/settings';
 
 interface PageProps {
-  params: {
-    locale: string
-    categoryKey: string
+  params: Promise<{ locale: string; categoryKey: string }>;
+}
+
+// 生成静态参数：每个已开通语言的每个分类
+export async function generateStaticParams() {
+  const locales = await getEnabledLanguages();
+  const params: { locale: string; categoryKey: string }[] = [];
+
+  for (const locale of locales) {
+    const categories = await getCategories(locale);
+    const keys = Object.keys(categories);
+    for (const categoryKey of keys) {
+      params.push({ locale, categoryKey });
+    }
   }
+  return params;
 }
 
 // 生成分类页的 SEO 元数据
 export async function generateMetadata({ params }: PageProps): Promise<Metadata> {
-  const { locale, categoryKey } = params
-  const category = await getCategory(categoryKey, locale)
-  if (!category) return {}
+  const { locale, categoryKey } = await params;
+  const category = await getCategory(categoryKey, locale);
+  if (!category) return {};
 
-  const metaTitle = category.seo?.metaTitle || `${category.name} - 视频分类`
-  const metaDescription = category.seo?.metaDescription || `浏览分类“${category.name}”下的所有视频`
+  const metaTitle = category.seo?.metaTitle || `${category.name} - 视频分类`;
+  const metaDescription = category.seo?.metaDescription || `浏览分类“${category.name}”下的所有视频`;
 
   return {
     title: metaTitle,
     description: metaDescription,
     keywords: category.seo?.keywords,
-  }
+  };
 }
 
-export default async function CategoryPage({ params }: PageProps) {
-  const { locale, categoryKey } = params
-  const category = await getCategory(categoryKey, locale)
-  if (!category) notFound()
+async function CategoryPage({ params }: PageProps) {
+  const { locale, categoryKey } = await params;
+  const category = await getCategory(categoryKey, locale);
+  if (!category) notFound();
 
-  const allVideos = await getAllVideos(locale)
-  const categoryVideos = allVideos.filter(v => v.category === categoryKey)
+  const allVideos = await getAllVideos(locale);
+  const categoryVideos = allVideos.filter(v => v.category === categoryKey);
 
   return (
     <div className="container mx-auto px-4 py-8">
@@ -51,13 +65,7 @@ export default async function CategoryPage({ params }: PageProps) {
         </div>
       )}
     </div>
-  )
+  );
 }
 
-// 静态生成所有分类页面（可选，提升性能）
-export async function generateStaticParams({ params: { locale } }: { params: { locale: string } }) {
-  const categories = await getCategories(locale)
-  return Object.keys(categories).map((categoryKey) => ({
-    categoryKey,
-  }))
-}
+export default withDynamicLocale(CategoryPage);

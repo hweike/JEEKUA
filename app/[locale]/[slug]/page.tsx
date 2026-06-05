@@ -4,6 +4,7 @@ import { getSeoInput } from '@/lib/seo/getSeoInput';
 import { getTemplateById } from '@/lib/webbuilder/template-manager';
 import { TemplateRenderer } from '@/components/webbuilder/TemplateRenderer';
 import { getPageIdBySlug, readPage } from '@/lib/pages/storage';
+import { withStaticLocale } from '@/lib/withPageLocale';
 
 interface PageProps {
   params: Promise<{ locale: string; slug: string }>;
@@ -18,7 +19,7 @@ export async function generateMetadata({ params }: PageProps) {
   return metadata;
 }
 
-export default async function Page({ params }: PageProps) {
+async function Page({ params }: PageProps) {
   const { locale, slug } = await params;
 
   // 获取页面数据
@@ -67,3 +68,5 @@ export default async function Page({ params }: PageProps) {
     </>
   );
 }
+
+export default withStaticLocale(Page);

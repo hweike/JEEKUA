@@ -6,6 +6,7 @@ import remarkGfm from 'remark-gfm';
 import rehypeRaw from 'rehype-raw';
 import VideoEmbed from '@/components/VideoEmbed';
 import RelatedProducts from '@/components/front/RelatedProducts';
+import { withDynamicLocale } from '@/lib/withPageLocale';
 
 type Props = {
   params: Promise<{ locale: string; slug: string }>;
@@ -23,7 +24,7 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
   };
 }
 
-export default async function BlogPostPage({ params }: Props) {
+async function BlogPostPage({ params }: Props) {
   const { locale, slug } = await params;
   const decodedSlug = decodeURIComponent(slug);
   const post = await getBlogPost(locale, decodedSlug);
@@ -47,7 +48,6 @@ export default async function BlogPostPage({ params }: Props) {
         </ReactMarkdown>
       </div>
 
-      {/* 标签区域：仅当有标签时显示 */}
       {post.tags && post.tags.length > 0 && (
         <div className="mt-8">
           <h3 className="text-lg font-semibold mb-2">标签</h3>
@@ -61,8 +61,9 @@ export default async function BlogPostPage({ params }: Props) {
         </div>
       )}
 
-      {/* 相关产品区域：组件自身判断无产品时不显示任何内容 */}
       <RelatedProducts resourceType="blog" resourceId={post.id} />
     </div>
   );
 }
+
+export default withDynamicLocale(BlogPostPage);

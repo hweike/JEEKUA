@@ -3,7 +3,7 @@ import fs from 'fs';
 import path from 'path';
 import { getAllThemePresets } from '@/lib/theme-presets';
 
-const THEMES_DIR = path.join(process.cwd(), 'data', 'themes');
+const THEMES_DIR = path.join(/*turbopackIgnore: true*/ process.cwd(), 'data', 'themes');
 const CUSTOM_THEMES_DIR = path.join(THEMES_DIR, 'custom');
 const PRESETS_DIR = path.join(THEMES_DIR, 'presets');
 const ACTIVE_THEME_FILE = path.join(THEMES_DIR, 'active-theme.json');

@@ -4,13 +4,14 @@ import { injectRuntimeDataSafe } from '@/lib/webbuilder/runtime-injector';
 import { getBlogCategories, getBlogPosts } from '@/lib/blog';
 import { getSiteSettings } from '@/lib/getSiteSettings';
 import WebBuilderClientWrapper from '@/components/webbuilder/WebBuilderClientWrapper';
+import { withStaticLocale } from '@/lib/withPageLocale';
 
 // 扩展 SiteSettings 类型以包含博客模板 ID（避免修改全局类型定义）
 interface ExtendedSiteSettings {
   blogTemplateId?: string;
 }
 
-export default async function BlogIndexPage({
+async function BlogIndexPage({
   params,
   searchParams,
 }: {
@@ -51,3 +52,5 @@ export default async function BlogIndexPage({
 
   return <WebBuilderClientWrapper data={finalData} />;
 }
+
+export default withStaticLocale(BlogIndexPage);

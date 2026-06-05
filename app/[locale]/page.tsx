@@ -6,14 +6,14 @@ import { generatePageMetadata } from '@/lib/seo';
 import { getSeoInput } from '@/lib/seo/getSeoInput';
 import { supabase } from '@/lib/supabase/client';
 import { extractAllTextIds } from '@/lib/webbuilder/text-utils';
+import { withStaticLocale } from '@/lib/withPageLocale';
 
-const DEFAULT_SITE_ID = process.env.NEXT_PUBLIC_SITE_ID || '000001'; // 与原硬编码 siteId = '100001' 保持一致
+const DEFAULT_SITE_ID = process.env.NEXT_PUBLIC_SITE_ID || '000001';
 
 interface HomePageProps {
   params: Promise<{ locale: string }>;
 }
 
-// 生成 Metadata 和 JSON-LD 脚本
 export async function generateMetadata({ params }: HomePageProps) {
   const { locale } = await params;
   const seoInput = await getSeoInput('home', 'home', locale);
@@ -22,12 +22,13 @@ export async function generateMetadata({ params }: HomePageProps) {
   return metadata;
 }
 
-export default async function HomePage({ params }: HomePageProps) {
+async function HomePage({ params }: HomePageProps) {
   const { locale } = await params;
+  // setRequestLocale 由 withStaticLocale 自动处理
+
   const template = await getTemplateById('default_homepage_published');
   if (!template) notFound();
 
-  // ========== 多语言文本注入 ==========
   const textIds = extractAllTextIds(template.data);
   let texts: Record<string, string> = {};
   if (textIds.length > 0) {
@@ -46,7 +47,6 @@ export default async function HomePage({ params }: HomePageProps) {
   }
   const runtime = { texts, locale };
   const finalData = injectRuntimeDataSafe(template.data, runtime);
-  // ===================================
 
   const seoInput = await getSeoInput('home', 'home', locale);
   let jsonLdScripts: string[] = [];
@@ -72,3 +72,5 @@ export default async function HomePage({ params }: HomePageProps) {
     </>
   );
 }
+
+export default withStaticLocale(HomePage);

@@ -1,7 +1,8 @@
 import { redirect } from 'next/navigation';
 import { getAllCategories } from '@/lib/products/categories';
+import { withStaticLocale } from '@/lib/withPageLocale';
 
-export default async function ProductsPage({ params }: { params: Promise<{ locale: string }> }) {
+async function ProductsPage({ params }: { params: Promise<{ locale: string }> }) {
   const { locale } = await params;
   const { productLines } = await getAllCategories(locale);
 
@@ -13,3 +14,5 @@ export default async function ProductsPage({ params }: { params: Promise<{ local
   const firstSlug = productLines[0].slug || productLines[0].name;
   redirect(`/${locale}/products/${encodeURIComponent(firstSlug)}`);
 }
+
+export default withStaticLocale(ProductsPage);

@@ -52,7 +52,8 @@ export async function getAllCategories(locale: string) {
       categories: data.categories || [],
     };
   } catch (err) {
-    console.error('[getAllCategories] error:', err);
+    // 文件不存在时降级处理，返回空数据，避免页面崩溃
+    console.warn(`[getAllCategories] Failed to load categories for locale ${locale}:`, (err as Error).message);
     return { productLines: [], categories: [] };
   }
 }

@@ -1,7 +1,8 @@
 import { getTranslations } from 'next-intl/server';
 import InquiryForm from '@/components/InquiryForm';
+import { withStaticLocale } from '@/lib/withPageLocale';
 
-export default async function InquiryPage({
+async function InquiryPage({
   params,
   searchParams,
 }: {
@@ -17,7 +18,6 @@ export default async function InquiryPage({
       <div className="max-w-3xl mx-auto px-4">
         <h1 className="text-3xl font-bold text-center mb-2 text-foreground">{t('title')}</h1>
         <p className="text-center text-muted-foreground mb-8">{t('subtitle')}</p>
-
         <InquiryForm
           locale={locale}
           defaultProductUrl={product}
@@ -27,3 +27,5 @@ export default async function InquiryPage({
     </main>
   );
 }
+
+export default withStaticLocale(InquiryPage);

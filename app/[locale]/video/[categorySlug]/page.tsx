@@ -5,10 +5,11 @@ import WebBuilderClientWrapper from '@/components/webbuilder/WebBuilderClientWra
 import { getVideos } from '@/lib/videosys';
 import fs from 'fs/promises';
 import path from 'path';
+import { withDynamicLocale } from '@/lib/withPageLocale';
 
 const DEFAULT_TEMPLATE_ID = 'default_video_category_published';
 
-export default async function VideoCategoryPage({
+async function VideoCategoryPage({
   params,
 }: {
   params: Promise<{ locale: string; categorySlug: string }>;
@@ -44,7 +45,7 @@ export default async function VideoCategoryPage({
   // 为每个视频附加其对应的分类 slug
   const videosWithSlug = videos.map(v => ({
     ...v,
-    categorySlug: categoryKeyToSlug.get(v.category_key) || currentCategory.slug, // 确保有值
+    categorySlug: categoryKeyToSlug.get(v.category_key) || currentCategory.slug,
   }));
 
   // 确定模板 ID
@@ -69,3 +70,5 @@ export default async function VideoCategoryPage({
   const finalData = injectRuntimeDataSafe(template.data, runtime);
   return <WebBuilderClientWrapper data={finalData} />;
 }
+
+export default withDynamicLocale(VideoCategoryPage);

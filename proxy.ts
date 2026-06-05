@@ -11,7 +11,7 @@ const intlMiddleware = createMiddleware({
   localePrefix: 'always',
 });
 
-export async function middleware(request: NextRequest) {
+export async function proxy(request: NextRequest) {
   const pathname = request.nextUrl.pathname;
 
   // 静态资源直接放行

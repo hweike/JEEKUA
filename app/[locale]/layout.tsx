@@ -8,9 +8,13 @@ import Footer from '@/components/Footer';
 import { getHeaderConfig, getMenuBySourceId, getFooterConfig, getMultipleMenus } from '@/lib/config-loader';
 import { getSiteSettings } from '@/lib/getSiteSettings';
 import DetectLanguage from '@/components/DetectLanguage';
+import { setRequestLocale } from 'next-intl/server';
+import { getEnabledLanguages } from '@/lib/languages/settings';
 
+// 只生成已开通的语言的静态页面，而不是所有 locales
 export async function generateStaticParams() {
-  return locales.map((locale) => ({ locale }));
+  const enabled = await getEnabledLanguages();
+  return enabled.map((locale) => ({ locale }));
 }
 
 export async function generateMetadata({ params }: { params: Promise<{ locale: string }> }) {
@@ -42,6 +46,8 @@ export default async function LocaleLayout({
 }) {
   const { locale } = await params;
   if (!locales.includes(locale as any)) notFound();
+
+  setRequestLocale(locale); // 避免 DYNAMIC_SERVER_USAGE 错误
 
   // 并行获取配置
   let messages, headerConfig, siteSettings, footerConfig;

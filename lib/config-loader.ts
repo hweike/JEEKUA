@@ -199,7 +199,7 @@ function mergeDeep(target: any, source: any): any {
   return output;
 }
 
-// 获取页头配置
+// 获取页头配置（文件不存在直接返回默认配置，不再 fallback 到 zh）
 export const getHeaderConfig = cache(async (locale: string): Promise<HeaderConfig> => {
   const filePath = path.join(process.cwd(), `data/SiteHeadersFooters/header/${locale}.json`);
   try {
@@ -207,23 +207,12 @@ export const getHeaderConfig = cache(async (locale: string): Promise<HeaderConfi
     const userConfig = JSON.parse(content);
     return mergeDeep(DEFAULT_HEADER_CONFIG, userConfig);
   } catch (error) {
-    console.error(`Failed to load header config for locale ${locale}:`, error);
-    if (locale !== 'zh') {
-      try {
-        const fallbackPath = path.join(process.cwd(), 'data/SiteHeadersFooters/header/zh.json');
-        const fallbackContent = await fs.readFile(fallbackPath, 'utf-8');
-        const fallbackConfig = JSON.parse(fallbackContent);
-        return mergeDeep(DEFAULT_HEADER_CONFIG, fallbackConfig);
-      } catch (fallbackError) {
-        console.error(`Failed to load fallback zh header config, using defaults`, fallbackError);
-        return DEFAULT_HEADER_CONFIG;
-      }
-    }
+    console.warn(`Header config for locale ${locale} not found, using default.`, error);
     return DEFAULT_HEADER_CONFIG;
   }
 });
 
-// 获取页脚配置
+// 获取页脚配置（文件不存在直接返回默认配置，不再 fallback 到 zh）
 export const getFooterConfig = cache(async (locale: string): Promise<FooterConfig> => {
   const filePath = path.join(process.cwd(), `data/SiteHeadersFooters/footer/${locale}.json`);
   try {
@@ -231,18 +220,7 @@ export const getFooterConfig = cache(async (locale: string): Promise<FooterConfi
     const userConfig = JSON.parse(content);
     return mergeDeep(DEFAULT_FOOTER_CONFIG, userConfig);
   } catch (error) {
-    console.error(`Failed to load footer config for locale ${locale}:`, error);
-    if (locale !== 'zh') {
-      try {
-        const fallbackPath = path.join(process.cwd(), 'data/SiteHeadersFooters/footer/zh.json');
-        const fallbackContent = await fs.readFile(fallbackPath, 'utf-8');
-        const fallbackConfig = JSON.parse(fallbackContent);
-        return mergeDeep(DEFAULT_FOOTER_CONFIG, fallbackConfig);
-      } catch (fallbackError) {
-        console.error(`Failed to load fallback zh footer config, using defaults`, fallbackError);
-        return DEFAULT_FOOTER_CONFIG;
-      }
-    }
+    console.warn(`Footer config for locale ${locale} not found, using default.`, error);
     return DEFAULT_FOOTER_CONFIG;
   }
 });

@@ -3,15 +3,21 @@ import { getTemplateById } from '@/lib/webbuilder/template-manager';
 import { injectRuntimeDataSafe } from '@/lib/webbuilder/runtime-injector';
 import { getDocsLibBySlug, getDocsTree, getDocBySlug } from '@/lib/docs';
 import WebBuilderClientWrapper from '@/components/webbuilder/WebBuilderClientWrapper';
+import { withDynamicLocale } from '@/lib/withPageLocale';
 
-export default async function DocPage({ params }: { params: { locale: string; libSlug: string; docSlug: string } }) {
+interface DocPageProps {
+  params: Promise<{ locale: string; libSlug: string; docSlug: string }>;
+}
+
+async function DocPage({ params }: DocPageProps) {
   const { locale, libSlug, docSlug } = await params;
+  // setRequestLocale 由 withDynamicLocale 自动处理
 
   // 1. 获取文档库
   const library = await getDocsLibBySlug(locale, libSlug);
   if (!library) notFound();
 
-  // 2. 获取当前文档及内容（使用 URL 中的 libSlug，与 library.slug 相同但确保非空）
+  // 2. 获取当前文档及内容
   const docData = await getDocBySlug(locale, libSlug, docSlug);
   if (!docData) notFound();
   const { doc, content } = docData;
@@ -47,3 +53,5 @@ export default async function DocPage({ params }: { params: { locale: string; li
   const finalData = injectRuntimeDataSafe(template.data, runtime);
   return <WebBuilderClientWrapper data={finalData} />;
 }
+
+export default withDynamicLocale(DocPage);

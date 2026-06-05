@@ -1,8 +1,15 @@
 import { redirect, notFound } from 'next/navigation';
 import { getDocsLibBySlug, getDocsTree } from '@/lib/docs';
+import { withDynamicLocale } from '@/lib/withPageLocale';
 
-export default async function DocsLibRedirectPage({ params }: { params: { locale: string; libSlug: string } }) {
+interface DocsLibRedirectPageProps {
+  params: Promise<{ locale: string; libSlug: string }>;
+}
+
+async function DocsLibRedirectPage({ params }: DocsLibRedirectPageProps) {
   const { locale, libSlug } = await params;
+  // setRequestLocale 由 withDynamicLocale 自动处理
+
   const lib = await getDocsLibBySlug(locale, libSlug);
   if (!lib) notFound();
 
@@ -17,3 +24,5 @@ export default async function DocsLibRedirectPage({ params }: { params: { locale
   }
   redirect(`/${locale}/docs/${libSlug}/${firstSlug}`);
 }
+
+export default withDynamicLocale(DocsLibRedirectPage);

@@ -2,6 +2,7 @@ import { redirect, notFound } from 'next/navigation';
 import { getAllCategories } from '@/lib/products/categories';
 import { generateClientSlug } from '@/lib/utils/clientSlug';
 import { toPinyin } from '@/lib/utils/pinyin';
+import { withDynamicLocale } from '@/lib/withPageLocale';
 
 // 改进的 slug 生成函数：纯英文不经过拼音转换
 function generateSlugFromName(name: string): string {
@@ -14,7 +15,7 @@ function generateSlugFromName(name: string): string {
   return generateClientSlug(name);
 }
 
-export default async function ProductRootPage({ params }: { params: { locale: string } }) {
+async function ProductRootPage({ params }: { params: Promise<{ locale: string }> }) {
   const { locale } = await params;
   const { productLines } = await getAllCategories(locale);
   
@@ -37,3 +38,5 @@ export default async function ProductRootPage({ params }: { params: { locale: st
   
   redirect(`/${locale}/products/${slug}`);
 }
+
+export default withDynamicLocale(ProductRootPage);

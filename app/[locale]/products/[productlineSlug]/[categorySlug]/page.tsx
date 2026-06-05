@@ -3,12 +3,13 @@ import { getTemplateById } from '@/lib/webbuilder/template-manager';
 import { TemplateRenderer } from '@/components/webbuilder/TemplateRenderer';
 import { injectRuntimeDataSafe } from '@/lib/webbuilder/runtime-injector';
 import { fetchProductLineRuntime } from '@/lib/webbuilder/product-line-helpers';
+import { withDynamicLocale } from '@/lib/withPageLocale';
 
 interface Props {
   params: Promise<{ locale: string; productlineSlug: string; categorySlug: string }>;
 }
 
-export default async function CategoryPage({ params }: Props) {
+async function CategoryPage({ params }: Props) {
   let { locale, productlineSlug, categorySlug } = await params;
   productlineSlug = decodeURIComponent(productlineSlug);
   categorySlug = decodeURIComponent(categorySlug);
@@ -27,3 +28,5 @@ export default async function CategoryPage({ params }: Props) {
 
   return <TemplateRenderer data={finalData} />;
 }
+
+export default withDynamicLocale(CategoryPage);

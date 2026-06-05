@@ -1,12 +1,16 @@
-// app/[locale]/collections/[slug]/page.tsx
 import { notFound } from 'next/navigation';
 import { getTemplateById } from '@/lib/webbuilder/template-manager';
 import { injectRuntimeDataSafe } from '@/lib/webbuilder/runtime-injector';
 import { TemplateRenderer } from '@/components/webbuilder/TemplateRenderer';
 import { fetchCollectionRuntime } from '@/lib/webbuilder/collection-helpers';
 import ProductCard from '@/components/front/ProductCard';
+import { withDynamicLocale } from '@/lib/withPageLocale';
 
-export default async function CollectionsPage({ params }: { params: { locale: string; slug: string } }) {
+interface CollectionsPageProps {
+  params: Promise<{ locale: string; slug: string }>;
+}
+
+async function CollectionsPage({ params }: CollectionsPageProps) {
   const { locale, slug } = await params;
   const runtimeData = await fetchCollectionRuntime(locale, slug);
   
@@ -41,26 +45,4 @@ export default async function CollectionsPage({ params }: { params: { locale: st
   return <TemplateRenderer data={finalData} />;
 }
 
-// 原来显示固定显示分类页
-// import { notFound } from 'next/navigation';
-// import { getCategoryBySlug } from '@/lib/products/categories';
-// import { getProductUrlPattern } from '@/lib/products/productSettings';
-// import CollectionProducts from '@/components/front/CollectionProducts';
-
-// export default async function CollectionsPage({ params }: { params: { locale: string; slug: string } }) {
-//   const { locale, slug } = await params;
-//   const category = await getCategoryBySlug(locale, slug);
-//   if (!category) notFound();
-
-//   const urlPattern = await getProductUrlPattern(locale);
-
-//   return (
-//     <CollectionProducts
-//       locale={locale}
-//       categoryId={category.id}
-//       categoryName={category.name}
-//       categoryDescription={category.description || ''}
-//       urlPattern={urlPattern}
-//     />
-//   );
-// }
+export default withDynamicLocale(CollectionsPage);

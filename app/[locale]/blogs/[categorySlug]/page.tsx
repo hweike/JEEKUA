@@ -1,4 +1,3 @@
-// app/[locale]/blogs/[categorySlug]/page.tsx
 import { notFound } from 'next/navigation';
 import fs from 'fs';
 import path from 'path';
@@ -6,8 +5,9 @@ import { getBlogCategories, getBlogPosts } from '@/lib/blog';
 import { getTemplateById } from '@/lib/webbuilder/template-manager';
 import { injectRuntimeDataSafe } from '@/lib/webbuilder/runtime-injector';
 import WebBuilderClientWrapper from '@/components/webbuilder/WebBuilderClientWrapper';
+import { withDynamicLocale } from '@/lib/withPageLocale';
 
-export default async function BlogCategoryPage({
+async function BlogCategoryPage({
   params,
 }: {
   params: Promise<{ locale: string; categorySlug: string }>;
@@ -44,7 +44,7 @@ export default async function BlogCategoryPage({
     );
   }
 
-  // 5. 准备运行时数据（basePath 指向 /blogs/post）
+  // 5. 准备运行时数据
   const runtime = {
     entityType: 'blog-collection',
     categories: categories.map((c) => ({ slug: c.slug, name: c.name })),
@@ -57,3 +57,5 @@ export default async function BlogCategoryPage({
   const finalData = injectRuntimeDataSafe(template.data, runtime);
   return <WebBuilderClientWrapper data={finalData} />;
 }
+
+export default withDynamicLocale(BlogCategoryPage);

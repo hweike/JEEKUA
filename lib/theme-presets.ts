@@ -2,8 +2,8 @@
 import fs from 'fs';
 import path from 'path';
 
-const PRESETS_DIR = path.join(process.cwd(), 'data', 'themes', 'presets');
-const TENANTS_DIR = path.join(process.cwd(), 'data', 'themes', 'tenants');
+const PRESETS_DIR = path.join(/*turbopackIgnore: true*/ process.cwd(), 'data', 'themes', 'presets');
+const TENANTS_DIR = path.join(/*turbopackIgnore: true*/ process.cwd(), 'data', 'themes', 'tenants');
 
 export interface ThemePreset {
   id: string;
@@ -22,7 +22,7 @@ function findPreviewImage(categoryDir: string, baseName: string): string | null 
   for (const ext of extensions) {
     const imagePath = path.join(categoryDir, `${baseName}.${ext}`);
     if (fs.existsSync(imagePath)) {
-      return `/api/theme-preview?path=${encodeURIComponent(path.relative(process.cwd(), imagePath))}`;
+      return `/api/theme-preview?path=${encodeURIComponent(path.relative(/*turbopackIgnore: true*/ process.cwd(), imagePath))}`;
     }
   }
   return null;
