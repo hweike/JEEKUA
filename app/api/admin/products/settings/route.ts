@@ -1,10 +1,6 @@
+// app/api/admin/products/settings/route.ts
 import { NextRequest, NextResponse } from 'next/server';
-import fs from 'fs/promises';
-import path from 'path';
-
-function getSettingsPath(locale: string) {
-  return path.join(process.cwd(), 'data/products', locale, 'settings.json');
-}
+import { getPrivateStorage } from '@/lib/storage/factory';
 
 const DEFAULT_SETTINGS = {
   default_min_order_qty: 1,
@@ -17,23 +13,33 @@ const DEFAULT_SETTINGS = {
   default_mpn: '',
 };
 
+function getStorageKey(locale: string): string {
+  return `products/${locale}/settings.json`;
+}
+
 export async function GET(request: NextRequest) {
   const searchParams = request.nextUrl.searchParams;
   const locale = searchParams.get('locale') || 'zh';
-  const filePath = getSettingsPath(locale);
+  const storage = getPrivateStorage();
+  const key = getStorageKey(locale);
 
   try {
-    const data = await fs.readFile(filePath, 'utf-8');
-    const parsed = JSON.parse(data);
+    const content = await storage.read(key, 'utf8');
+    const parsed = JSON.parse(content as string);
     return NextResponse.json({
       defaultSettings: parsed.defaultSettings ?? null,
       attributeTemplates: Array.isArray(parsed.attributeTemplates) ? parsed.attributeTemplates : [],
     });
-  } catch {
-    return NextResponse.json({
-      defaultSettings: null,
-      attributeTemplates: [],
-    });
+  } catch (error: any) {
+    // 文件不存在时返回空配置
+    if (error?.code === 'NoSuchKey' || error?.Code === 'NoSuchKey' || error?.message?.includes('File not found')) {
+      return NextResponse.json({
+        defaultSettings: null,
+        attributeTemplates: [],
+      });
+    }
+    console.error('GET /settings error:', error);
+    return NextResponse.json({ error: '读取失败' }, { status: 500 });
   }
 }
 
@@ -42,25 +48,29 @@ export async function PUT(request: NextRequest) {
   const locale = searchParams.get('locale') || 'zh';
   try {
     const body = await request.json();
-    const filePath = getSettingsPath(locale);
-    const dir = path.dirname(filePath);
-    await fs.mkdir(dir, { recursive: true });
+    const storage = getPrivateStorage();
+    const key = getStorageKey(locale);
 
     let existingData: any = {};
     try {
-      const existingContent = await fs.readFile(filePath, 'utf-8');
-      existingData = JSON.parse(existingContent);
-    } catch {}
+      const content = await storage.read(key, 'utf8');
+      existingData = JSON.parse(content as string);
+    } catch (error: any) {
+      if (!(error?.code === 'NoSuchKey' || error?.Code === 'NoSuchKey' || error?.message?.includes('File not found'))) {
+        throw error;
+      }
+      // 文件不存在，使用空对象
+    }
 
     const newData = {
       defaultSettings: body.defaultSettings !== undefined ? body.defaultSettings : existingData.defaultSettings,
       attributeTemplates: body.attributeTemplates !== undefined ? body.attributeTemplates : (existingData.attributeTemplates || []),
     };
 
-    await fs.writeFile(filePath, JSON.stringify(newData, null, 2), 'utf-8');
+    await storage.write(key, JSON.stringify(newData, null, 2), { contentType: 'application/json' });
     return NextResponse.json({ success: true });
   } catch (error) {
-    console.error('Failed to save settings:', error);
+    console.error('PUT /settings error:', error);
     return NextResponse.json({ error: '保存失败' }, { status: 500 });
   }
 }
@@ -73,28 +83,33 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'locales 参数必须是非空数组' }, { status: 400 });
     }
 
+    const storage = getPrivateStorage();
     const results = [];
+
     for (const locale of locales) {
       try {
-        const filePath = getSettingsPath(locale);
-        const dir = path.dirname(filePath);
-        await fs.mkdir(dir, { recursive: true });
+        const key = getStorageKey(locale);
 
         let existingAttributeTemplates: any[] = [];
         try {
-          const existingContent = await fs.readFile(filePath, 'utf-8');
-          const existingData = JSON.parse(existingContent);
+          const content = await storage.read(key, 'utf8');
+          const existingData = JSON.parse(content as string);
           if (Array.isArray(existingData.attributeTemplates)) {
             existingAttributeTemplates = existingData.attributeTemplates;
           }
-        } catch {}
+        } catch (error: any) {
+          if (!(error?.code === 'NoSuchKey' || error?.Code === 'NoSuchKey' || error?.message?.includes('File not found'))) {
+            throw error;
+          }
+          // 文件不存在，使用空数组
+        }
 
         const newData = {
           defaultSettings: DEFAULT_SETTINGS,
           attributeTemplates: existingAttributeTemplates,
         };
 
-        await fs.writeFile(filePath, JSON.stringify(newData, null, 2), 'utf-8');
+        await storage.write(key, JSON.stringify(newData, null, 2), { contentType: 'application/json' });
         results.push({ locale, success: true });
       } catch (err: any) {
         results.push({ locale, success: false, error: err.message });
@@ -108,7 +123,7 @@ export async function POST(request: NextRequest) {
       : `${successCount} 个站点成功，${failCount} 个失败`;
     return NextResponse.json({ success: failCount === 0, message, results });
   } catch (error: any) {
-    console.error('Failed to initialize all locales:', error);
+    console.error('POST /settings error:', error);
     return NextResponse.json({ error: error.message || '批量初始化失败' }, { status: 500 });
   }
 }

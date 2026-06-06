@@ -1,8 +1,8 @@
 // lib/webbuilder/template-repo.ts
 import { getPrivateStorage } from '@/lib/storage/factory';
 
-// 私有桶中的基础前缀
-const STORAGE_PREFIX = 'data/webbuilder/templates';
+// 私有桶中的基础前缀（已去掉 data/ 前缀，与其他模块统一）
+const STORAGE_PREFIX = 'webbuilder/templates';
 
 // 扩展 TemplateCategory 包含 product_line 和 document_library
 export type TemplateCategory =
@@ -77,7 +77,8 @@ export async function getAllTemplates(category?: TemplateCategory | null): Promi
         }
       }
     } catch (error: any) {
-      if (!(error?.message?.includes('File not found') || error?.code === 'NoSuchKey')) {
+      // 增强错误捕获：目录不存在（NoSuchKey）时不报错
+      if (!(error?.message?.includes('File not found') || error?.code === 'NoSuchKey' || error?.Code === 'NoSuchKey' || error?.$metadata?.httpStatusCode === 404)) {
         console.error(`Failed to list templates for category ${cat}:`, error);
       }
     }
@@ -97,7 +98,7 @@ export async function getTemplateById(id: string): Promise<Template | null> {
       return JSON.parse(content as string);
     } catch (error: any) {
       // 文件不存在则继续尝试下一个分类
-      if (!(error?.message?.includes('File not found') || error?.code === 'NoSuchKey')) {
+      if (!(error?.message?.includes('File not found') || error?.code === 'NoSuchKey' || error?.Code === 'NoSuchKey' || error?.$metadata?.httpStatusCode === 404)) {
         console.error(`Error reading template ${id} from category ${cat}:`, error);
       }
     }

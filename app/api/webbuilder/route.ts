@@ -1,9 +1,7 @@
+// app/api/webbuilder/route.ts
 import { NextRequest, NextResponse } from 'next/server';
-import fs from 'fs/promises';
-import path from 'path';
 import { supabase } from '@/lib/supabase/client';
-
-const TEMPLATES_DIR = path.join(process.cwd(), 'data/webbuilder/templates');
+import { getPrivateStorage } from '@/lib/storage/factory';
 
 export type TemplateCategory =
   | 'page'
@@ -34,6 +32,19 @@ interface I18nRecord {
   text: string;
 }
 
+// 私有桶中模板存储的基础前缀（无 data/ 前缀）
+const STORAGE_BASE = 'webbuilder/templates';
+
+// 简单内存缓存
+let templatesCache: Template[] | null = null;
+let cacheExpireTime = 0;
+const CACHE_TTL = 30 * 1000; // 30秒
+
+function clearTemplatesCache() {
+  templatesCache = null;
+  cacheExpireTime = 0;
+}
+
 function extractI18nData(data: any): I18nRecord[] {
   const records: I18nRecord[] = [];
   if (!data || typeof data !== 'object') return records;
@@ -61,13 +72,8 @@ function extractI18nData(data: any): I18nRecord[] {
   return records;
 }
 
-async function ensureDir(dir: string) {
-  try {
-    await fs.access(dir);
-  } catch {
-    await fs.mkdir(dir, { recursive: true });
-  }
-}
+// 云存储无需创建目录，保留空实现以兼容
+async function ensureDir(_dir: string): Promise<void> {}
 
 function generateBaseId(): string {
   const chars = 'abcdefghijklmnopqrstuvwxyz0123456789';
@@ -99,62 +105,122 @@ const ALL_CATEGORIES: TemplateCategory[] = [
   'video',
 ];
 
+// 获取模板的存储 Key（无版本后缀时用于查找，实际存储时带版本）
+function getTemplateKey(category: TemplateCategory, baseId: string, version: 'draft' | 'published'): string {
+  return `${STORAGE_BASE}/${category}/${baseId}_${version}.json`;
+}
+
+// 获取某个分类下所有模板文件（包括 draft 和 published）
+async function listTemplateFiles(category: TemplateCategory): Promise<{ key: string; baseId: string; version: 'draft' | 'published' }[]> {
+  const storage = getPrivateStorage();
+  const prefix = `${STORAGE_BASE}/${category}/`;
+  try {
+    const keys = await storage.list(prefix);
+    const result: { key: string; baseId: string; version: 'draft' | 'published' }[] = [];
+    for (const key of keys) {
+      const match = key.match(/\/([^/]+)_(draft|published)\.json$/);
+      if (match) {
+        const baseId = match[1];
+        const version = match[2] as 'draft' | 'published';
+        result.push({ key, baseId, version });
+      }
+    }
+    return result;
+  } catch {
+    return [];
+  }
+}
+
 export async function getAllTemplates(category?: TemplateCategory | null): Promise<Template[]> {
-  await ensureDir(TEMPLATES_DIR);
+  // 检查缓存
+  if (templatesCache && Date.now() < cacheExpireTime) {
+    // 如果有分类筛选，需要过滤（注意缓存的是全量，但为了简单，不清除分类缓存，直接过滤）
+    if (category) {
+      return templatesCache.filter(t => t.category === category);
+    }
+    return templatesCache;
+  }
+
   const categories = category ? [category] : ALL_CATEGORIES;
   const baseMap = new Map<string, Template>();
 
-  for (const cat of categories) {
-    const catDir = path.join(TEMPLATES_DIR, cat);
+  // 并发获取所有分类的文件列表
+  const filesListPromises = categories.map(cat => listTemplateFiles(cat));
+  const filesArrays = await Promise.all(filesListPromises);
+  const allFiles = filesArrays.flat();
+
+  // 并发读取所有文件内容
+  const readPromises = allFiles.map(async (file) => {
+    const storage = getPrivateStorage();
     try {
-      const files = await fs.readdir(catDir);
-      for (const file of files) {
-        if (!file.endsWith('.json')) continue;
-        const content = await fs.readFile(path.join(catDir, file), 'utf-8');
-        const template: Template = JSON.parse(content);
-        const baseId = file.replace(/_(draft|published)\.json$/, '');
-        const existing = baseMap.get(baseId);
-        if (!existing || template.version === 'draft' || new Date(template.updatedAt) > new Date(existing.updatedAt)) {
-          baseMap.set(baseId, template);
-        }
-      }
-    } catch {
-      // 目录不存在则跳过
+      const content = await storage.read(file.key, 'utf8');
+      const template: Template = JSON.parse(content as string);
+      return { template, baseId: file.baseId, version: file.version };
+    } catch (err) {
+      console.error(`读取模板文件失败: ${file.key}`, err);
+      return null;
+    }
+  });
+
+  const results = await Promise.all(readPromises);
+  for (const res of results) {
+    if (!res) continue;
+    const { template, baseId, version } = res;
+    const existing = baseMap.get(baseId);
+    if (!existing || version === 'draft' || new Date(template.updatedAt) > new Date(existing.updatedAt)) {
+      baseMap.set(baseId, template);
     }
   }
 
   const result = Array.from(baseMap.values());
   result.sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime());
+
+  // 存入缓存（全量）
+  if (!category) {
+    templatesCache = result;
+    cacheExpireTime = Date.now() + CACHE_TTL;
+  }
   return result;
 }
 
 export async function getTemplateById(id: string): Promise<Template | null> {
-  await ensureDir(TEMPLATES_DIR);
+  let baseId: string;
+  let version: 'draft' | 'published' | null = null;
+  if (id.endsWith('_draft')) {
+    baseId = id.slice(0, -6);
+    version = 'draft';
+  } else if (id.endsWith('_published')) {
+    baseId = id.slice(0, -10);
+    version = 'published';
+  } else {
+    baseId = id;
+  }
 
-  if (id.endsWith('_draft') || id.endsWith('_published')) {
+  const storage = getPrivateStorage();
+  if (version) {
     for (const cat of ALL_CATEGORIES) {
-      const filePath = path.join(TEMPLATES_DIR, cat, `${id}.json`);
+      const key = getTemplateKey(cat, baseId, version);
       try {
-        const content = await fs.readFile(filePath, 'utf-8');
-        return JSON.parse(content);
+        const content = await storage.read(key, 'utf8');
+        return JSON.parse(content as string);
       } catch {
-        continue;
+        // continue
       }
     }
     return null;
   }
 
+  // 未指定版本，优先返回草稿
   for (const cat of ALL_CATEGORIES) {
-    const catDir = path.join(TEMPLATES_DIR, cat);
+    const draftKey = getTemplateKey(cat, baseId, 'draft');
     try {
-      const draftPath = path.join(catDir, `${id}_draft.json`);
-      const draftContent = await fs.readFile(draftPath, 'utf-8');
-      return JSON.parse(draftContent);
+      const draftContent = await storage.read(draftKey, 'utf8');
+      return JSON.parse(draftContent as string);
     } catch {
+      const pubKey = getTemplateKey(cat, baseId, 'published');
       try {
-        const publishedPath = path.join(catDir, `${id}_published.json`);
-        const publishedContent = await fs.readFile(publishedPath, 'utf-8');
-        return JSON.parse(publishedContent);
+        const pubContent = await storage.read(pubKey, 'utf8');
+        return JSON.parse(pubContent as string);
       } catch {
         continue;
       }
@@ -164,20 +230,20 @@ export async function getTemplateById(id: string): Promise<Template | null> {
 }
 
 export async function deleteTemplate(baseId: string): Promise<boolean> {
-  await ensureDir(TEMPLATES_DIR);
+  const storage = getPrivateStorage();
   let deleted = false;
   for (const cat of ALL_CATEGORIES) {
-    const catDir = path.join(TEMPLATES_DIR, cat);
-    try {
-      const files = await fs.readdir(catDir);
-      for (const file of files) {
-        if (file.startsWith(baseId) && file.endsWith('.json')) {
-          await fs.unlink(path.join(catDir, file));
+    const prefix = `${STORAGE_BASE}/${cat}/`;
+    const keys = await storage.list(prefix);
+    for (const key of keys) {
+      if (key.includes(`/${baseId}_draft.json`) || key.includes(`/${baseId}_published.json`)) {
+        try {
+          await storage.delete(key);
           deleted = true;
+        } catch (err) {
+          console.error(`删除模板文件失败: ${key}`, err);
         }
       }
-    } catch {
-      // 目录不存在
     }
   }
   return deleted;
@@ -224,8 +290,6 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    await ensureDir(TEMPLATES_DIR);
-
     let baseId: string;
     let existingTemplate: Template | null = null;
     if (id) {
@@ -247,8 +311,7 @@ export async function POST(request: NextRequest) {
       baseId = generateBaseId();
     }
 
-    const catDir = path.join(TEMPLATES_DIR, category);
-    await ensureDir(catDir);
+    const storage = getPrivateStorage();
     const now = new Date().toISOString();
     const puckData = Object.keys(data).length > 0 ? data : getDefaultPuckData();
 
@@ -263,18 +326,18 @@ export async function POST(request: NextRequest) {
         createdAt: existingTemplate?.createdAt || now,
         updatedAt: now,
       };
-      const publishedPath = path.join(catDir, `${baseId}_published.json`);
-      await fs.writeFile(publishedPath, JSON.stringify(publishedTemplate, null, 2));
+      const publishedKey = getTemplateKey(category, baseId, 'published');
+      await storage.write(publishedKey, JSON.stringify(publishedTemplate, null, 2), { contentType: 'application/json' });
 
       // 删除草稿
-      const draftPath = path.join(catDir, `${baseId}_draft.json`);
+      const draftKey = getTemplateKey(category, baseId, 'draft');
       try {
-        await fs.unlink(draftPath);
+        await storage.delete(draftKey);
       } catch {}
 
-      // ========== 多语言数据全量替换（Supabase） ==========
+      // 多语言数据全量替换（Supabase）
       try {
-        const siteId = '100001';
+        const siteId = '000001';
         const templateId = publishedTemplate.id;
 
         // 删除旧记录
@@ -317,6 +380,7 @@ export async function POST(request: NextRequest) {
         // 不中断发布流程
       }
 
+      clearTemplatesCache(); // 清除缓存
       return NextResponse.json({
         success: true,
         id: `${baseId}_published`,
@@ -334,10 +398,10 @@ export async function POST(request: NextRequest) {
         createdAt: existingTemplate?.createdAt || now,
         updatedAt: now,
       };
-      const draftPath = path.join(catDir, `${baseId}_draft.json`);
-      await fs.writeFile(draftPath, JSON.stringify(draftTemplate, null, 2));
+      const draftKey = getTemplateKey(category, baseId, 'draft');
+      await storage.write(draftKey, JSON.stringify(draftTemplate, null, 2), { contentType: 'application/json' });
 
-      // 保存草稿时不操作数据库
+      clearTemplatesCache(); // 清除缓存
       return NextResponse.json({
         success: true,
         id: `${baseId}_draft`,
@@ -357,9 +421,10 @@ export async function POST(request: NextRequest) {
         createdAt: now,
         updatedAt: now,
       };
-      const filePath = path.join(catDir, `${newId}_draft.json`);
-      await fs.writeFile(filePath, JSON.stringify(newTemplate, null, 2));
+      const newKey = getTemplateKey(category, newId, 'draft');
+      await storage.write(newKey, JSON.stringify(newTemplate, null, 2), { contentType: 'application/json' });
 
+      clearTemplatesCache(); // 清除缓存
       return NextResponse.json({
         success: true,
         id: `${newId}_draft`,
@@ -389,17 +454,17 @@ export async function DELETE(request: NextRequest) {
 
     let templateData: Template | null = null;
     for (const cat of ALL_CATEGORIES) {
-      const catDir = path.join(TEMPLATES_DIR, cat);
+      const draftKey = getTemplateKey(cat, baseId, 'draft');
+      const pubKey = getTemplateKey(cat, baseId, 'published');
+      const storage = getPrivateStorage();
       try {
-        const draftPath = path.join(catDir, `${baseId}_draft.json`);
-        const content = await fs.readFile(draftPath, 'utf-8');
-        templateData = JSON.parse(content);
+        const content = await storage.read(draftKey, 'utf8');
+        templateData = JSON.parse(content as string);
         break;
       } catch {
         try {
-          const publishedPath = path.join(catDir, `${baseId}_published.json`);
-          const content = await fs.readFile(publishedPath, 'utf-8');
-          templateData = JSON.parse(content);
+          const content = await storage.read(pubKey, 'utf8');
+          templateData = JSON.parse(content as string);
           break;
         } catch {
           continue;
@@ -422,7 +487,7 @@ export async function DELETE(request: NextRequest) {
 
     // 删除数据库中的多语言记录
     try {
-      const siteId = '100001';
+      const siteId = '000001';
       const templateIds = [`${baseId}_published`, `${baseId}_draft`];
       const { error } = await supabase
         .from('component_texts')
@@ -436,6 +501,7 @@ export async function DELETE(request: NextRequest) {
       console.warn('Failed to delete i18n records for template:', err);
     }
 
+    clearTemplatesCache(); // 清除缓存
     return NextResponse.json({ success: true });
   } catch (error) {
     console.error('DELETE /api/webbuilder error:', error);

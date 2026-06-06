@@ -1,4 +1,3 @@
-// components/webbuilder/WebBuilderClient.tsx
 'use client';
 
 import { Puck, Render, legacySideBarPlugin } from '@puckeditor/core';
@@ -11,7 +10,14 @@ import '@puckeditor/core/puck.css';
 
 const legacySideBar = legacySideBarPlugin();
 
-// ... 接口定义保持不变
+interface WebBuilderClientProps {
+  data: any;
+  onSave?: (data: any) => Promise<void>;
+  onPublish?: (data: any) => Promise<void>;
+  readOnly?: boolean;
+  initialTitle?: string;
+  initialCategory?: string;
+}
 
 export default function WebBuilderClient({
   data: initialData,
@@ -23,8 +29,11 @@ export default function WebBuilderClient({
     if (initialData && Array.isArray(initialData.content)) return initialData;
     return { root: { props: {} }, content: [], zones: {} };
   });
+  const [isPublishing, setIsPublishing] = useState(false);
 
   const handlePublish = async (puckData: any) => {
+    if (isPublishing) return;
+    setIsPublishing(true);
     setData(puckData);
     if (onPublish) {
       try {
@@ -32,7 +41,11 @@ export default function WebBuilderClient({
         toast.success('发布成功');
       } catch (error) {
         toast.error('发布失败');
+      } finally {
+        setIsPublishing(false);
       }
+    } else {
+      setIsPublishing(false);
     }
   };
 
@@ -47,11 +60,8 @@ export default function WebBuilderClient({
       onPublish={handlePublish}
       plugins={[legacySideBar]}
       overrides={{
-        // 🔥 注册自定义字段类型
         fieldTypes: customFieldTypes,
-        // 🔥 覆盖属性面板渲染
         fields: ({ children, itemSelector }) => {
-          // 没有选中任何组件时，显示提示
           if (!itemSelector) {
             return (
               <div className="p-4 text-center text-gray-400 text-sm">
@@ -59,7 +69,6 @@ export default function WebBuilderClient({
               </div>
             );
           }
-          // 使用自定义渲染器
           return children;
         },
         headerActions: ({ children }) => <>{children}</>,

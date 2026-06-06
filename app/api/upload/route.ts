@@ -1,7 +1,6 @@
 // app/api/upload/route.ts
 import { NextRequest, NextResponse } from 'next/server';
-import fs from 'fs/promises';
-import path from 'path';
+import { getPublicStorage } from '@/lib/storage/factory';
 
 export async function POST(request: NextRequest) {
   try {
@@ -19,20 +18,18 @@ export async function POST(request: NextRequest) {
     const bytes = await file.arrayBuffer();
     const buffer = Buffer.from(bytes);
 
+    // 生成唯一文件名（保留原扩展名）
     const timestamp = Date.now();
-    const ext = path.extname(file.name);
-    const filename = `upload_${timestamp}${ext}`;
-    
-    const uploadDir = path.join(process.cwd(), 'public', 'uploads');
-    await fs.mkdir(uploadDir, { recursive: true });
-    
-    const filePath = path.join(uploadDir, filename);
-    await fs.writeFile(filePath, buffer);
+    const ext = file.name.split('.').pop() || 'jpg';
+    const filename = `upload_${timestamp}.${ext}`;
+    const key = `uploads/${filename}`; // 公开桶中的路径
 
-    // 🔥 关键修复：构建绝对 URL，避免被多语言路由拦截
-    const host = request.headers.get('host') || 'localhost:3000';
-    const protocol = process.env.NODE_ENV === 'development' ? 'http' : 'https';
-    const url = `${protocol}://${host}/uploads/${filename}`;
+    // 上传到公开桶
+    const storage = getPublicStorage();
+    await storage.write(key, buffer, { contentType: file.type });
+
+    // 获取公开访问 URL（优先使用自定义域名，否则使用 R2.dev 子域）
+    const url = storage.getPublicUrl(key);
 
     return NextResponse.json({ success: true, url });
   } catch (error) {

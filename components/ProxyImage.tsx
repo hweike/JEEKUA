@@ -31,12 +31,27 @@ export default function ProxyImage({
 
   useEffect(() => {
     if (!src) return;
-    // 如果是本地已上传的图片（以 /uploads/ 开头），不需要代理
-    if (src.startsWith('/uploads/') || src.startsWith('/api/upload') || src.includes('localhost') || src.includes('127.0.0.1')) {
+
+    // 1. 本地相对路径（以 /uploads/ 或 /api/upload 开头）直接使用
+    if (src.startsWith('/uploads/') || src.startsWith('/api/upload')) {
       setProxyUrl(src);
       return;
     }
-    // 其他外部图片，走代理
+
+    // 2. 本地开发地址直接使用
+    if (src.includes('localhost') || src.includes('127.0.0.1')) {
+      setProxyUrl(src);
+      return;
+    }
+
+    // 3. 云存储公开 URL（包含 /uploads/ 的绝对路径）直接使用
+    //    这包括 R2 默认域名或自定义 CDN 域名下的图片
+    if (src.includes('/uploads/')) {
+      setProxyUrl(src);
+      return;
+    }
+
+    // 4. 其他外部图片，走代理（防止防盗链、跨域等问题）
     setProxyUrl(`/api/proxy-image?url=${encodeURIComponent(src)}`);
   }, [src]);
 
@@ -59,7 +74,7 @@ export default function ProxyImage({
           className={className}
           sizes={sizes}
           priority={priority}
-          unoptimized // 因为已经是代理，可以直接使用原生优化？为了性能不再次优化，可去掉
+          unoptimized
           onError={() => setError(true)}
           referrerPolicy={referrerPolicy}
         />

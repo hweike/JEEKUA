@@ -1,8 +1,8 @@
-// lib/theme.ts
+// lib/theme-utils.ts
 import { getPrivateStorage } from '@/lib/storage/factory';
 
-// 私有桶中的存储 Key
-const ACTIVE_THEME_KEY = 'data/themes/active-theme.json';
+// 私有桶中的存储 Key（localPathToKey 会自动去掉开头的 "data/"，因此这里不需要加 "data/"）
+const ACTIVE_THEME_KEY = 'themes/active-theme.json';
 
 // 默认主题（当 active-theme.json 不存在时使用）
 const DEFAULT_THEME = {
@@ -53,8 +53,8 @@ export async function getActiveTheme(): Promise<any> {
     const content = await storage.read(ACTIVE_THEME_KEY, 'utf8');
     return JSON.parse(content as string);
   } catch (error: any) {
-    if (error?.message?.includes('File not found') || error?.code === 'NoSuchKey') {
-      // 文件不存在，返回默认主题的深拷贝
+    // 文件不存在时返回默认主题深拷贝
+    if (error?.Code === 'NoSuchKey' || error?.code === 'NoSuchKey' || error?.message?.includes('NoSuchKey')) {
       return JSON.parse(JSON.stringify(DEFAULT_THEME));
     }
     console.error('读取激活主题失败:', error);
@@ -66,11 +66,16 @@ export async function getActiveTheme(): Promise<any> {
  * 保存激活的主题
  * @param theme 主题配置对象
  */
-export async function saveActiveTheme(theme: any): Promise<void> {
+export async function saveActiveTheme(theme: { name: string }): Promise<void> {
   const storage = getPrivateStorage();
-  await storage.write(ACTIVE_THEME_KEY, JSON.stringify(theme, null, 2), {
-    contentType: 'application/json',
-  });
+  const key = ACTIVE_THEME_KEY;
+  try {
+    await storage.write(key, JSON.stringify(theme, null, 2), {
+      contentType: 'application/json',
+    });
+  } catch (err) {
+    throw err; // 重新抛出，让 API 返回错误
+  }
 }
 
 /**

@@ -5,7 +5,7 @@ import type { Customer } from '@/lib/CRM/types';
 
 export async function GET() {
   try {
-    const customers = getAllCustomers();
+    const customers = await getAllCustomers(); // ✅ 添加 await
     return NextResponse.json(customers);
   } catch (error) {
     console.error('GET /api/admin/crm error:', error);
@@ -24,7 +24,7 @@ export async function POST(request: Request) {
       createdAt: new Date().toISOString().slice(0, 19).replace('T', ' '),
       ...body,
     };
-    createCustomer(newCustomer);
+    await createCustomer(newCustomer); // ✅ 添加 await
     return NextResponse.json(newCustomer, { status: 201 });
   } catch (error) {
     console.error('POST /api/admin/crm error:', error);

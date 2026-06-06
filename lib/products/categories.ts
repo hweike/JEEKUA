@@ -15,7 +15,7 @@ function normalizeProductLine(raw: any) {
  * 获取分类 JSON 文件在私有桶中的 Key
  */
 function getCategoriesKey(locale: string): string {
-  return `data/products/${locale}/categories.json`;
+  return `products/${locale}/categories.json`;
 }
 
 /**

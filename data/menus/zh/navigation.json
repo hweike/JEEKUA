@@ -16,7 +16,7 @@
       "parentId": null,
       "label": "产品",
       "linkType": "internal",
-      "linkValue": "/products/mornsun",
+      "linkValue": "/products/power",
       "order": 1
     },
     {
@@ -64,104 +64,8 @@
       "parentId": null,
       "label": "联系我们",
       "linkType": "internal",
-      "linkValue": "/ContactTTTTAAA",
+      "linkValue": "/contact",
       "order": 7
-    },
-    {
-      "id": "1b8bee78-0882-43d2-9ffc-0b67559acbcd",
-      "parentId": null,
-      "label": "",
-      "linkType": "internal",
-      "linkValue": "",
-      "order": 8
-    },
-    {
-      "id": "dfcf938a-7f3f-40e4-9049-5fdbb1eea96d",
-      "parentId": null,
-      "label": "",
-      "linkType": "internal",
-      "linkValue": "",
-      "order": 9
-    },
-    {
-      "id": "32b8d1cd-02f8-4819-921a-32bd5fff6842",
-      "parentId": "7b3e2f1a-4c5d-4e6f-8a9b-0c1d2e3f4a5b",
-      "label": "111",
-      "linkType": "internal",
-      "linkValue": "/products",
-      "order": 0
-    },
-    {
-      "id": "bc9196d0-c062-4228-8fc2-648363e6e229",
-      "parentId": "7b3e2f1a-4c5d-4e6f-8a9b-0c1d2e3f4a5b",
-      "label": "122",
-      "linkType": "internal",
-      "linkValue": "/products",
-      "order": 1
-    },
-    {
-      "id": "70ea8e18-f595-4fc4-83eb-ffd3fd0434bd",
-      "parentId": "7b3e2f1a-4c5d-4e6f-8a9b-0c1d2e3f4a5b",
-      "label": "133",
-      "linkType": "internal",
-      "linkValue": "/products",
-      "order": 2
-    },
-    {
-      "id": "765d469a-17d0-4906-ab51-826967da90ae",
-      "parentId": "7b3e2f1a-4c5d-4e6f-8a9b-0c1d2e3f4a5b",
-      "label": "5555",
-      "linkType": "internal",
-      "linkValue": "/products",
-      "order": 3
-    },
-    {
-      "id": "8cda87af-c917-4b69-91bb-7daa88f78218",
-      "parentId": "32b8d1cd-02f8-4819-921a-32bd5fff6842",
-      "label": "12223",
-      "linkType": "internal",
-      "linkValue": "/products",
-      "order": 0
-    },
-    {
-      "id": "0737fe21-f502-4c22-b36a-c34e01f90c93",
-      "parentId": "32b8d1cd-02f8-4819-921a-32bd5fff6842",
-      "label": "112333",
-      "linkType": "internal",
-      "linkValue": "/products",
-      "order": 1
-    },
-    {
-      "id": "85e9928d-4028-4c10-9ee7-48cdad5aeed3",
-      "parentId": "70ea8e18-f595-4fc4-83eb-ffd3fd0434bd",
-      "label": "3333",
-      "linkType": "internal",
-      "linkValue": "/products",
-      "order": 0
-    },
-    {
-      "id": "fc863c34-5352-44b7-8fb5-79d9bf5417eb",
-      "parentId": "765d469a-17d0-4906-ab51-826967da90ae",
-      "label": "",
-      "linkType": "internal",
-      "linkValue": "",
-      "order": 0
-    },
-    {
-      "id": "7f0a716c-4a50-4831-b270-18fd902dce4b",
-      "parentId": "a1b2c3d4-e5f6-4a7b-8c9d-0e1f2a3b4c5d",
-      "label": "2222",
-      "linkType": "internal",
-      "linkValue": "/products",
-      "order": 0
-    },
-    {
-      "id": "bf2d99c5-337d-4e96-b632-75906f64abf7",
-      "parentId": "a1b2c3d4-e5f6-4a7b-8c9d-0e1f2a3b4c5d",
-      "label": "333",
-      "linkType": "internal",
-      "linkValue": "/products",
-      "order": 1
     }
   ]
 }

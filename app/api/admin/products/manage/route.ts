@@ -1,3 +1,4 @@
+// app/api/admin/products/manage/route.ts
 import { NextRequest, NextResponse } from 'next/server';
 import { readProduct, writeProduct, deleteProduct } from '@/lib/products/mdParser';
 import {
@@ -14,19 +15,18 @@ import {
 import { getProductSettings } from '@/lib/products/productSettings';
 import { generateSlug, generateSeoTitle, generateSeoDescription } from '@/lib/products/seoGenerator';
 import { generateUniqueProductId } from '@/lib/utils/idGenerator';
-import fs from 'fs';
-import path from 'path';
 import { supabase } from '@/lib/supabase/client';
+import { getPrivateStorage } from '@/lib/storage/factory';
 
-// ✅ 固定站点 ID（按修改意见）
 const DEFAULT_SITE_ID = '000001';
 
-// ==================== 辅助函数 ====================
+// ==================== 辅助函数（改为云存储） ====================
 async function getSiteSettings() {
-  const settingsPath = path.join(process.cwd(), 'data', 'settings.json');
+  const storage = getPrivateStorage();
+  const key = 'settings.json'; // 无 data/ 前缀
   try {
-    const data = await fs.promises.readFile(settingsPath, 'utf-8');
-    return JSON.parse(data);
+    const content = await storage.read(key, 'utf8');
+    return JSON.parse(content as string);
   } catch {
     return { site_name: '我的网站' };
   }
@@ -42,11 +42,14 @@ function getPriceRange(tiers: any[], currency: string): string {
   return `${min} - ${max} ${currency}`;
 }
 
-function getProductType(locale: string, categoryId: string, seriesId?: string): string {
+// 从私有桶读取分类数据
+async function getProductType(locale: string, categoryId: string, seriesId?: string): Promise<string> {
   if (categoryId === '__UNCATEGORIZED__') return '';
-  const categoriesPath = path.join(process.cwd(), 'data', 'products', locale, 'categories.json');
+  const storage = getPrivateStorage();
+  const key = `products/${locale}/categories.json`;
   try {
-    const data = JSON.parse(fs.readFileSync(categoriesPath, 'utf-8'));
+    const content = await storage.read(key, 'utf8');
+    const data = JSON.parse(content as string);
     const categories = data.categories || [];
     const cat = categories.find((c: any) => c.id === categoryId);
     if (!cat) return '';
@@ -98,7 +101,6 @@ export async function GET(request: NextRequest) {
     const uncategorized = searchParams.get('uncategorized') === 'true';
 
     if (uncategorized) {
-      // 直接从 Supabase 查询未分类产品
       let query = supabase
         .from('products')
         .select('*', { count: 'exact' })
@@ -238,7 +240,7 @@ export async function POST(request: NextRequest) {
     if (!categoryId) return NextResponse.json({ error: 'categoryId is required' }, { status: 400 });
     const seriesId = body.seriesId;
 
-    let productLineId = body.productLineId || getProductLineIdFromCategory(locale, categoryId);
+    let productLineId = body.productLineId || (await getProductLineIdFromCategory(locale, categoryId));
     if (!productLineId) return NextResponse.json({ error: '无法确定产品线' }, { status: 400 });
 
     const siteSettings = await getSiteSettings();
@@ -281,7 +283,7 @@ export async function POST(request: NextRequest) {
       mpn = processMpn(defaultSettings.default_mpn, sku);
     }
 
-    const product_type = getProductType(locale, categoryId, seriesId);
+    const product_type = await getProductType(locale, categoryId, seriesId);
 
     const frontMatter = {
       id: productId,
@@ -420,7 +422,7 @@ export async function PUT(request: NextRequest) {
     const seriesId = body.seriesId;
     if (!categoryId) return NextResponse.json({ error: 'categoryId required' }, { status: 400 });
 
-    let productLineId = body.productLineId || getProductLineIdFromCategory(locale, categoryId);
+    let productLineId = body.productLineId || (await getProductLineIdFromCategory(locale, categoryId));
     if (!productLineId) return NextResponse.json({ error: '无法确定产品线' }, { status: 400 });
 
     const existingMd = await readProduct(locale, productId);
@@ -445,7 +447,7 @@ export async function PUT(request: NextRequest) {
     }
     final.sku = sku;
 
-    const product_type = getProductType(locale, categoryId, seriesId);
+    const product_type = await getProductType(locale, categoryId, seriesId);
 
     const firstTier = (final.price_tiers && final.price_tiers[0]) || { min_qty: 1, price: 0 };
     const extractedMinOrderQty = firstTier.min_qty;
@@ -578,29 +580,14 @@ export async function DELETE(request: NextRequest) {
       }
     }
 
-    // 2. 删除父产品的物理 MD 文件
-    const filePath = path.join(process.cwd(), 'data', 'products', locale, 'products', `${productId}.md`);
-    let fileDeleted = false;
-    try {
-      if (fs.existsSync(filePath)) {
-        await fs.promises.unlink(filePath);
-        fileDeleted = true;
-        console.log(`已删除产品文件: ${filePath}`);
-      } else {
-        console.warn(`产品文件不存在: ${filePath}`);
-      }
-    } catch (err: any) {
-      console.error(`删除产品文件失败: ${filePath}`, err);
-    }
-
-    // 3. 调用原有的 deleteProduct（兼容）
+    // 2. 删除父产品的物理 MD 文件（通过已升级的 deleteProduct 函数）
     try {
       await deleteProduct(locale, productId);
     } catch (err: any) {
-      console.warn(`deleteProduct 调用失败（可忽略）: ${err.message}`);
+      console.warn(`deleteProduct 调用失败: ${err.message}`);
     }
 
-    // 4. 删除父产品索引
+    // 3. 删除父产品索引
     try {
       await deleteProductIndex(productId);
     } catch (err: any) {
@@ -608,7 +595,7 @@ export async function DELETE(request: NextRequest) {
       return NextResponse.json({ error: `删除索引失败: ${err.message}` }, { status: 500 });
     }
 
-    // 5. 删除产品与资源的关联记录
+    // 4. 删除产品与资源的关联记录
     try {
       const { error: resourceError } = await supabase
         .from('resource_product')
@@ -621,7 +608,7 @@ export async function DELETE(request: NextRequest) {
       console.error(`删除产品关联资源失败: ${productId}`, err);
     }
 
-    return NextResponse.json({ success: true, fileDeleted });
+    return NextResponse.json({ success: true });
   } catch (error) {
     console.error('DELETE /products/manage error:', error);
     return NextResponse.json({ error: error instanceof Error ? error.message : '删除失败' }, { status: 500 });

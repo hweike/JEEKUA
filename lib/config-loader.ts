@@ -1,4 +1,4 @@
-// lib/config.ts
+// lib/config-loader.ts
 import { cache } from 'react';
 import { getPrivateStorage } from '@/lib/storage/factory';
 
@@ -205,16 +205,21 @@ async function readConfigFile(key: string): Promise<any | null> {
     const content = await storage.read(key, 'utf8');
     return JSON.parse(content as string);
   } catch (error: any) {
-    if (error?.message?.includes('File not found') || error?.code === 'NoSuchKey') {
+    // ✅ 增强错误捕获：检查多种可能的 404 标识
+    if (error?.code === 'NoSuchKey' ||
+        error?.Code === 'NoSuchKey' ||
+        error?.$metadata?.httpStatusCode === 404 ||
+        (error?.message && (error.message.includes('NoSuchKey') || error.message.includes('not found')))) {
       return null;
     }
+    // 其他错误继续抛出
     throw error;
   }
 }
 
 // 获取页头配置（文件不存在直接返回默认配置）
 export const getHeaderConfig = cache(async (locale: string): Promise<HeaderConfig> => {
-  const key = `data/SiteHeadersFooters/header/${locale}.json`;
+  const key = `SiteHeadersFooters/header/${locale}.json`;
   const userConfig = await readConfigFile(key);
   if (!userConfig) {
     console.warn(`Header config for locale ${locale} not found, using default.`);
@@ -225,7 +230,7 @@ export const getHeaderConfig = cache(async (locale: string): Promise<HeaderConfi
 
 // 获取页脚配置（文件不存在直接返回默认配置）
 export const getFooterConfig = cache(async (locale: string): Promise<FooterConfig> => {
-  const key = `data/SiteHeadersFooters/footer/${locale}.json`;
+  const key = `SiteHeadersFooters/footer/${locale}.json`;
   const userConfig = await readConfigFile(key);
   if (!userConfig) {
     console.warn(`Footer config for locale ${locale} not found, using default.`);
@@ -236,13 +241,13 @@ export const getFooterConfig = cache(async (locale: string): Promise<FooterConfi
 
 // 获取固定菜单（navigation / footer）- 文件不存在返回 null
 async function getFixedMenu(locale: string, menuSourceId: 'navigation' | 'footer'): Promise<Menu | null> {
-  const key = `data/menus/${locale}/${menuSourceId}.json`;
+  const key = `menus/${locale}/${menuSourceId}.json`;
   return await readConfigFile(key);
 }
 
 // 获取自定义菜单（从 custom_menus.json 中按 ID 查找）
 async function getCustomMenuById(locale: string, menuId: string | number): Promise<Menu | null> {
-  const key = `data/menus/${locale}/custom_menus.json`;
+  const key = `menus/${locale}/custom_menus.json`;
   const customMenus = await readConfigFile(key);
   if (!customMenus || !Array.isArray(customMenus)) return null;
   const target = customMenus.find(menu => String(menu.id) === String(menuId));

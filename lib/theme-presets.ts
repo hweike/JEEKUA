@@ -1,5 +1,5 @@
 // lib/theme-presets.ts
-import { getPrivateStorage, getPublicStorage } from '@/lib/storage/factory';
+import { getPrivateStorage } from '@/lib/storage/factory';
 
 export interface ThemePreset {
   id: string;
@@ -13,144 +13,113 @@ export interface ThemePreset {
   };
 }
 
-/**
- * 异步查找预览图在公开桶中的 URL
- * @param category 分类名称
- * @param baseName 文件名基础名（不含扩展名）
- * @returns 公开 URL 或 null
- */
-async function findPreviewImage(category: string, baseName: string): Promise<string | null> {
-  const extensions = ['png', 'jpg', 'jpeg', 'webp', 'gif'];
-  const publicStorage = getPublicStorage();
-  // 公开桶中的基础前缀（与私有桶 JSON 路径对应，但图片放在公开桶）
-  const publicPrefix = `themes/presets/${category}/`;
-  for (const ext of extensions) {
-    const key = `${publicPrefix}${baseName}.${ext}`;
-    try {
-      // 检查文件是否存在（通过 list 或直接读取元数据，这里使用 list 判断）
-      const keys = await publicStorage.list(publicPrefix);
-      if (keys.includes(key)) {
-        // 返回公开访问 URL（优先使用自定义域名）
-        return publicStorage.getPublicUrl(key);
-      }
-    } catch {
-      // 忽略错误，继续尝试下一个扩展名
+// 硬编码默认主题（仅用于 R2 中无数据时的 fallback）
+const DEFAULT_PRESETS: ThemePreset[] = [
+  {
+    id: 'Blue_default',
+    category: 'Blue',
+    name: 'default',
+    color: '#3b82f6',
+    previewImage: null,
+    cssVars: {
+      light: { '--primary': '#3b82f6', '--background': '#ffffff', '--foreground': '#0f172a' },
+      dark: { '--primary': '#60a5fa', '--background': '#0f172a', '--foreground': '#f8fafc' }
     }
+  }
+];
+
+/**
+ * 在私有桶中查找预览图片，返回代理 API URL
+ */
+async function findPreviewImageInR2(category: string, baseName: string): Promise<string | null> {
+  const storage = getPrivateStorage();
+  const extensions = ['png', 'jpg', 'jpeg', 'webp', 'gif'];
+  const prefix = `themes/presets/${category}`; // 关键修改：去掉 data/ 前缀
+  try {
+    const files = await storage.list(prefix);
+    for (const ext of extensions) {
+      const imgKey = `${prefix}/${baseName}.${ext}`;
+      if (files.includes(imgKey)) {
+        // 通过代理 API 返回图片（该 API 会从私有桶读取）
+        return `/api/theme-preview?path=${encodeURIComponent(imgKey)}`;
+      }
+    }
+  } catch (err) {
+    console.warn(`查找图片失败 ${category}/${baseName}:`, err);
   }
   return null;
 }
 
-/**
- * 获取所有主题预设（从私有桶读取）
- */
 export async function getAllThemePresets(): Promise<ThemePreset[]> {
-  const storage = getPrivateStorage();
+  const privateStorage = getPrivateStorage();
   const presets: ThemePreset[] = [];
-  const prefix = 'data/themes/presets/';
+  const prefix = 'themes/presets'; // 去掉 data/
 
   try {
-    // 列出所有分类目录（二级目录）
-    const allKeys = await storage.list(prefix);
+    // 列出所有分类（二级目录）
+    const allKeys = await privateStorage.list(prefix);
     const categories = new Set<string>();
     for (const key of allKeys) {
-      // 格式: data/themes/presets/{category}/{file}.json
       const parts = key.split('/');
-      if (parts.length >= 4) {
-        categories.add(parts[3]); // 分类目录名
-      }
+      if (parts.length >= 3) categories.add(parts[2]); // themes/presets/{category}/...
     }
 
     for (const category of categories) {
-      const categoryPrefix = `${prefix}${category}/`;
-      const categoryKeys = await storage.list(categoryPrefix);
-      const jsonKeys = categoryKeys.filter(k => k.endsWith('.json'));
+      const categoryPrefix = `${prefix}/${category}/`;
+      const keys = await privateStorage.list(categoryPrefix);
+      const jsonKeys = keys.filter(k => k.endsWith('.json'));
       for (const key of jsonKeys) {
         try {
-          const content = await storage.read(key, 'utf8');
+          const content = await privateStorage.read(key, 'utf8');
           const themeJson = JSON.parse(content as string);
-          let lightVars = {};
-          let darkVars = {};
-          if (themeJson.cssVars) {
-            if (themeJson.cssVars.light) lightVars = themeJson.cssVars.light;
-            if (themeJson.cssVars.dark) darkVars = themeJson.cssVars.dark;
-          } else if (themeJson.light && themeJson.dark) {
-            lightVars = themeJson.light;
-            darkVars = themeJson.dark;
-          } else if (themeJson.colors) {
-            lightVars = themeJson.colors;
-          }
+          let lightVars = themeJson.cssVars?.light || themeJson.colors || {};
+          let darkVars = themeJson.cssVars?.dark || {};
           const primaryColor = (lightVars as any)['--primary'] || (lightVars as any)['primary'] || '#3b82f6';
           const fileName = key.split('/').pop() || '';
           const themeName = themeJson.name || fileName.replace(/\.json$/, '');
           const presetId = `${category}_${fileName.replace(/\.json$/, '')}`;
           const baseName = fileName.replace(/\.json$/, '');
-          const previewImage = await findPreviewImage(category, baseName);
-
+          const previewImage = await findPreviewImageInR2(category, baseName);
           presets.push({
             id: presetId,
             category,
             name: themeName,
             color: primaryColor,
             previewImage,
-            cssVars: {
-              light: lightVars,
-              dark: darkVars,
-            },
+            cssVars: { light: lightVars, dark: darkVars },
           });
         } catch (err) {
-          console.error(`解析主题文件失败: ${key}`, err);
+          console.error(`解析预设主题文件失败: ${key}`, err);
         }
       }
     }
   } catch (err) {
-    console.error('获取主题预设失败:', err);
+    console.error('从 R2 读取预设主题失败:', err);
+  }
+
+  if (presets.length === 0) {
+    console.warn('R2 中没有预设主题数据，使用内置默认主题');
+    return DEFAULT_PRESETS;
   }
   return presets;
 }
 
-/**
- * 获取当前激活的主题 ID
- * @param tenantId 租户 ID，默认为 'tenant_001'
- */
+// 获取当前激活的主题 ID（从私有桶读取 themes/active-theme.json）
 export async function getActiveThemeId(tenantId: string = 'tenant_001'): Promise<string> {
-  const storage = getPrivateStorage();
-  const key = `data/themes/tenants/${tenantId}.json`;
+  const privateStorage = getPrivateStorage();
+  // 注意：根据迁移路径，激活主题文件为 themes/active-theme.json
+  const key = `themes/active-theme.json`;
   try {
-    const content = await storage.read(key, 'utf8');
-    const tenantTheme = JSON.parse(content as string);
-    return tenantTheme.activePresetId || '';
+    const content = await privateStorage.read(key, 'utf8');
+    const { name } = JSON.parse(content as string);
+    return name || '';
   } catch {
     return '';
   }
 }
 
-/**
- * 应用主题预设（保存到租户配置）
- * @param tenantId 租户 ID
- * @param presetId 主题预设 ID
- */
+// 应用主题预设（保存租户配置，可酌情实现）
 export async function applyThemePreset(tenantId: string, presetId: string): Promise<void> {
-  const presets = await getAllThemePresets();
-  const preset = presets.find(p => p.id === presetId);
-  if (!preset) throw new Error(`Theme preset "${presetId}" not found`);
-
-  const tenantTheme = {
-    activePresetId: presetId,
-    name: tenantId,
-    displayName: `${preset.name} 主题`,
-    colors: preset.cssVars.light,
-    darkColors: preset.cssVars.dark,
-    typography: {},
-    spacing: {},
-    borderRadius: {},
-    shadows: {},
-    animation: {},
-    darkMode: 'system',
-  };
-
-  const storage = getPrivateStorage();
-  const key = `data/themes/tenants/${tenantId}.json`;
-  await storage.write(key, JSON.stringify(tenantTheme, null, 2), {
-    contentType: 'application/json',
-  });
+  // 可根据需要实现，这里仅占位
+  throw new Error('Not implemented');
 }

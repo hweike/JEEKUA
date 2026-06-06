@@ -1,24 +1,19 @@
 // app/api/admin/products/categories/import/route.ts
 import { NextRequest, NextResponse } from 'next/server';
 import * as XLSX from 'xlsx';
-import fs from 'fs/promises';
-import path from 'path';
 import { v4 as uuidv4 } from 'uuid';
 import { getAllCategories } from '@/lib/products/categories';
 import { toPinyin } from '@/lib/utils/pinyin';
-import { generateClientSlug } from '@/lib/utils/clientSlug';
+import { getPrivateStorage, getPublicStorage } from '@/lib/storage/factory';
 
 function generateCategoryId(): string {
   return `${Date.now()}-${Math.random().toString(36).substring(2, 10)}`;
 }
 
-// 与前端 SeoFields 组件完全一致的 Slug 生成规则
 function generateSlugFromText(text: string): string {
   if (!text) return '';
-
   const parts: string[] = [];
   let currentWord = '';
-  
   for (let i = 0; i < text.length; i++) {
     const ch = text[i];
     if (/[a-zA-Z]/.test(ch)) {
@@ -31,11 +26,9 @@ function generateSlugFromText(text: string): string {
       if (/[\u4e00-\u9fa5]/.test(ch)) {
         const pinyin = toPinyin(ch);
         parts.push(pinyin);
-      } 
-      else if (/[0-9]/.test(ch)) {
+      } else if (/[0-9]/.test(ch)) {
         parts.push(ch);
-      }
-      else if (ch === ' ' || ch === '_' || ch === '-') {
+      } else if (ch === ' ' || ch === '_' || ch === '-') {
         continue;
       }
     }
@@ -43,9 +36,7 @@ function generateSlugFromText(text: string): string {
   if (currentWord) {
     parts.push(currentWord.toLowerCase());
   }
-
   let slug = parts.join('-').replace(/-+/g, '-').replace(/^-|-$/g, '');
-  
   if (!slug) {
     slug = text
       .toLowerCase()
@@ -54,7 +45,6 @@ function generateSlugFromText(text: string): string {
       .replace(/-+/g, '-')
       .replace(/^-|-$/g, '');
   }
-  
   return slug;
 }
 
@@ -69,6 +59,7 @@ function ensureUniqueSlug(slug: string, existingSlugs: Set<string>): string {
   return newSlug;
 }
 
+// 下载图片并保存到公开桶，返回公开 URL
 async function downloadAndSaveImage(url: string, locale: string): Promise<string> {
   if (!url.startsWith('http://') && !url.startsWith('https://')) {
     return url;
@@ -80,11 +71,11 @@ async function downloadAndSaveImage(url: string, locale: string): Promise<string
     const contentType = res.headers.get('content-type') || 'image/jpeg';
     const ext = contentType.split('/')[1] || 'jpg';
     const fileName = `import_${Date.now()}_${uuidv4().slice(0, 8)}.${ext}`;
-    const uploadDir = path.join(process.cwd(), 'public', 'uploads', 'imported', locale);
-    await fs.mkdir(uploadDir, { recursive: true });
-    const filePath = path.join(uploadDir, fileName);
-    await fs.writeFile(filePath, Buffer.from(buffer));
-    return `/uploads/imported/${locale}/${fileName}`;
+    const key = `uploads/imported/${locale}/${fileName}`; // 公开桶中的路径
+    const publicStorage = getPublicStorage();
+    await publicStorage.write(key, Buffer.from(buffer), { contentType });
+    // 返回公开访问 URL（优先使用自定义域名）
+    return publicStorage.getPublicUrl(key);
   } catch (err) {
     console.error(`图片下载失败: ${url}`, err);
     return url;
@@ -103,19 +94,19 @@ function findAttributeTemplateId(templates: any[], input: string | null): string
   return tpl ? tpl.id : null;
 }
 
-// ---------- 缓存 attributeTemplates ----------
-let cachedAttributeTemplates: any[] = [];  // 修改：初始化为空数组，避免 null
+let cachedAttributeTemplates: any[] = [];
 let cacheTimestamp = 0;
-const CACHE_TTL = 60 * 1000; // 60秒
+const CACHE_TTL = 60 * 1000;
 
-async function getAttributeTemplates(locale: string): Promise<any[]> {  // 始终返回数组
+async function getAttributeTemplates(locale: string): Promise<any[]> {
   const now = Date.now();
-  if (cachedAttributeTemplates.length > 0 && (now - cacheTimestamp) < CACHE_TTL) {
+  if (cachedAttributeTemplates.length > 0 && now - cacheTimestamp < CACHE_TTL) {
     return cachedAttributeTemplates;
   }
   try {
-    const productSettings = await fetch(`${process.env.NEXT_PUBLIC_BASE_URL || 'http://localhost:3000'}/api/admin/products/settings?locale=${locale}`)
-      .then(res => res.json());
+    const baseUrl = process.env.NEXT_PUBLIC_BASE_URL || 'http://localhost:3000';
+    const res = await fetch(`${baseUrl}/api/admin/products/settings?locale=${locale}`);
+    const productSettings = await res.json();
     cachedAttributeTemplates = productSettings.attributeTemplates || [];
   } catch (err) {
     console.error('获取属性模板失败', err);
@@ -125,13 +116,12 @@ async function getAttributeTemplates(locale: string): Promise<any[]> {  // 始�
   return cachedAttributeTemplates;
 }
 
-// ---------- 主函数 ----------
 export async function POST(request: NextRequest) {
   try {
     const formData = await request.formData();
     const file = formData.get('file') as File;
-    const locale = formData.get('locale') as string || 'zh';
-    const contextProductLineId = formData.get('productLineId') as string || null;
+    const locale = (formData.get('locale') as string) || 'zh';
+    const contextProductLineId = (formData.get('productLineId') as string) || null;
 
     if (!file) {
       return NextResponse.json({ error: '请选择文件' }, { status: 400 });
@@ -145,7 +135,6 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: '文件内容为空' }, { status: 400 });
     }
 
-    // 列索引定义（根据模板实际列顺序调整）
     const col = {
       productLineName: 0,
       category1Name: 1,
@@ -162,7 +151,6 @@ export async function POST(request: NextRequest) {
     const { productLines, categories: existingCategories } = await getAllCategories(locale);
     const attributeTemplates = await getAttributeTemplates(locale);
 
-    // 收集现有 slug 和 分类名称
     const existingSlugs = new Set<string>();
     const existingCategoryByName = new Map<string, any>();
     for (const cat of existingCategories) {
@@ -175,7 +163,6 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    // 用于维护每个产品线的下一个 order 值（优化 O(n²)）
     const productLineOrderMap = new Map<string, number>();
     for (const cat of existingCategories) {
       const plId = cat.productLineId;
@@ -190,10 +177,9 @@ export async function POST(request: NextRequest) {
     const newCategories = [...existingCategories];
     let currentCategory1: any = null;
 
-    // 收集图片下载任务（并发优化）
     type ImageTask = {
-      target: any;     // 一级分类对象或二级分类对象
-      field: string;   // 字段名，如 'image'
+      target: any;
+      field: string;
       url: string;
       locale: string;
     };
@@ -214,7 +200,6 @@ export async function POST(request: NextRequest) {
       const seoTitle = row[col.seoTitle]?.toString().trim() || '';
       const seoDescription = row[col.seoDescription]?.toString().trim() || '';
 
-      // 处理一级分类
       if (category1Name) {
         let productLineId = null;
         if (productLineName) {
@@ -237,7 +222,6 @@ export async function POST(request: NextRequest) {
           continue;
         }
 
-        // 修复：确保 attrTemplateInput 为 string | null，函数已支持
         const attributeTemplateId = findAttributeTemplateId(attributeTemplates, attrTemplateInput || null);
         const order = productLineOrderMap.get(productLineId) || 0;
         productLineOrderMap.set(productLineId, order + 1);
@@ -271,14 +255,10 @@ export async function POST(request: NextRequest) {
         currentCategory1 = newCategory;
         existingSlugs.add(finalSlug);
         successCount++;
-      }
-      // 处理二级分类
-      else if (category2Name && currentCategory1) {
+      } else if (category2Name && currentCategory1) {
         let baseSlug = slugRaw || generateSlugFromText(category2Name);
         let finalSlug = ensureUniqueSlug(baseSlug, existingSlugs);
-        const existingSeries = currentCategory1.series || [];
-        // 修复：给回调参数 s 添加类型 any
-        const seriesExists = existingSeries.some((s: any) => s.slug === finalSlug || s.name === category2Name);
+        const seriesExists = (currentCategory1.series || []).some((s: any) => s.slug === finalSlug || s.name === category2Name);
         if (seriesExists) {
           errors.push(`第 ${i+1} 行: 二级分类“${category2Name}”已存在，跳过`);
           skipCount++;
@@ -287,8 +267,7 @@ export async function POST(request: NextRequest) {
 
         let seriesImage = '';
         if (coverImageUrl && coverImageUrl.startsWith('http')) {
-          // 记录任务
-          seriesImage = ''; // 占位
+          seriesImage = '';
         } else if (coverImageUrl) {
           seriesImage = coverImageUrl;
         }
@@ -322,10 +301,8 @@ export async function POST(request: NextRequest) {
         errors.push(`第 ${i+1} 行: 二级分类“${category2Name}”没有对应的一级分类，跳过`);
         skipCount++;
       }
-      // 完全空行忽略
     }
 
-    // 并发下载所有图片
     if (imageTasks.length > 0) {
       await Promise.all(imageTasks.map(async (task) => {
         try {
@@ -333,17 +310,16 @@ export async function POST(request: NextRequest) {
           task.target[task.field] = localPath;
         } catch (err) {
           console.error(`下载图片失败: ${task.url}`, err);
-          // 保持原 URL
           task.target[task.field] = task.url;
         }
       }));
     }
 
-    // 保存最终数据到文件
+    // 保存最终数据到私有桶
     const finalData = { productLines, categories: newCategories };
-    const filePath = path.join(process.cwd(), 'data/products', locale, 'categories.json');
-    await fs.mkdir(path.dirname(filePath), { recursive: true });
-    await fs.writeFile(filePath, JSON.stringify(finalData, null, 2), 'utf-8');
+    const privateStorage = getPrivateStorage();
+    const key = `products/${locale}/categories.json`; // 无 data/ 前缀
+    await privateStorage.write(key, JSON.stringify(finalData, null, 2), { contentType: 'application/json' });
 
     const message = `导入完成：成功 ${successCount} 条，跳过 ${skipCount} 条。${errors.length ? `错误详情: ${errors.join('; ')}` : ''}`;
     return NextResponse.json({ success: true, message, successCount, skipCount, errors });

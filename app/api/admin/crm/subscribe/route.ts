@@ -20,7 +20,7 @@ export async function POST(request: Request) {
     }
 
     // 检查是否已存在相同邮箱
-    const existing = getCustomerByEmail(email);
+    const existing = await getCustomerByEmail(email); // ✅ 添加 await
 
     if (existing) {
       // 只更新订阅状态，如果国家为空则补上
@@ -29,11 +29,11 @@ export async function POST(request: Request) {
         emailSubscribed: '已订阅' as const,
         ...(!existing.country && country !== 'Unknown' ? { country } : {}),
       };
-      updateCustomer(updated);
+      await updateCustomer(updated); // ✅ 添加 await
       return NextResponse.json({ success: true, customerId: existing.id, updated: true });
     }
 
-    // 创建新客户：阶段、等级、规模留空
+    // 创建新客户
     const now = new Date().toISOString().slice(0, 19).replace('T', ' ');
     const newCustomer: Customer = {
       id: generateId(),
@@ -53,7 +53,7 @@ export async function POST(request: Request) {
       emailSubscribed: '已订阅',
       createdAt: now,
     };
-    createCustomer(newCustomer);
+    await createCustomer(newCustomer); // ✅ 添加 await
     return NextResponse.json({ success: true, customerId: newCustomer.id });
   } catch (error) {
     console.error('Subscription error:', error);

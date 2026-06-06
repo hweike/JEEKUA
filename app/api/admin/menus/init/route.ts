@@ -1,9 +1,6 @@
+// app/api/admin/menus/init/route.ts
 import { NextRequest, NextResponse } from 'next/server';
-import fs from 'fs/promises';
-import path from 'path';
-
-const PRESET_DIR = path.join(process.cwd(), 'data', 'menus', 'Preset');
-const MENUS_DIR = path.join(process.cwd(), 'data', 'menus');
+import { getPrivateStorage } from '@/lib/storage/factory';
 
 export async function POST(req: NextRequest) {
   try {
@@ -19,29 +16,31 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Only navigation and footer can be initialized' }, { status: 400 });
     }
 
-    // 构建预设文件路径
+    // 构建预设文件的存储 Key
     const presetFileName = `${locale}_${menuType}_menus.json`;
-    const presetFilePath = path.join(PRESET_DIR, presetFileName);
+    const presetKey = `data/menus/Preset/${presetFileName}`;
+
+    const storage = getPrivateStorage();
 
     // 读取预设文件
-    let presetContent;
+    let presetContent: string;
     try {
-      presetContent = await fs.readFile(presetFilePath, 'utf-8');
-    } catch {
+      const content = await storage.read(presetKey, 'utf8');
+      presetContent = content as string;
+    } catch (err: any) {
+      console.error(`读取预设文件失败: ${presetKey}`, err);
       return NextResponse.json({ error: 'Preset file not found' }, { status: 404 });
     }
 
     const presetMenu = JSON.parse(presetContent);
 
-    // 目标文件路径
-    const targetDir = path.join(MENUS_DIR, locale);
-    const targetFilePath = path.join(targetDir, `${menuType}.json`);
-
-    // 确保目标目录存在
-    await fs.mkdir(targetDir, { recursive: true });
+    // 目标文件存储 Key
+    const targetKey = `data/menus/${locale}/${menuType}.json`;
 
     // 写入目标文件
-    await fs.writeFile(targetFilePath, JSON.stringify(presetMenu, null, 2), 'utf-8');
+    await storage.write(targetKey, JSON.stringify(presetMenu, null, 2), {
+      contentType: 'application/json',
+    });
 
     return NextResponse.json({ success: true });
   } catch (error) {

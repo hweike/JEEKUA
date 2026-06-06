@@ -1,9 +1,7 @@
+// app/api/admin/categories/import/route.ts
 import { NextRequest, NextResponse } from 'next/server';
-import fs from 'fs/promises';
-import path from 'path';
-import * as XLSX from 'xlsx'; // 需要安装 xlsx 包
-
-const CATEGORIES_FILE = path.join(process.cwd(), 'data/categories.json');
+import * as XLSX from 'xlsx';
+import { getPrivateStorage } from '@/lib/storage/factory';
 
 export async function POST(request: NextRequest) {
   try {
@@ -21,10 +19,6 @@ export async function POST(request: NextRequest) {
     const rows = XLSX.utils.sheet_to_json(sheet);
 
     // 将 Excel 数据转换为分类结构
-    // 这里需要根据您的 Excel 模板格式实现转换逻辑
-    // 示例：假设 Excel 有列：一级分类名称、一级分类URL、二级分类名称、二级分类URL等
-    // 实际请根据您的模板调整
-
     const categoriesMap = new Map();
     for (const row of rows as any[]) {
       const catName = row['一级分类名称'];
@@ -60,10 +54,23 @@ export async function POST(request: NextRequest) {
     }
 
     const newCategories = Array.from(categoriesMap.values());
-    // 读取现有分类
-    const allCategories = await fs.readFile(CATEGORIES_FILE, 'utf-8').then(JSON.parse).catch(() => ({}));
+    const storage = getPrivateStorage();
+    const key = 'categories.json'; // 存储 Key（无 data/ 前缀，与其他模块统一）
+
+    // 读取现有分类（如果文件不存在则初始化为空对象）
+    let allCategories: Record<string, any[]> = {};
+    try {
+      const content = await storage.read(key, 'utf8');
+      allCategories = JSON.parse(content as string);
+    } catch (error: any) {
+      if (error?.code !== 'NoSuchKey' && error?.Code !== 'NoSuchKey' && !error?.message?.includes('File not found')) {
+        throw error;
+      }
+      // 文件不存在，保持空对象
+    }
+
     allCategories[locale] = newCategories;
-    await fs.writeFile(CATEGORIES_FILE, JSON.stringify(allCategories, null, 2));
+    await storage.write(key, JSON.stringify(allCategories, null, 2), { contentType: 'application/json' });
 
     return NextResponse.json({ message: '导入成功', count: newCategories.length });
   } catch (error) {

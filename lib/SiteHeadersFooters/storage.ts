@@ -1,14 +1,11 @@
-// lib/config-loader.ts
+// lib/SiteHeadersFooters/storage.ts
 import { getPrivateStorage } from '@/lib/storage/factory';
 
 type ConfigType = 'header' | 'footer';
 
-// 私有桶中的基础路径（对应原 data/SiteHeadersFooters）
-const STORAGE_PREFIX = 'data/SiteHeadersFooters';
+// 私有桶中的基础路径（对应原 data/SiteHeadersFooters，去掉了 data/ 前缀）
+const STORAGE_PREFIX = 'SiteHeadersFooters';
 
-/**
- * 获取配置文件在私有桶中的完整 Key
- */
 function getConfigKey(type: ConfigType, locale: string): string {
   return `${STORAGE_PREFIX}/${type}/${locale}.json`;
 }
@@ -24,9 +21,17 @@ export async function getConfig(type: ConfigType, locale: string): Promise<any> 
     const content = await storage.read(key, 'utf8');
     return JSON.parse(content as string);
   } catch (error: any) {
-    if (error?.message?.includes('File not found') || error?.code === 'NoSuchKey') {
+    // 兼容各种错误表示：AWS SDK 的 Code（大写）、code（小写）、httpStatusCode 404
+    const isNotFound =
+      error?.Code === 'NoSuchKey' ||
+      error?.code === 'NoSuchKey' ||
+      error?.$metadata?.httpStatusCode === 404 ||
+      error?.message?.includes('File not found') ||
+      error?.message?.includes('NoSuchKey');
+    if (isNotFound) {
       return null;
     }
+    // 其他错误继续抛出，让上层处理
     throw error;
   }
 }
@@ -44,7 +49,7 @@ export async function saveConfig(type: ConfigType, locale: string, config: any):
 
 /**
  * 初始化配置：从样本文件复制到目标语言文件
- * 样本文件路径：data/SiteHeadersFooters/samples/{type}_sample.json
+ * 样本文件路径：SiteHeadersFooters/samples/{type}_sample.json
  */
 export async function initConfig(type: ConfigType, locale: string): Promise<void> {
   const storage = getPrivateStorage();
@@ -52,10 +57,13 @@ export async function initConfig(type: ConfigType, locale: string): Promise<void
   const targetKey = getConfigKey(type, locale);
   try {
     const sampleContent = await storage.read(sampleKey, 'utf8');
-    // 直接复制样本内容到目标文件
     await storage.write(targetKey, sampleContent, { contentType: 'application/json' });
   } catch (error: any) {
-    if (error?.message?.includes('File not found') || error?.code === 'NoSuchKey') {
+    const isNotFound =
+      error?.Code === 'NoSuchKey' ||
+      error?.code === 'NoSuchKey' ||
+      error?.$metadata?.httpStatusCode === 404;
+    if (isNotFound) {
       throw new Error(`样本文件不存在: ${sampleKey}`);
     }
     throw error;
@@ -63,25 +71,27 @@ export async function initConfig(type: ConfigType, locale: string): Promise<void
 }
 
 /**
- * 获取可用菜单列表（读取 data/menu/{locale}.json）
- * @param locale 语言代码
- * @returns 菜单项扁平列表，每个项包含 id, name, level, parentId
+ * 获取可用菜单列表（读取 menu/{locale}.json）
  */
 export async function getAvailableMenus(locale: string): Promise<{ id: string; name: string; level?: number; parentId?: string }[]> {
   const storage = getPrivateStorage();
-  const key = `data/menu/${locale}.json`;
+  const key = `menu/${locale}.json`;
   let data: any[] = [];
   try {
     const content = await storage.read(key, 'utf8');
     data = JSON.parse(content as string);
   } catch (error: any) {
-    if (error?.message?.includes('File not found') || error?.code === 'NoSuchKey') {
-      return []; // 文件不存在返回空数组
+    const isNotFound =
+      error?.Code === 'NoSuchKey' ||
+      error?.code === 'NoSuchKey' ||
+      error?.$metadata?.httpStatusCode === 404 ||
+      error?.message?.includes('File not found');
+    if (isNotFound) {
+      return [];
     }
     throw error;
   }
 
-  // 递归展开菜单树
   const flatMenus: any[] = [];
   function flatten(items: any[], parentId: string = '', level: number = 0) {
     for (const item of items) {

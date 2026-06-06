@@ -1,3 +1,4 @@
+// app/api/admin/products/search/route.ts
 import { NextRequest, NextResponse } from 'next/server';
 import { searchProducts } from '@/lib/products/indexDb';
 
@@ -11,8 +12,7 @@ export async function GET(request: NextRequest) {
     const page = parseInt(searchParams.get('page') || '1', 10);
     const size = Math.min(parseInt(searchParams.get('size') || '20', 10), 50);
 
-    // 复用现有搜索函数，只查父产品
-    const { items, total } = searchProducts(
+    const { items, total } = await searchProducts(
       locale,
       status === 'all' ? undefined : status,
       keyword,
@@ -22,7 +22,6 @@ export async function GET(request: NextRequest) {
       size
     );
 
-    // 简化返回字段，仅用于关联选择器
     const simplified = items.map(p => ({
       productId: p.productId,
       productName: p.product_name,

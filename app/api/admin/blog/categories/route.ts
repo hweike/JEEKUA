@@ -2,27 +2,23 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getPrivateStorage } from '@/lib/storage/factory';
 
-// 生成8位随机数字ID
 function generateId(): string {
   return Math.floor(10000000 + Math.random() * 90000000).toString();
 }
 
-// 获取指定语言的分类文件在私有桶中的 key（相对路径）
 function getCategoryKey(locale: string): string {
-  // 私有桶中存储路径：blog/{locale}/categories.json
-  return `data/blog/${locale}/categories.json`;
+  // 直接存储为 blog/{locale}/categories.json（无 data/ 前缀）
+  return `blog/${locale}/categories.json`;
 }
 
-// 读取分类列表
 async function readCategories(locale: string): Promise<any[]> {
   const storage = getPrivateStorage();
   const key = getCategoryKey(locale);
   try {
-    const content = await storage.read(`data/${key}`, 'utf8');
+    const content = await storage.read(key, 'utf8');
     return JSON.parse(content as string);
   } catch (error: any) {
-    // 文件不存在，返回空数组（不上报错误）
-    if (error?.message?.includes('File not found') || error?.code === 'NoSuchKey') {
+    if (error?.Code === 'NoSuchKey' || error?.code === 'NoSuchKey' || error?.message?.includes('NoSuchKey')) {
       return [];
     }
     console.error(`读取分类文件失败 [${locale}]:`, error);
@@ -30,16 +26,14 @@ async function readCategories(locale: string): Promise<any[]> {
   }
 }
 
-// 写入分类列表
 async function writeCategories(locale: string, categories: any[]): Promise<void> {
   const storage = getPrivateStorage();
   const key = getCategoryKey(locale);
-  await storage.write(`data/${key}`, JSON.stringify(categories, null, 2), {
+  await storage.write(key, JSON.stringify(categories, null, 2), {
     contentType: 'application/json',
   });
 }
 
-// GET: 获取某语言的所有分类
 export async function GET(request: NextRequest) {
   const searchParams = request.nextUrl.searchParams;
   const locale = searchParams.get('locale') || 'zh';
@@ -52,7 +46,6 @@ export async function GET(request: NextRequest) {
   }
 }
 
-// POST: 新建分类
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
@@ -77,7 +70,6 @@ export async function POST(request: NextRequest) {
   }
 }
 
-// PUT: 更新分类
 export async function PUT(request: NextRequest) {
   try {
     const body = await request.json();
@@ -106,7 +98,6 @@ export async function PUT(request: NextRequest) {
   }
 }
 
-// DELETE: 删除分类
 export async function DELETE(request: NextRequest) {
   const searchParams = request.nextUrl.searchParams;
   const locale = searchParams.get('locale');

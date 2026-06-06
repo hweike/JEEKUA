@@ -1,10 +1,10 @@
 // app/api/admin/products/categories/route.ts
 import { NextRequest, NextResponse } from 'next/server';
-import fs from 'fs/promises';
-import path from 'path';
+import { getPrivateStorage } from '@/lib/storage/factory';
 
-function getDataPath(locale: string) {
-  return path.join(process.cwd(), 'data/products', locale, 'categories.json');
+// 私有桶中存储路径（无 data/ 前缀）
+function getStorageKey(locale: string): string {
+  return `products/${locale}/categories.json`;
 }
 
 interface Series {
@@ -25,7 +25,7 @@ interface Category {
   slug: string;
   order: number;
   productLineId: string;
-  templateId: string;               // ✅ 替换原有的 pageTemplate
+  templateId: string;
   image: string;
   description: string;
   seoTitle: string;
@@ -35,7 +35,6 @@ interface Category {
   series: Series[];
 }
 
-// 新增 ProductLine 接口，用于 sort 回调类型标注
 interface ProductLine {
   id: string;
   name: string;
@@ -68,7 +67,7 @@ function normalizeCategory(raw: any): Category {
     slug: String(raw.slug || ''),
     order: typeof raw.order === 'number' ? raw.order : 0,
     productLineId: String(raw.productLineId || ''),
-    templateId: String(raw.templateId || ''),    // ✅ 使用 templateId
+    templateId: String(raw.templateId || ''),
     image: String(raw.image || ''),
     description: String(raw.description || ''),
     seoTitle: String(raw.seoTitle || ''),
@@ -95,17 +94,22 @@ function normalizeProductLine(raw: any): ProductLine {
 export async function GET(request: NextRequest) {
   try {
     const locale = request.nextUrl.searchParams.get('locale') || 'zh';
-    const filePath = getDataPath(locale);
-    let rawData;
+    const storage = getPrivateStorage();
+    const key = getStorageKey(locale);
+    let rawData: any = { productLines: [], categories: [] };
     try {
-      const content = await fs.readFile(filePath, 'utf-8');
-      rawData = JSON.parse(content);
-    } catch {
-      rawData = { productLines: [], categories: [] };
+      const content = await storage.read(key, 'utf8');
+      rawData = JSON.parse(content as string);
+    } catch (error: any) {
+      // 文件不存在时使用默认空结构（兼容 AWS SDK 错误）
+      if (error?.code === 'NoSuchKey' || error?.Code === 'NoSuchKey' || error?.message?.includes('File not found')) {
+        rawData = { productLines: [], categories: [] };
+      } else {
+        throw error;
+      }
     }
     const productLines = (rawData.productLines || []).map(normalizeProductLine);
     const categories = (rawData.categories || []).map(normalizeCategory);
-    // 为 sort 回调参数添加显式类型
     productLines.sort((a: ProductLine, b: ProductLine) => a.order - b.order);
     categories.sort((a: Category, b: Category) => a.order - b.order);
     for (const cat of categories) {
@@ -128,10 +132,9 @@ export async function PUT(request: NextRequest) {
     const cleanedProductLines = (body.productLines || []).map(normalizeProductLine);
     const cleanedCategories = (body.categories || []).map(normalizeCategory);
     const cleanData = { productLines: cleanedProductLines, categories: cleanedCategories };
-    const filePath = getDataPath(locale);
-    const dir = path.dirname(filePath);
-    await fs.mkdir(dir, { recursive: true });
-    await fs.writeFile(filePath, JSON.stringify(cleanData, null, 2), 'utf-8');
+    const storage = getPrivateStorage();
+    const key = getStorageKey(locale);
+    await storage.write(key, JSON.stringify(cleanData, null, 2), { contentType: 'application/json' });
     return NextResponse.json({ success: true });
   } catch (error) {
     console.error('PUT Error:', error);

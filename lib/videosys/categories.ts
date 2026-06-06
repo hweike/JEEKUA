@@ -2,16 +2,11 @@
 import { getPrivateStorage } from '@/lib/storage/factory';
 import { CategoriesMap, Category } from './types';
 
-/**
- * 获取分类 JSON 文件在私有桶中的存储 Key
- */
 function getCategoriesKey(locale: string): string {
-  return `data/videosys/${locale}/categories.json`;
+  // 确保 key 不带 data/ 前缀，与其他模块一致
+  return `videosys/${locale}/categories.json`;
 }
 
-/**
- * 获取所有分类（从私有桶读取）
- */
 export async function getCategories(locale: string): Promise<CategoriesMap> {
   const storage = getPrivateStorage();
   const key = getCategoriesKey(locale);
@@ -19,16 +14,16 @@ export async function getCategories(locale: string): Promise<CategoriesMap> {
     const content = await storage.read(key, 'utf8');
     return JSON.parse(content as string);
   } catch (error: any) {
-    if (error?.message?.includes('File not found') || error?.code === 'NoSuchKey') {
-      return {};
+    // 捕获 AWS S3 风格的 NoSuchKey 错误以及原生 ENOENT
+    if (error?.code === 'NoSuchKey' || error?.Code === 'NoSuchKey' || error?.message?.includes('File not found')) {
+      return {}; // 文件不存在，返回空对象
     }
+    // 其他错误继续抛出
     throw error;
   }
 }
 
-/**
- * 保存所有分类到私有桶
- */
+// saveCategories 保持不变
 export async function saveCategories(locale: string, categories: CategoriesMap): Promise<void> {
   const storage = getPrivateStorage();
   const key = getCategoriesKey(locale);
@@ -37,9 +32,6 @@ export async function saveCategories(locale: string, categories: CategoriesMap):
   });
 }
 
-/**
- * 根据 key 获取单个分类
- */
 export async function getCategory(key: string, locale: string): Promise<Category | null> {
   const categories = await getCategories(locale);
   return categories[key] || null;

@@ -7,7 +7,7 @@ export async function GET(
   { params }: { params: Promise<{ id: string }> }
 ) {
   const { id } = await params;
-  const customer = getCustomerById(id);
+  const customer = await getCustomerById(id); // 添加 await
   if (!customer) {
     return NextResponse.json({ error: 'Not found' }, { status: 404 });
   }
@@ -20,7 +20,7 @@ export async function PUT(
 ) {
   const { id } = await params;
   const body = await request.json();
-  const existing = getCustomerById(id);
+  const existing = await getCustomerById(id); // 添加 await
   if (!existing) {
     return NextResponse.json({ error: 'Not found' }, { status: 404 });
   }
@@ -31,7 +31,7 @@ export async function PUT(
     ...body,
     id, // 确保 id 不变
   };
-  updateCustomer(updated);
+  await updateCustomer(updated); // 添加 await
   return NextResponse.json(updated);
 }
 
@@ -40,10 +40,10 @@ export async function DELETE(
   { params }: { params: Promise<{ id: string }> }
 ) {
   const { id } = await params;
-  const existing = getCustomerById(id);
+  const existing = await getCustomerById(id); // 添加 await
   if (!existing) {
     return NextResponse.json({ error: 'Not found' }, { status: 404 });
   }
-  deleteCustomer(id);
+  await deleteCustomer(id); // 添加 await
   return NextResponse.json({ success: true });
 }

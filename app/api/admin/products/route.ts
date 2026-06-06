@@ -1,41 +1,52 @@
+// app/api/admin/product-categories/route.ts
 import { NextRequest, NextResponse } from 'next/server';
-import fs from 'fs/promises';
-import path from 'path';
+import { getPrivateStorage } from '@/lib/storage/factory';
 
-function getCategoriesPath(locale: string) {
-  return path.join(process.cwd(), 'data/products', locale, 'categories.json');
+function getStorageKey(locale: string): string {
+  return `products/${locale}/categories.json`;
 }
 
-async function readCategories(locale: string) {
-  const filePath = getCategoriesPath(locale);
+async function readCategories(locale: string): Promise<any[]> {
+  const storage = getPrivateStorage();
+  const key = getStorageKey(locale);
   try {
-    const data = await fs.readFile(filePath, 'utf-8');
-    return JSON.parse(data);
-  } catch {
-    return [];
+    const content = await storage.read(key, 'utf8');
+    return JSON.parse(content as string);
+  } catch (error: any) {
+    // 文件不存在时返回空数组
+    if (error?.code === 'NoSuchKey' || error?.Code === 'NoSuchKey' || error?.message?.includes('File not found')) {
+      return [];
+    }
+    throw error;
   }
 }
 
-async function writeCategories(locale: string, categories: any[]) {
-  const filePath = getCategoriesPath(locale);
-  const dir = path.dirname(filePath);
-  await fs.mkdir(dir, { recursive: true });
-  await fs.writeFile(filePath, JSON.stringify(categories, null, 2), 'utf-8');
+async function writeCategories(locale: string, categories: any[]): Promise<void> {
+  const storage = getPrivateStorage();
+  const key = getStorageKey(locale);
+  await storage.write(key, JSON.stringify(categories, null, 2), {
+    contentType: 'application/json',
+  });
 }
 
 export async function GET(request: NextRequest) {
   const searchParams = request.nextUrl.searchParams;
   const locale = searchParams.get('locale') || 'zh';
 
-  const categories = await readCategories(locale);
-  // 按 order 排序
-  const sorted = categories.sort((a: any, b: any) => a.order - b.order);
-  for (const cat of sorted) {
-    if (cat.series) {
-      cat.series = cat.series.sort((a: any, b: any) => a.order - b.order);
+  try {
+    let categories = await readCategories(locale);
+    // 按 order 排序
+    const sorted = categories.sort((a: any, b: any) => a.order - b.order);
+    for (const cat of sorted) {
+      if (cat.series) {
+        cat.series = cat.series.sort((a: any, b: any) => a.order - b.order);
+      }
     }
+    return NextResponse.json({ categories: sorted });
+  } catch (error) {
+    console.error('GET /api/admin/product-categories error:', error);
+    return NextResponse.json({ error: '读取失败' }, { status: 500 });
   }
-  return NextResponse.json({ categories: sorted });
 }
 
 export async function PUT(request: NextRequest) {
@@ -53,6 +64,11 @@ export async function PUT(request: NextRequest) {
     return NextResponse.json({ error: '缺少 categories 字段' }, { status: 400 });
   }
 
-  await writeCategories(locale, body.categories);
-  return NextResponse.json({ success: true });
+  try {
+    await writeCategories(locale, body.categories);
+    return NextResponse.json({ success: true });
+  } catch (error) {
+    console.error('PUT /api/admin/product-categories error:', error);
+    return NextResponse.json({ error: '保存失败' }, { status: 500 });
+  }
 }

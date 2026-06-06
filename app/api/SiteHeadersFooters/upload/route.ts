@@ -1,6 +1,6 @@
+// app/api/SiteHeadersFooters/upload/route.ts
 import { NextRequest, NextResponse } from 'next/server';
-import { writeFile, mkdir } from 'fs/promises';
-import path from 'path';
+import { getPublicStorage } from '@/lib/storage/factory';
 
 export async function POST(request: NextRequest) {
   try {
@@ -23,14 +23,14 @@ export async function POST(request: NextRequest) {
     const timestamp = Date.now();
     const ext = file.name.split('.').pop();
     const fileName = `${timestamp}.${ext}`;
-    const uploadDir = path.join(process.cwd(), 'public', 'uploads', 'headers-footers');
-    const filePath = path.join(uploadDir, fileName);
+    // 在公开桶中的存储路径（与原 public/uploads/headers-footers 对应）
+    const key = `uploads/headers-footers/${fileName}`;
 
-    // 确保目录存在
-    await mkdir(uploadDir, { recursive: true });
-    await writeFile(filePath, buffer);
+    const storage = getPublicStorage();
+    await storage.write(key, buffer, { contentType: file.type });
 
-    const publicUrl = `/uploads/headers-footers/${fileName}`;
+    // 获取公开访问 URL（优先使用自定义域名，否则使用 R2 默认域名）
+    const publicUrl = storage.getPublicUrl(key);
     return NextResponse.json({ url: publicUrl });
   } catch (error) {
     console.error('Upload error:', error);

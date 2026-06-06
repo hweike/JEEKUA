@@ -1,11 +1,8 @@
+// app/api/admin/products/importProducts/route.ts
 import { NextRequest, NextResponse } from 'next/server';
 import * as XLSX from 'xlsx';
-import fs from 'fs/promises';
-import { readFileSync } from 'fs';
-import path from 'path';
-import { nanoid } from 'nanoid'; // ✅ 新增 nanoid 导入
+import { nanoid } from 'nanoid';
 import { getProductSettings } from '@/lib/products/productSettings';
-// import { generateUniqueProductId } from '@/lib/utils/idGenerator'; // ❌ 已废弃，不再使用
 import {
   getProductLineIdFromCategory,
   getProductIndex,
@@ -14,7 +11,8 @@ import {
 } from '@/lib/products/indexDb';
 import { writeProduct, readProduct } from '@/lib/products/mdParser';
 import { generateSlug, generateSeoTitle, generateSeoDescription } from '@/lib/products/seoGenerator';
-import { downloadImage, ensureDir } from '@/lib/imageUtils';
+import { downloadImage } from '@/lib/imageUtils';
+import { getPrivateStorage } from '@/lib/storage/factory';
 
 interface PriceTier {
   min_qty: number;
@@ -22,30 +20,36 @@ interface PriceTier {
   price: number;
 }
 
+// 从私有桶读取站点设置
 async function getSiteName(): Promise<string> {
-  const settingsPath = path.join(process.cwd(), 'data', 'settings.json');
+  const storage = getPrivateStorage();
+  const key = 'settings.json'; // 无 data/ 前缀
   try {
-    const data = await fs.readFile(settingsPath, 'utf-8');
-    const settings = JSON.parse(data);
+    const content = await storage.read(key, 'utf8');
+    const settings = JSON.parse(content as string);
     return settings.site_name || '我的网站';
   } catch {
     return '我的网站';
   }
 }
 
-async function updateParentVariants(locale: string, parentId: string, variants: any[]) {
-  const parentMd = await readProduct(locale, parentId);
-  if (!parentMd) throw new Error('父产品不存在');
-  const updated = { ...parentMd, variants };
-  await writeProduct(locale, parentId, updated, parentMd.content || '');
+// 从私有桶读取分类数据
+async function loadCategories(locale: string): Promise<any[]> {
+  const storage = getPrivateStorage();
+  const key = `products/${locale}/categories.json`; // 无 data/ 前缀
+  try {
+    const content = await storage.read(key, 'utf8');
+    const data = JSON.parse(content as string);
+    return data.categories || [];
+  } catch {
+    return [];
+  }
 }
 
-function getProductType(locale: string, categoryId: string, seriesId?: string): string {
+async function getProductType(locale: string, categoryId: string, seriesId?: string): Promise<string> {
   if (!categoryId || categoryId === '__UNCATEGORIZED__') return '';
-  const categoriesPath = path.join(process.cwd(), 'data', 'products', locale, 'categories.json');
   try {
-    const data = JSON.parse(readFileSync(categoriesPath, 'utf-8'));
-    const categories = data.categories || [];
+    const categories = await loadCategories(locale);
     const cat = categories.find((c: any) => c.id === categoryId);
     if (!cat) return '';
     let type = cat.name;
@@ -91,12 +95,9 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Excel 文件为空' }, { status: 400 });
     }
 
-    // ========== 全局 ID 生成机制：使用 nanoid(6)，保证不重复 ==========
-    // 1. 获取所有已存在的产品 ID（包括父产品和变体）
+    // 全局 ID 生成机制：使用 nanoid(6)，保证不重复
     const existingIds = await getAllProductIds(locale);
-    // 2. 维护本次导入已使用的 ID 集合（初始化为已有 ID）
     const usedIds = new Set(existingIds);
-    // 3. 生成唯一 ID 的函数（6 位随机字符串）
     const generateUniqueId = (): string => {
       let id: string;
       do {
@@ -105,22 +106,14 @@ export async function POST(req: NextRequest) {
       usedIds.add(id);
       return id;
     };
-    // ============================================================
 
     const productSettings = await getProductSettings(locale);
     const defaultSettings = (productSettings as any).defaultSettings || {};
     const siteName = await getSiteName();
     const skuRule = defaultSettings.sku_rule || 'P-{timestamp}';
 
-    const categoriesPath = path.join(process.cwd(), 'data', 'products', locale, 'categories.json');
-    let categoriesData;
-    try {
-      const data = await fs.readFile(categoriesPath, 'utf-8');
-      categoriesData = JSON.parse(data);
-    } catch {
-      return NextResponse.json({ error: '无法加载分类数据' }, { status: 500 });
-    }
-    const categories = categoriesData.categories || [];
+    // 加载分类数据（从私有桶）
+    const categories = await loadCategories(locale);
 
     const results: { row: number; sku: string; success: boolean; error?: string }[] = [];
     let parentProductId: string | null = null;
@@ -155,7 +148,7 @@ export async function POST(req: NextRequest) {
                 }
               }
               try {
-                productLineId = getProductLineIdFromCategory(locale, category.id);
+                productLineId = await getProductLineIdFromCategory(locale, category.id);
               } catch (err) {
                 console.warn(`行 ${rowNum}: 无法获取产品线ID，将留空`, err);
               }
@@ -193,7 +186,6 @@ export async function POST(req: NextRequest) {
             }
           }
 
-          // ✅ 使用统一的 generateUniqueId 生成父产品 ID（6 位随机字符串）
           const productId = generateUniqueId();
 
           let sku = row['SKU']?.trim();
@@ -267,7 +259,7 @@ export async function POST(req: NextRequest) {
             mpn = processMpn(defaultSettings.default_mpn, sku);
           }
 
-          const product_type = getProductType(locale, categoryId, seriesId);
+          const product_type = await getProductType(locale, categoryId, seriesId);
 
           const productData = {
             id: productId,
@@ -354,7 +346,6 @@ export async function POST(req: NextRequest) {
 
           const mainImageUrl = await downloadImage(row['主图URL']);
 
-          // ✅ 使用统一的 generateUniqueId 生成变体 ID（6 位随机字符串，不再使用 variant_ 前缀）
           const variantId = generateUniqueId();
 
           const variantData = {
@@ -373,7 +364,9 @@ export async function POST(req: NextRequest) {
 
           const variants = parentProduct.variants || [];
           variants.push(variantData);
-          await updateParentVariants(locale, parentProductId, variants);
+          // 更新父产品的变体列表
+          const updatedParent = { ...parentProduct, variants };
+          await writeProduct(locale, parentProductId, updatedParent, parentProduct.content || '');
 
           const parentIndex = await getProductIndex(parentProductId);
           if (!parentIndex) throw new Error('父产品索引不存在');

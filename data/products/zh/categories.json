@@ -1620,6 +1620,21 @@
       "seoKeywords": "",
       "attributeTemplateId": "",
       "series": []
+    },
+    {
+      "id": "1780743117837",
+      "name": "11",
+      "slug": "1-1",
+      "order": 103,
+      "productLineId": "1777552920876",
+      "templateId": "default_product_category_published",
+      "image": "",
+      "description": "",
+      "seoTitle": "",
+      "seoDescription": "",
+      "seoKeywords": "",
+      "attributeTemplateId": "",
+      "series": []
     }
   ]
 }

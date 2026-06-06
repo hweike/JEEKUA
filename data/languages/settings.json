@@ -2,8 +2,8 @@
   "enabled": {
     "zh": true,
     "en": true,
-    "hi": true,
-    "es": true,
+    "hi": false,
+    "es": false,
     "ar": false,
     "fr": false,
     "pt": false,

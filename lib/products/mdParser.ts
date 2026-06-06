@@ -4,9 +4,10 @@ import { getPrivateStorage } from '@/lib/storage/factory';
 
 /**
  * 获取产品 MD 文件在私有桶中的存储 Key
+ * 注意：为了与项目中其他模块统一，不再使用 data/ 前缀
  */
 function getProductMdKey(locale: string, productId: string): string {
-  return `data/products/${locale}/products/${productId}.md`;
+  return `products/${locale}/products/${productId}.md`;
 }
 
 /**

@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import Link from 'next/link';
 import { Edit, Trash2, Plus, Eye, X } from 'lucide-react';
 import WebBuilderClient from '@/components/webbuilder/WebBuilderClient';
@@ -8,24 +8,21 @@ import { toast } from 'sonner';
 
 // 模板分类（全量，用于类型推断）
 const CATEGORIES = [
-  { value: 'page',              label: '页面' },
-  { value: 'product',           label: '产品' },
-  { value: 'product_category',  label: '产品合集' },   // 改名
-  { value: 'product_line',      label: '产品线' },
-  { value: 'document',          label: '文档' },       // 隐藏
-  { value: 'document_library',  label: '文档库' },
-  { value: 'blog',              label: '博客' },
-  { value: 'blog_post',         label: '博客文章' },   // 隐藏
-  { value: 'video_category',    label: '视频合集' },   // 改名
-  { value: 'video',             label: '视频' },       // 隐藏
+  { value: 'page', label: '页面' },
+  { value: 'product', label: '产品' },
+  { value: 'product_category', label: '产品合集' },
+  { value: 'product_line', label: '产品线' },
+  { value: 'document', label: '文档' },
+  { value: 'document_library', label: '文档库' },
+  { value: 'blog', label: '博客' },
+  { value: 'blog_post', label: '博客文章' },
+  { value: 'video_category', label: '视频合集' },
+  { value: 'video', label: '视频' },
 ] as const;
 
 type Category = (typeof CATEGORIES)[number]['value'];
 
-// 需要在前端隐藏的分类
 const HIDDEN_CATEGORIES: Category[] = ['document', 'blog_post', 'video'];
-
-// 用于界面显示的过滤后分类
 const VISIBLE_CATEGORIES = CATEGORIES.filter(c => !HIDDEN_CATEGORIES.includes(c.value));
 
 interface Template {
@@ -34,7 +31,45 @@ interface Template {
   category: Category;
   updatedAt: string;
   isSystem?: boolean;
-  data?: any; // 添加 data 字段，用于存储模板的 Puck 数据
+  data?: any;
+}
+
+// 缓存配置
+const CACHE_KEY = 'webbuilder_templates_cache';
+const CACHE_TTL = 5 * 60 * 1000; // 5分钟
+
+interface CacheData {
+  data: Template[];
+  timestamp: number;
+}
+
+// 读取缓存
+function getCachedTemplates(): Template[] | null {
+  if (typeof window === 'undefined') return null;
+  const cached = sessionStorage.getItem(CACHE_KEY);
+  if (!cached) return null;
+  try {
+    const { data, timestamp }: CacheData = JSON.parse(cached);
+    if (Date.now() - timestamp < CACHE_TTL) {
+      return data;
+    }
+  } catch (e) {
+    console.warn('解析缓存失败', e);
+  }
+  return null;
+}
+
+// 写入缓存
+function setCachedTemplates(data: Template[]) {
+  if (typeof window === 'undefined') return;
+  const cacheData: CacheData = { data, timestamp: Date.now() };
+  sessionStorage.setItem(CACHE_KEY, JSON.stringify(cacheData));
+}
+
+// 清除缓存
+function clearTemplatesCache() {
+  if (typeof window === 'undefined') return;
+  sessionStorage.removeItem(CACHE_KEY);
 }
 
 export default function AdminWebBuilderPage() {
@@ -45,38 +80,84 @@ export default function AdminWebBuilderPage() {
   const [newTemplateCategory, setNewTemplateCategory] = useState<Category>('page');
   const [activeCategory, setActiveCategory] = useState<Category>('page');
   const [editingTemplate, setEditingTemplate] = useState<Template | null>(null);
+  
+  // 用于取消请求的 AbortController
+  const abortControllerRef = useRef<AbortController | null>(null);
+  const requestIdRef = useRef(0);
 
-  useEffect(() => {
-    fetch('/api/webbuilder')
-      .then((res) => res.json())
-      .then((data) => {
+  const loadTemplates = useCallback(async (skipCache = false) => {
+    // 先检查缓存（除非强制跳过）
+    if (!skipCache) {
+      const cached = getCachedTemplates();
+      if (cached) {
+        setTemplates(cached);
+        setLoading(false);
+        return;
+      }
+    }
+
+    // 取消之前的请求
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+    }
+    const controller = new AbortController();
+    abortControllerRef.current = controller;
+    const currentRequestId = ++requestIdRef.current;
+
+    try {
+      const res = await fetch('/api/webbuilder', { signal: controller.signal });
+      const data = await res.json();
+      // 只处理最新请求的结果
+      if (currentRequestId === requestIdRef.current) {
         setTemplates(data);
+        setCachedTemplates(data);
         setLoading(false);
-      })
-      .catch((err) => {
+      }
+    } catch (err) {
+      if ((err as Error).name !== 'AbortError') {
         console.error('加载模板失败', err);
-        setLoading(false);
-      });
+        if (currentRequestId === requestIdRef.current) {
+          setLoading(false);
+        }
+        toast.error('加载模板失败，请刷新页面重试');
+      }
+    }
   }, []);
 
-  const refreshTemplates = async () => {
-    const res = await fetch('/api/webbuilder');
-    const data = await res.json();
-    setTemplates(data);
-  };
+  // 初始加载
+  useEffect(() => {
+    loadTemplates();
+    return () => {
+      if (abortControllerRef.current) {
+        abortControllerRef.current.abort();
+      }
+    };
+  }, [loadTemplates]);
 
-  const handleDelete = async (id: string) => {
+  const refreshTemplates = useCallback(async () => {
+    clearTemplatesCache();
+    setLoading(true);
+    await loadTemplates(true); // 强制跳过缓存
+  }, [loadTemplates]);
+
+  const handleDelete = useCallback(async (id: string) => {
     if (!confirm('确定删除此模板吗？')) return;
     const res = await fetch(`/api/webbuilder?id=${id}`, { method: 'DELETE' });
     if (res.ok) {
-      setTemplates((prev) => prev.filter((t) => t.id !== id));
+      await refreshTemplates();
       toast.success('删除成功');
     } else {
       toast.error('删除失败');
     }
-  };
+  }, [refreshTemplates]);
 
-  const handleSaveOnly = async () => {
+  // 关闭编辑器并刷新模板列表
+  const handleCloseEditor = useCallback(async () => {
+    setEditingTemplate(null);
+    await refreshTemplates();
+  }, [refreshTemplates]);
+
+  const handleSaveOnly = useCallback(async () => {
     if (!newTemplateName.trim()) {
       alert('请输入模板名称');
       return;
@@ -97,16 +178,15 @@ export default function AdminWebBuilderPage() {
     });
     const result = await res.json();
     if (result.success) {
-      const newTemplate = result;
-      setTemplates((prev) => [...prev, newTemplate]);
+      await refreshTemplates();
       closeModal();
       toast.success('模板已保存');
     } else {
       toast.error(result.error || '创建失败');
     }
-  };
+  }, [newTemplateName, newTemplateCategory, refreshTemplates]);
 
-  const handleCreateAndDesign = async () => {
+  const handleCreateAndDesign = useCallback(async () => {
     if (!newTemplateName.trim()) {
       alert('请输入模板名称');
       return;
@@ -127,14 +207,13 @@ export default function AdminWebBuilderPage() {
     });
     const result = await res.json();
     if (result.success) {
-      const newTemplate = result;
-      setTemplates((prev) => [...prev, newTemplate]);
+      await refreshTemplates();
       closeModal();
-      setEditingTemplate(newTemplate);
+      setEditingTemplate(result);
     } else {
       toast.error(result.error || '创建失败');
     }
-  };
+  }, [newTemplateName, newTemplateCategory, refreshTemplates]);
 
   const closeModal = () => {
     setIsCreateModalOpen(false);
@@ -142,14 +221,46 @@ export default function AdminWebBuilderPage() {
     setNewTemplateCategory('page');
   };
 
-  const filteredTemplates = templates.filter((t) => t.category === activeCategory);
+  // 使用 useMemo 缓存过滤后的模板，避免每次渲染重新计算
+  const filteredTemplates = useMemo(() => {
+    return templates.filter((t) => t.category === activeCategory);
+  }, [templates, activeCategory]);
 
   const getCategoryLabel = (cat: Category) => {
     return CATEGORIES.find((c) => c.value === cat)?.label || cat;
   };
 
+  // 加载状态优化
   if (loading) {
-    return <div className="p-6 text-center text-gray-500">加载中...</div>;
+    return (
+      <div className="p-6">
+        <div className="flex justify-between items-center mb-6">
+          <div className="flex flex-wrap gap-1 border-b border-gray-200 w-full">
+            {VISIBLE_CATEGORIES.map((cat) => (
+              <button
+                key={cat.value}
+                className="px-4 py-2 text-sm font-medium text-gray-500 border-transparent border-b-2 -mb-px"
+              >
+                {cat.label}
+              </button>
+            ))}
+          </div>
+          <button className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg flex items-center space-x-2 transition ml-4 shrink-0 opacity-50 cursor-not-allowed">
+            <Plus className="w-4 h-4" />
+            <span>新建模板</span>
+          </button>
+        </div>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          {[1, 2, 3, 4].map((i) => (
+            <div key={i} className="border rounded-lg p-5 shadow-sm bg-gray-50 animate-pulse">
+              <div className="h-5 bg-gray-200 rounded w-3/4 mb-2"></div>
+              <div className="h-4 bg-gray-200 rounded w-1/2 mb-2"></div>
+              <div className="h-3 bg-gray-200 rounded w-1/3"></div>
+            </div>
+          ))}
+        </div>
+      </div>
+    );
   }
 
   return (
@@ -301,7 +412,7 @@ export default function AdminWebBuilderPage() {
               正在编辑：<span className="font-medium">{editingTemplate.name}</span>
             </span>
             <button
-              onClick={() => setEditingTemplate(null)}
+              onClick={handleCloseEditor}
               className="text-sm text-gray-600 hover:text-gray-900 transition flex items-center gap-1"
             >
               <X className="w-4 h-4" />
@@ -315,7 +426,7 @@ export default function AdminWebBuilderPage() {
               initialCategory={editingTemplate.category}
               onSave={async (puckData: any) => {
                 const pageTitle = puckData?.root?.props?.title || editingTemplate.name;
-                const res = await fetch('/api/webbuilder', {
+                await fetch('/api/webbuilder', {
                   method: 'POST',
                   headers: { 'Content-Type': 'application/json' },
                   body: JSON.stringify({
@@ -326,12 +437,12 @@ export default function AdminWebBuilderPage() {
                     action: 'save',
                   }),
                 });
-                const result = await res.json();
-                refreshTemplates();
+                // 不再立即刷新模板列表
+               
               }}
               onPublish={async (puckData: any) => {
                 const pageTitle = puckData?.root?.props?.title || editingTemplate.name;
-                const res = await fetch('/api/webbuilder', {
+                await fetch('/api/webbuilder', {
                   method: 'POST',
                   headers: { 'Content-Type': 'application/json' },
                   body: JSON.stringify({
@@ -342,8 +453,8 @@ export default function AdminWebBuilderPage() {
                     action: 'publish',
                   }),
                 });
-                const result = await res.json();
-                refreshTemplates();
+                // 不再立即刷新模板列表
+               
               }}
             />
           </div>

@@ -1,20 +1,19 @@
 // app/api/theme-presets/route.ts
 import { NextRequest, NextResponse } from 'next/server';
-import fs from 'fs';
-import path from 'path';
 import { getAllThemePresets, getActiveThemeId } from '@/lib/theme-presets';
+import { getPrivateStorage } from '@/lib/storage/factory';
 
 export async function GET(request: NextRequest) {
   const searchParams = request.nextUrl.searchParams;
   const presetId = searchParams.get('presetId');
 
   if (presetId) {
-    // 解析 presetId，格式为 "category_themeName"，例如 "Blue_Twitter"
     const [category, themeName] = presetId.split('_');
-    const themePath = path.join(process.cwd(), 'data', 'themes', 'presets', category, `${themeName}.json`);
-
-    if (fs.existsSync(themePath)) {
-      const themeJson = JSON.parse(fs.readFileSync(themePath, 'utf-8'));
+    const key = `data/themes/presets/${category}/${themeName}.json`;
+    const storage = getPrivateStorage();
+    try {
+      const content = await storage.read(key, 'utf8');
+      const themeJson = JSON.parse(content as string);
       return NextResponse.json({
         name: themeName,
         cssVars: themeJson.cssVars,
@@ -24,13 +23,15 @@ export async function GET(request: NextRequest) {
         shadows: themeJson.shadows || {},
         animation: themeJson.animation || {},
       });
-    } else {
-      return NextResponse.json({ error: 'Theme not found' }, { status: 404 });
+    } catch (err: any) {
+      if (err?.Code === 'NoSuchKey' || err?.code === 'NoSuchKey' || err?.message?.includes('NoSuchKey')) {
+        return NextResponse.json({ error: 'Theme not found' }, { status: 404 });
+      }
+      return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
     }
   } else {
-    // 返回所有预设主题列表及当前激活的主题 ID
-    const presets = getAllThemePresets();
-    const activeTheme = getActiveThemeId('tenant_001');
+    const presets = await getAllThemePresets();
+    const activeTheme = await getActiveThemeId('tenant_001');
     return NextResponse.json({ presets, activeTheme });
   }
 }
