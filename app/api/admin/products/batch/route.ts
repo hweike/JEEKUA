@@ -6,13 +6,11 @@ import {
   getProductLineIdFromCategory,
   deleteProductIndex,
   getChildrenProducts,
-  searchAllProducts,   // 用于获取所有产品ID（异步）
+  searchAllProducts,
 } from '@/lib/products/indexDb';
 import { generateUniqueProductId } from '@/lib/utils/idGenerator';
 
-// 获取所有现存的 productId（用于唯一性校验）- 异步版本
 async function getAllExistingProductIds(locale: string): Promise<Set<string>> {
-  // 分页获取所有产品，最多 10000 条
   let allItems: any[] = [];
   let page = 1;
   const size = 1000;
@@ -36,7 +34,7 @@ export async function PUT(request: NextRequest) {
       return NextResponse.json({ error: 'locale required' }, { status: 400 });
     }
 
-    // ==================== 批量更新状态 ====================
+    // 批量更新状态
     if (action === 'status') {
       if (!status) return NextResponse.json({ error: 'status required' }, { status: 400 });
       for (const productId of ids) {
@@ -56,7 +54,7 @@ export async function PUT(request: NextRequest) {
       return NextResponse.json({ message: '状态更新成功' });
     }
 
-    // ==================== 批量修改归属分类 ====================
+    // 批量修改归属分类
     if (action === 'category') {
       if (!categoryId) return NextResponse.json({ error: 'categoryId required' }, { status: 400 });
       const productLineId = await getProductLineIdFromCategory(locale, categoryId);
@@ -82,7 +80,7 @@ export async function PUT(request: NextRequest) {
       return NextResponse.json({ message: '修改归属分类成功' });
     }
 
-    // ==================== 批量修改页面模板 ====================
+    // 批量修改页面模板
     if (action === 'template') {
       if (!templateId) return NextResponse.json({ error: 'templateId required' }, { status: 400 });
       for (const productId of ids) {
@@ -102,20 +100,18 @@ export async function PUT(request: NextRequest) {
       return NextResponse.json({ message: '页面模板更新成功' });
     }
 
-    // ==================== 批量复制产品（父产品 + 所有变体） ====================
+    // 批量复制产品
     if (action === 'duplicate') {
       const existingIds = await getAllExistingProductIds(locale);
       const duplicatedParentIds: string[] = [];
 
       for (const productId of ids) {
         const originalParent = await readProduct(locale, productId);
-        if (!originalParent || originalParent.parent_product_id) continue; // 只复制父产品
+        if (!originalParent || originalParent.parent_product_id) continue;
 
-        // 生成新父产品ID
         const newParentId = await generateUniqueProductId(async () => Array.from(existingIds));
         existingIds.add(newParentId);
 
-        // 深拷贝父产品数据
         const newParent = JSON.parse(JSON.stringify(originalParent));
         delete newParent.id;
         newParent.productId = newParentId;
@@ -124,24 +120,18 @@ export async function PUT(request: NextRequest) {
         newParent.updatedAt = new Date().toISOString();
         newParent.parent_product_id = '';
 
-        // 复制 variants 数组：为每个变体生成新 ID
         if (newParent.variants && Array.isArray(newParent.variants)) {
           const newVariants = [];
           for (const variant of newParent.variants) {
             const newVariantId = await generateUniqueProductId(async () => Array.from(existingIds));
             existingIds.add(newVariantId);
-            newVariants.push({
-              ...variant,
-              id: newVariantId,
-            });
+            newVariants.push({ ...variant, id: newVariantId });
           }
           newParent.variants = newVariants;
         }
 
-        // 写入 MD 文件
         await writeProduct(locale, newParentId, newParent, originalParent.content || '');
 
-        // 复制父产品索引
         const originalParentIndex = await getProductIndex(productId);
         if (originalParentIndex) {
           const newParentIndex = {
@@ -157,7 +147,6 @@ export async function PUT(request: NextRequest) {
           await upsertProductIndex(newParentIndex);
         }
 
-        // 复制每个变体的索引
         if (originalParent.variants && originalParent.variants.length > 0) {
           for (let i = 0; i < originalParent.variants.length; i++) {
             const originalVariant = originalParent.variants[i];
@@ -176,7 +165,6 @@ export async function PUT(request: NextRequest) {
               };
               await upsertProductIndex(newVariantIndex);
             } else {
-              // 手动创建基础索引
               await upsertProductIndex({
                 productId: newVariantId,
                 locale,
@@ -211,22 +199,49 @@ export async function PUT(request: NextRequest) {
       });
     }
 
-    // ==================== 批量删除产品 ====================
+    // 批量删除产品（增强错误处理）
     if (action === 'delete') {
       let deletedCount = 0;
+      let failedCount = 0;
+      const errors: string[] = [];
+
       for (const productId of ids) {
-        // 删除变体索引（变体无独立 MD，仅删除索引）
-        const children = await getChildrenProducts(productId);
-        for (const child of children) {
-          await deleteProductIndex(child.productId);
-          deletedCount++;
+        try {
+          // 删除变体索引
+          const children = await getChildrenProducts(productId);
+          for (const child of children) {
+            try {
+              await deleteProductIndex(child.productId);
+              deletedCount++;
+            } catch (err: any) {
+              console.error(`删除变体索引失败: ${child.productId}`, err);
+              errors.push(`变体 ${child.productId}: ${err.message}`);
+              failedCount++;
+            }
+          }
+          // 删除父产品 MD 文件和索引
+          await deleteProduct(locale, productId);
+          try {
+            await deleteProductIndex(productId);
+            deletedCount++;
+          } catch (err: any) {
+            console.error(`删除父产品索引失败: ${productId}`, err);
+            errors.push(`父产品 ${productId}: ${err.message}`);
+            failedCount++;
+          }
+        } catch (err: any) {
+          console.error(`处理产品 ${productId} 删除时出错`, err);
+          errors.push(`产品 ${productId}: ${err.message}`);
+          failedCount++;
         }
-        // 删除父产品 MD 文件和索引
-        await deleteProduct(locale, productId);
-        await deleteProductIndex(productId);
-        deletedCount++;
       }
-      return NextResponse.json({ message: `成功删除 ${deletedCount} 个产品` });
+
+      const message = `成功删除 ${deletedCount} 个产品，失败 ${failedCount} 个`;
+      if (failedCount > 0) {
+        console.error('删除失败详情:', errors);
+        return NextResponse.json({ message, errors, success: false }, { status: 207 }); // 207 Multi-Status
+      }
+      return NextResponse.json({ message, success: true });
     }
 
     return NextResponse.json({ error: '无效的 action' }, { status: 400 });

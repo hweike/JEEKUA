@@ -1,21 +1,72 @@
 'use client';
 
-import { useState, useEffect, useCallback, useTransition, useRef } from 'react';
+import { useState, useEffect, useCallback, useTransition, useRef, useMemo } from 'react';
 import { useSearchParams, useRouter } from 'next/navigation';
+import dynamic from 'next/dynamic';
 import LanguageSelector from '@/components/common/LanguageSelector';
 import Toast from '@/components/Toast';
 import { ProductCard } from './components/ProductCard';
 import { Pagination } from '@/components/common/Pagination';
-import { CategorySelectModal } from './components/CategorySelectModal';
-import { VariantEditModal } from './components/VariantEditModal';
 import { SearchBar } from './components/SearchBar';
-import { ChevronDown } from 'lucide-react';
-import ImportProductsModal from './components/ImportProductsModal';
+import { ChevronDown, ChevronUp } from 'lucide-react';
 import { TemplateSelector } from '@/components/webbuilder/TemplateSelector';
 import { LANGUAGES } from '@/lib/languages/config';
 
-// 获取所有支持的语言代码列表（动态，支持任意多种语言）
+// 懒加载弹窗组件
+const CategorySelectModal = dynamic(() => import('./components/CategorySelectModal'), { ssr: false });
+const VariantEditModal = dynamic(() => import('./components/VariantEditModal'), { ssr: false });
+const ImportProductsModal = dynamic(() => import('./components/ImportProductsModal'), { ssr: false });
+const ImportProductsJsonModal = dynamic(() => import('./components/ImportProductsJsonModal'), { ssr: false });
+
+// ==================== 类型定义 ====================
+interface Product {
+  productId: string;
+  product_name: string;
+  sku: string;
+  categoryId: string;
+  seriesId?: string;
+  status: 'published' | 'draft' | 'offline';
+  main_image_url: string;
+  price_tiers: any;
+  currency: string;
+  min_order_quantity: number;
+  [key: string]: any;
+}
+
+interface StatusCount {
+  published: number;
+  draft: number;
+  offline: number;
+}
+
+interface CategoryInfo {
+  name: string;
+  series: Map<string, string>;
+}
+
+// 骨架屏组件
+function ProductCardSkeleton() {
+  return (
+    <div className="border rounded-lg bg-white shadow-sm overflow-hidden animate-pulse">
+      <div className="flex p-4 gap-4">
+        <div className="flex-shrink-0 pt-2">
+          <div className="w-4 h-4 bg-gray-200 rounded"></div>
+        </div>
+        <div className="flex-shrink-0 w-[150px] h-[150px] bg-gray-200 rounded"></div>
+        <div className="flex-1 space-y-2">
+          <div className="h-5 bg-gray-200 rounded w-3/4"></div>
+          <div className="h-4 bg-gray-200 rounded w-1/2"></div>
+          <div className="h-4 bg-gray-200 rounded w-1/3"></div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ==================== 常量 ====================
 const validLocaleCodes = LANGUAGES.map(lang => lang.code);
+const PAGE_SIZE = 20;
+
 const getInitialLocale = (): string => {
   if (typeof window === 'undefined') return validLocaleCodes[0] || 'zh';
   const stored = localStorage.getItem('admin_selected_language');
@@ -29,19 +80,22 @@ export default function ProductManagePage() {
   const [isPending, startTransition] = useTransition();
   const abortControllerRef = useRef<AbortController | null>(null);
 
+  // 语言状态（与 URL 同步）
   const [locale, setLocale] = useState(getInitialLocale);
 
+  // URL 参数
   const status = searchParams.get('status') || 'all';
   const keyword = searchParams.get('keyword') || '';
   const categoryId = searchParams.get('categoryId') || '';
   const seriesId = searchParams.get('seriesId') || '';
   const page = Number(searchParams.get('page')) || 1;
-  const pageSize = 20;
   const searchAll = searchParams.get('searchAll') === 'true';
+  const uncategorized = searchParams.get('uncategorized') === 'true';
 
-  const [products, setProducts] = useState<any[]>([]);
+  // 状态
+  const [products, setProducts] = useState<Product[]>([]);
   const [total, setTotal] = useState(0);
-  const [statusCount, setStatusCount] = useState({ published: 0, draft: 0, offline: 0 });
+  const [statusCount, setStatusCount] = useState<StatusCount>({ published: 0, draft: 0, offline: 0 });
   const [uncategorizedCount, setUncategorizedCount] = useState(0);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -51,15 +105,24 @@ export default function ProductManagePage() {
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
   const [batchLoading, setBatchLoading] = useState(false);
   const [showMoreMenu, setShowMoreMenu] = useState(false);
+  const [showImportMenu, setShowImportMenu] = useState(false);
+  const importMenuRef = useRef<HTMLDivElement>(null);
   const [categoryModalMode, setCategoryModalMode] = useState<'new' | 'batch'>('new');
-  const [categoryMap, setCategoryMap] = useState<Map<string, { name: string; series: Map<string, string> }>>(new Map());
-
+  const [categoryMap, setCategoryMap] = useState<Map<string, CategoryInfo>>(new Map());
   const [showImportModal, setShowImportModal] = useState(false);
+  const [showImportJsonModal, setShowImportJsonModal] = useState(false);
   const [showTemplateModal, setShowTemplateModal] = useState(false);
-  const [uncategorized, setUncategorized] = useState(false);
   const [selectedTemplateId, setSelectedTemplateId] = useState('');
 
-  // 初始化 localStorage 中的语言设置
+  // Toast 自动关闭
+  useEffect(() => {
+    if (toast) {
+      const timer = setTimeout(() => setToast(null), 3000);
+      return () => clearTimeout(timer);
+    }
+  }, [toast]);
+
+  // 初始化语言设置
   useEffect(() => {
     const initLocale = async () => {
       const stored = localStorage.getItem('admin_selected_language');
@@ -84,35 +147,12 @@ export default function ProductManagePage() {
     initLocale();
   }, []);
 
-  // 获取未分类产品总数（全局，不依赖 status）
-  const fetchUncategorizedCount = useCallback(async () => {
-    try {
-      const url = `/api/admin/products/manage?locale=${locale}&uncategorized=true&size=1`;
-      const res = await fetch(url);
-      if (res.ok) {
-        const data = await res.json();
-        setUncategorizedCount(data.total || 0);
-      } else {
-        setUncategorizedCount(0);
-      }
-    } catch (err) {
-      console.error('获取未分类产品数量失败', err);
-      setUncategorizedCount(0);
-    }
-  }, [locale]);
-
-  // 初始化未分类筛选状态（从 URL 参数读取）
-  useEffect(() => {
-    const isUncategorized = searchParams.get('uncategorized') === 'true';
-    setUncategorized(isUncategorized);
-  }, [searchParams]);
-
   // 加载分类数据
   useEffect(() => {
     fetch(`/api/admin/products/categories?locale=${locale}`)
       .then(res => res.json())
       .then(data => {
-        const map = new Map();
+        const map = new Map<string, CategoryInfo>();
         (data.categories || []).forEach((cat: any) => {
           const seriesMap = new Map();
           (cat.series || []).forEach((s: any) => seriesMap.set(s.id, s.name));
@@ -123,7 +163,7 @@ export default function ProductManagePage() {
       .catch(console.error);
   }, [locale]);
 
-  // 获取产品列表
+  // 获取产品列表（合并未分类计数）
   const fetchProducts = useCallback(async (signal: AbortSignal) => {
     setLoading(true);
     setError(null);
@@ -140,24 +180,28 @@ export default function ProductManagePage() {
       }
       if (searchAll) url.searchParams.set('searchAll', 'true');
       url.searchParams.set('page', String(page));
-      url.searchParams.set('size', String(pageSize));
+      url.searchParams.set('size', String(PAGE_SIZE));
       const res = await fetch(url.toString(), { signal });
       if (!res.ok) throw new Error('加载失败');
       const data = await res.json();
       setProducts(data.items || []);
       setTotal(data.total || 0);
       setStatusCount(data.statusCount || { published: 0, draft: 0, offline: 0 });
+      
+      // 只在非未分类视图下刷新未分类计数（减少请求）
+      if (!uncategorized) {
+        const countRes = await fetch(`/api/admin/products/manage?locale=${locale}&uncategorized=true&size=1`);
+        if (countRes.ok) {
+          const countData = await countRes.json();
+          setUncategorizedCount(countData.total || 0);
+        }
+      }
     } catch (err: any) {
       if (err.name !== 'AbortError') setError(err.message);
     } finally {
       setLoading(false);
     }
   }, [locale, status, keyword, categoryId, seriesId, page, searchAll, uncategorized]);
-
-  // 获取产品列表的同时获取未分类总数
-  useEffect(() => {
-    fetchUncategorizedCount();
-  }, [fetchUncategorizedCount]);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -166,7 +210,7 @@ export default function ProductManagePage() {
     return () => controller.abort();
   }, [fetchProducts]);
 
-  // 更新 URL 参数（允许 undefined 值，内部会删除参数）
+  // 更新 URL 参数（同步 locale 状态）
   const updateParams = useCallback((updates: Record<string, string | number | undefined>) => {
     const params = new URLSearchParams(searchParams);
     Object.entries(updates).forEach(([key, val]) => {
@@ -177,14 +221,26 @@ export default function ProductManagePage() {
       const newLocale = String(updates.locale);
       if (validLocaleCodes.includes(newLocale)) {
         localStorage.setItem('admin_selected_language', newLocale);
+        setLocale(newLocale); // 同步组件状态
       }
     }
     startTransition(() => router.push(`?${params.toString()}`));
   }, [router, searchParams]);
 
+  // 点击外部关闭导入菜单
+  useEffect(() => {
+    if (!showImportMenu) return;
+    const handleClickOutside = (e: MouseEvent) => {
+      if (importMenuRef.current && !importMenuRef.current.contains(e.target as Node)) {
+        setShowImportMenu(false);
+      }
+    };
+    document.addEventListener('click', handleClickOutside);
+    return () => document.removeEventListener('click', handleClickOutside);
+  }, [showImportMenu]);
+
   const handleTabChange = (newStatus: string) => {
     if (newStatus === status) return;
-    setUncategorized(false);
     updateParams({ status: newStatus, page: 1, uncategorized: undefined });
   };
 
@@ -223,8 +279,7 @@ export default function ProductManagePage() {
       const res = await fetch(`/api/admin/products/manage?productId=${productId}&locale=${locale}`, { method: 'DELETE' });
       if (res.ok) {
         setToast({ message: '删除成功', type: 'success' });
-        fetchUncategorizedCount();
-        fetchProducts(abortControllerRef.current?.signal!);
+        await fetchProducts(abortControllerRef.current?.signal!);
       } else setToast({ message: '删除失败', type: 'error' });
     } catch {
       setToast({ message: '删除失败', type: 'error' });
@@ -260,8 +315,7 @@ export default function ProductManagePage() {
       if (res.ok) {
         setToast({ message: data.message || '操作成功', type: 'success' });
         setSelectedProductIds(new Set());
-        fetchUncategorizedCount();
-        fetchProducts(abortControllerRef.current?.signal!);
+        await fetchProducts(abortControllerRef.current?.signal!);
         return true;
       } else {
         setToast({ message: data.error || '操作失败', type: 'error' });
@@ -339,7 +393,7 @@ export default function ProductManagePage() {
     return () => document.removeEventListener('click', handleClickOutside);
   }, [showMoreMenu]);
 
-  const getCategoryPath = (product: any) => {
+  const getCategoryPath = (product: Product) => {
     const catInfo = categoryMap.get(product.categoryId);
     if (!catInfo) return '';
     const categoryName = catInfo.name;
@@ -347,7 +401,39 @@ export default function ProductManagePage() {
     return seriesName ? `${categoryName} > ${seriesName}` : categoryName;
   };
 
-  const totalPages = Math.ceil(total / pageSize);
+  const totalPages = useMemo(() => Math.ceil(total / PAGE_SIZE), [total]);
+
+  // 骨架屏渲染（加载时显示5个卡片）
+  const renderContent = () => {
+    if (loading) {
+      return (
+        <div className="space-y-4">
+          {Array.from({ length: 5 }).map((_, i) => (
+            <ProductCardSkeleton key={i} />
+          ))}
+        </div>
+      );
+    }
+    if (products.length === 0) {
+      return <div className="text-center py-12 text-gray-500">暂无产品数据</div>;
+    }
+    return (
+      <div className="space-y-4">
+        {products.map(product => (
+          <ProductCard
+            key={product.productId}
+            product={product}
+            locale={locale}
+            onDelete={handleDelete}
+            onEditVariant={handleEditVariant}
+            isSelected={selectedProductIds.has(product.productId)}
+            onSelectChange={toggleSelect}
+            categoryPath={getCategoryPath(product)}
+          />
+        ))}
+      </div>
+    );
+  };
 
   return (
     <div className="p-6">
@@ -380,7 +466,6 @@ export default function ProductManagePage() {
         <button
           key="uncategorized"
           onClick={() => {
-            setUncategorized(true);
             const params = new URLSearchParams(searchParams);
             params.set('status', 'all');
             params.delete('categoryId');
@@ -491,26 +576,7 @@ export default function ProductManagePage() {
         </div>
       )}
 
-      {loading ? (
-        <div className="space-y-4">加载中...</div>
-      ) : products.length === 0 ? (
-        <div className="text-center py-12 text-gray-500">暂无产品数据</div>
-      ) : (
-        <div className="space-y-4">
-          {products.map(product => (
-            <ProductCard
-              key={product.productId}
-              product={product}
-              locale={locale}
-              onDelete={handleDelete}
-              onEditVariant={handleEditVariant}
-              isSelected={selectedProductIds.has(product.productId)}
-              onSelectChange={toggleSelect}
-              categoryPath={getCategoryPath(product)}
-            />
-          ))}
-        </div>
-      )}
+      {renderContent()}
 
       {totalPages > 1 && (
         <div className="mt-6">
@@ -525,12 +591,37 @@ export default function ProductManagePage() {
         >
           + 新建商品
         </button>
-        <button
-          onClick={() => setShowImportModal(true)}
-          className="bg-blue-600 text-white px-6 py-3 rounded-full shadow-lg hover:bg-blue-700 transition-colors"
-        >
-          📥 导入商品
-        </button>
+        <div className="relative" ref={importMenuRef}>
+          <button
+            onClick={() => setShowImportMenu(!showImportMenu)}
+            className="bg-blue-600 text-white px-6 py-3 rounded-full shadow-lg hover:bg-blue-700 transition-colors flex items-center gap-1"
+          >
+            📥 导入商品
+            {showImportMenu ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
+          </button>
+          {showImportMenu && (
+            <div className="absolute bottom-full mb-2 left-0 w-48 bg-white border rounded-lg shadow-lg overflow-hidden z-50">
+              <button
+                onClick={() => {
+                  setShowImportModal(true);
+                  setShowImportMenu(false);
+                }}
+                className="block w-full text-left px-4 py-2 text-sm hover:bg-gray-100"
+              >
+                📄 导入商品(Excel)
+              </button>
+              <button
+                onClick={() => {
+                  setShowImportJsonModal(true);
+                  setShowImportMenu(false);
+                }}
+                className="block w-full text-left px-4 py-2 text-sm hover:bg-gray-100"
+              >
+                📦 导入商品(Json)
+              </button>
+            </div>
+          )}
+        </div>
       </div>
 
       {showCategoryModal && (
@@ -558,8 +649,18 @@ export default function ProductManagePage() {
           onClose={() => setShowImportModal(false)}
           onSuccess={async () => {
             setToast({ message: '导入成功，正在刷新列表', type: 'success' });
-            fetchUncategorizedCount();
-            fetchProducts(abortControllerRef.current?.signal!);
+            await fetchProducts(abortControllerRef.current?.signal!);
+          }}
+        />
+      )}
+
+      {showImportJsonModal && (
+        <ImportProductsJsonModal
+          locale={locale}
+          onClose={() => setShowImportJsonModal(false)}
+          onSuccess={async () => {
+            setToast({ message: 'JSON导入成功，正在刷新列表', type: 'success' });
+            await fetchProducts(abortControllerRef.current?.signal!);
           }}
         />
       )}

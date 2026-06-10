@@ -1,9 +1,8 @@
-// app/api/admin/login/route.ts
 import { NextRequest, NextResponse } from 'next/server';
 import { verifyPassword } from '@/lib/auth/password';
 import { findUserByEmail } from '@/lib/auth/users';
 import { setAuthCookie } from '@/lib/auth/jwt';
-import { logLogin } from '@/lib/logger'; // 已改造为写入数据库（如 Supabase）
+import { logLogin } from '@/lib/logger';
 
 export async function POST(request: NextRequest) {
   const { email, password } = await request.json();
@@ -32,7 +31,8 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: '邮箱或密码错误' }, { status: 401 });
   }
 
-  await setAuthCookie(user.email, user.id);
+  // 升级：传入 siteId（从用户对象中获取）
+  await setAuthCookie(user.email, user.id, user.siteId);
   await logLogin(email, ip, userAgent, true, '登录成功');
 
   return NextResponse.json({

@@ -319,7 +319,46 @@ CREATE TABLE IF NOT EXISTS "site_configs" (
     FOREIGN KEY ("site_id") REFERENCES "sites"("site_id") ON DELETE CASCADE
 );
 
+
+-- ========== 管理员表 ==========
+CREATE TABLE IF NOT EXISTS admin_users (
+  id TEXT PRIMARY KEY,
+  email TEXT UNIQUE NOT NULL,
+  name TEXT NOT NULL,
+  "englishName" TEXT NOT NULL,
+  "passwordHash" TEXT NOT NULL,
+  "createdAt" TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  "mustChangePassword" BOOLEAN NOT NULL DEFAULT true,
+  role TEXT NOT NULL CHECK (role IN ('super', 'admin')),
+  api_token VARCHAR(100) UNIQUE,
+  api_token_expires_at TIMESTAMPTZ,
+  site_id TEXT NOT NULL DEFAULT '000001'   -- 新增：站点隔离字段
+);
+
+-- 创建索引（单列）
+CREATE INDEX IF NOT EXISTS idx_admin_users_email ON admin_users(email);
+CREATE INDEX IF NOT EXISTS idx_admin_users_api_token ON admin_users(api_token);
+CREATE INDEX IF NOT EXISTS idx_admin_users_site_id ON admin_users(site_id);  -- 新增：站点索引
+
+-- 可选：联合索引，优化按站点 + 邮箱的查询（如果未来将唯一约束改为 (site_id, email) 则更有用）
+CREATE INDEX IF NOT EXISTS idx_admin_users_site_email ON admin_users(site_id, email);
+
+-- 插入默认超级管理员（仅当表为空时，且 site_id 默认为 '000001'）
+INSERT INTO admin_users (id, email, name, "englishName", "passwordHash", "mustChangePassword", role, site_id)
+SELECT 
+  '1', 
+  'admin@admin.com', 
+  '超级管理员', 
+  'Admin', 
+  '$2b$10$yDBubqffAuScFmQGQbw13uhqR4xrQ1j4scKcrihvzgfvv5AyLtm.S', 
+  false, 
+  'super',
+  '000001'   -- 默认站点
+WHERE NOT EXISTS (SELECT 1 FROM admin_users LIMIT 1);
+
+-- 为 site_configs 表创建索引（保持原有）
 CREATE INDEX IF NOT EXISTS "idx_configs_site_locale" ON "site_configs" ("site_id", "locale");
+
 
 -- ========== sync_logs 表 ==========
 DROP TABLE IF EXISTS "sync_logs" CASCADE;
@@ -370,6 +409,51 @@ CREATE INDEX IF NOT EXISTS idx_admin_logs_timestamp ON admin_logs (timestamp);
 CREATE INDEX IF NOT EXISTS idx_admin_logs_type ON admin_logs (type);
 CREATE INDEX IF NOT EXISTS idx_admin_logs_email ON admin_logs (email);
 CREATE INDEX IF NOT EXISTS idx_admin_logs_operator_email ON admin_logs (operator_email);
+
+
+
+-- ========== collected_products 产品数据采集表 ==========
+DROP TABLE IF EXISTS collected_products;
+CREATE TABLE collected_products (
+    id BIGSERIAL PRIMARY KEY,
+    tenant_id TEXT NOT NULL,                       -- 对应 tenants.tenant_id (TEXT)
+    site_id TEXT NOT NULL,                         -- 对应 sites.site_id (TEXT)
+    source_url TEXT NOT NULL,
+    platform VARCHAR(50),
+    status VARCHAR(20) DEFAULT 'unclaimed',
+    title TEXT,
+    main_image_url TEXT,
+    price DECIMAL(12,2),
+    currency VARCHAR(3) DEFAULT 'CNY',
+    raw_data JSONB NOT NULL,
+    documents JSONB,
+    custom_fields JSONB,
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX idx_collected_products_tenant_site ON collected_products(tenant_id, site_id);
+CREATE INDEX idx_collected_products_status ON collected_products(status);
+CREATE INDEX idx_collected_products_platform ON collected_products(platform);
+
+
+-- ========== user_platform_credentials 数据采集用户与平台凭据表 ==========
+-- 创建通用平台凭据表
+-- 创建新表，user_id 类型为 TEXT 以匹配 admin_users.id
+CREATE TABLE IF NOT EXISTS user_platform_credentials (
+    id BIGSERIAL PRIMARY KEY,
+    user_id TEXT NOT NULL,
+    platform VARCHAR(50) NOT NULL,
+    credential TEXT NOT NULL,
+    expires_at TIMESTAMPTZ,
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    updated_at TIMESTAMPTZ DEFAULT NOW(),
+    UNIQUE(user_id, platform)
+);
+
+-- 创建索引（不创建外键约束）
+CREATE INDEX IF NOT EXISTS idx_user_platform_credentials_user_platform ON user_platform_credentials(user_id, platform);
+
 
 -- ============================================================
 -- 附录：数据迁移说明（从单站点升级到多租户）

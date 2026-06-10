@@ -11,9 +11,9 @@ import { getPrivateStorage } from '@/lib/storage/factory';
 export async function saveDebugScreenshot(page: Page, taskId: string, prefix: string = 'error') {
   try {
     const timestamp = Date.now();
-    // 在私有桶中的路径：data/crawler/tasks/{taskId}/{prefix}_{timestamp}.png/html
-    const screenshotKey = `data/crawler/tasks/${taskId}/${prefix}_${timestamp}.png`;
-    const htmlKey = `data/crawler/tasks/${taskId}/${prefix}_${timestamp}.html`;
+    // 在私有桶中的路径：crawler/tasks/{taskId}/{prefix}_{timestamp}.png/html
+    const screenshotKey = `crawler/tasks/${taskId}/${prefix}_${timestamp}.png`;
+    const htmlKey = `crawler/tasks/${taskId}/${prefix}_${timestamp}.html`;
 
     const storage = getPrivateStorage();
 
@@ -50,4 +50,36 @@ export async function waitWithRetry<T>(
     }
   }
   throw lastError;
+}
+
+/**
+ * 追加日志到任务日志文件（存储在私有桶中）
+ * @param taskId 任务 ID
+ * @param message 日志消息
+ */
+export async function appendTaskLog(taskId: string, message: string) {
+  try {
+    const storage = getPrivateStorage();
+    // 统一路径：与截图一致使用 crawler/tasks/...（不包含 data/ 前缀）
+    const logKey = `crawler/tasks/${taskId}/log.txt`;
+    const timestamp = new Date().toISOString();
+    // 日志行格式：[timestamp] [taskId] message
+    const logLine = `[${timestamp}] [${taskId}] ${message}\n`;
+
+    // 读取现有日志内容（如果存在）
+    let existingContent = '';
+    try {
+      const existing = await storage.read(logKey, 'utf8');
+      existingContent = existing as string;
+    } catch (err) {
+      // 文件不存在，忽略错误
+    }
+
+    // 拼接新内容并写回
+    const newContent = existingContent + logLine;
+    await storage.write(logKey, newContent, { contentType: 'text/plain' });
+  } catch (err) {
+    // 日志写入失败不应影响主流程，仅打印警告
+    console.warn(`Failed to append log for task ${taskId}:`, err);
+  }
 }

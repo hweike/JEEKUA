@@ -8,6 +8,7 @@ interface TaskStatus {
   status: string;
   categories?: any[];
   products?: any[];
+  latestProducts?: any[];
   progress?: string;
   error?: string;
 }
@@ -18,6 +19,7 @@ export default function CrawlerAdmin() {
   const [taskId, setTaskId] = useState<string | null>(null);
   const [taskStatus, setTaskStatus] = useState<TaskStatus | null>(null);
   const [loading, setLoading] = useState(false);
+  const [logContent, setLogContent] = useState('');
 
   useEffect(() => {
     fetch('/api/crawler/rule')
@@ -31,6 +33,7 @@ export default function CrawlerAdmin() {
       .catch(console.error);
   }, []);
 
+  // 轮询任务状态
   useEffect(() => {
     if (!taskId) return;
     const interval = setInterval(async () => {
@@ -45,17 +48,49 @@ export default function CrawlerAdmin() {
     return () => clearInterval(interval);
   }, [taskId]);
 
+  // 轮询日志
+  useEffect(() => {
+    if (!taskId) return;
+    const logInterval = setInterval(async () => {
+      try {
+        const res = await fetch(`/api/crawler/log?taskId=${taskId}`);
+        const data = await res.json();
+        setLogContent(data.log || '');
+        const logDiv = document.getElementById('crawler-log');
+        if (logDiv) logDiv.scrollTop = logDiv.scrollHeight;
+      } catch (e) {
+        console.error('获取日志失败', e);
+      }
+    }, 2000);
+    return () => clearInterval(logInterval);
+  }, [taskId]);
+
   const startCrawl = async () => {
     if (!selectedRule) return;
     setLoading(true);
     setTaskStatus(null);
-    const res = await fetch('/api/crawler/run', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ ruleId: selectedRule }),
-    });
-    const { taskId: tid } = await res.json();
-    setTaskId(tid);
+    setLogContent('');
+    try {
+      const res = await fetch('/api/crawler/run', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ruleId: selectedRule }),
+      });
+      // 检查响应状态
+      if (!res.ok) {
+        const text = await res.text();
+        throw new Error(`服务器错误 (${res.status}): ${text.slice(0, 100)}`);
+      }
+      const data = await res.json();
+      if (!data || !data.taskId) {
+        throw new Error('响应缺少 taskId 字段');
+      }
+      setTaskId(data.taskId);
+    } catch (err: any) {
+      console.error('启动爬取失败:', err);
+      alert(`启动失败: ${err.message}`);
+      setLoading(false);
+    }
   };
 
   const downloadJSON = (data: any, filename: string) => {
@@ -156,6 +191,40 @@ export default function CrawlerAdmin() {
             </div>
           )}
         </div>
+
+        {/* 实时日志区域 */}
+        {taskId && (
+          <div className="bg-white rounded-lg shadow-md p-6 mt-6">
+            <h2 className="text-xl font-semibold mb-4">📋 实时日志(任务ID: {taskId})</h2>
+            <div
+              id="crawler-log"
+              className="bg-gray-900 text-green-400 p-4 rounded-md h-64 overflow-auto font-mono text-xs"
+            >
+              {logContent.split('\n').map((line, i) => (
+                <div key={i}>{line}</div>
+              ))}
+              {!logContent && <div className="text-gray-500">等待日志输出...</div>}
+            </div>
+          </div>
+        )}
+
+        {/* 最新产品预览区域 */}
+        {taskStatus?.latestProducts && taskStatus.latestProducts.length > 0 && (
+          <div className="bg-white rounded-lg shadow-md p-6 mt-6">
+            <h2 className="text-xl font-semibold mb-4">🆕 最新抓取产品（最近5条）</h2>
+            <div className="space-y-2">
+              {taskStatus.latestProducts.map((prod, idx) => (
+                <div key={idx} className="border-l-4 border-blue-500 pl-4 py-2 bg-gray-50 rounded">
+                  <p className="font-medium">{prod.parent_product_name || prod.model || prod.name}</p>
+                  <p className="text-sm text-gray-600 truncate">分类: {prod.categoryName}</p>
+                  <p className="text-xs text-gray-400">
+                    抓取时间: {new Date(prod.crawledAt || Date.now()).toLocaleString()}
+                  </p>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );

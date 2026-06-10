@@ -1,0 +1,104 @@
+{
+  "domain": "detail.1688.com",
+  "platform": "1688",
+  "global": {
+    "waitTimeout": 5000,
+    "scrollToLoad": false
+  },
+  "extractors": {
+    "title": {
+      "selector": ["#productTitle h1", "[data-spm='productTitle'] h1", "h1"],
+      "method": "text",
+      "fallback": "document.title"
+    },
+    "sku": {
+      "selector": "url",
+      "method": "regex",
+      "pattern": "offer/(\\d+)\\.html"
+    },
+    "shop_name": {
+      "selector": [".shop-company-name h1", ".seller-name"],
+      "method": "text",
+      "fallback": ""
+    },
+    "price": {
+      "selector": ["#mainPrice .price-info", "[data-spm='mainPrice'] .price-info"],
+      "method": "text",
+      "transform": "extractPriceFromText",
+      "fallback": "0",
+      "waitTimeout": 3000
+    },
+    "price_list": {
+      "selector": ".od-price-container .price-component",
+      "method": "tableRow",
+      "fields": {
+        "price": {
+          "selector": ".price-info",
+          "method": "text",
+          "transform": "extractFirstNumber"
+        },
+        "moq": {
+          "selector": "p",
+          "method": "text",
+          "transform": "extractNumber"
+        }
+      }
+    },
+    "main_image_url": {
+      "selector": ["#gallery .ant-image-img", ".od-gallery-preview .ant-image-img"],
+      "method": "attr",
+      "attribute": "src",
+      "index": 0,
+      "waitTimeout": 3000
+    },
+    "additional_images": {
+      "selector": ["#gallery .ant-image-img", ".od-gallery-preview .ant-image-img"],
+      "method": "attr",
+      "attribute": "src",
+      "skipFirst": true,
+      "waitTimeout": 3000
+    },
+    "attributes": {
+      "selector": ".attributes-table tr, #productAttributes .ant-descriptions-row, .sku-attributes .attribute-item",
+      "method": "keyValuePairs",
+      "keySelector": "th, .attr-name, .attribute-key",
+      "valueSelector": "td, .attr-value, .attribute-value"
+    },
+    "brand": {
+      "selector": ".attributes-table tr, #productAttributes .ant-descriptions-row",
+      "method": "keyValue",
+      "key": "品牌"
+    },
+    "location": {
+      "selector": "#shippingServices .location, .delivery-info .location",
+      "method": "text",
+      "fallback": ""
+    },
+    "description": {
+      "selector": [".detail-description", ".desc-content", "#J-description", "#description-module"],
+      "method": "html",
+      "fallback": "",
+      "waitTimeout": 4000
+    },
+    "variants": {
+      "selector": "#skuSelection .expand-view-item, .sku-list .sku-item",
+      "method": "tableRow",
+      "fields": {
+        "sku_name": {
+          "selector": ".item-label, .sku-name",
+          "method": "text"
+        },
+        "price": {
+          "selector": ".item-price-stock, .sku-price",
+          "method": "text",
+          "transform": "extractFirstNumber"
+        },
+        "image": {
+          "selector": ".item-img img, .sku-image",
+          "method": "attr",
+          "attribute": "src"
+        }
+      }
+    }
+  }
+}

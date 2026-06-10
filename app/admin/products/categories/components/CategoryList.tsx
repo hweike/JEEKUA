@@ -337,72 +337,81 @@ export default function CategoryList({
         </div>
       )}
 
-      {categories.map((cat: any) => (
-        <div key={cat.id} className="border rounded-lg bg-white shadow-sm overflow-hidden">
-          {editingCat?.id === cat.id ? (
-            <div className="p-4">
-              <CategoryForm
-                category={editingCat}
-                onSave={(updated: any) => saveCategory(updated, false)}
-                onCancel={() => setEditingCat(null)}
-                productLines={productLines}
-                attributeTemplates={attributeTemplates}
-              />
-            </div>
-          ) : (
-            <>
-              <div 
-                className="p-4 border-b flex justify-between items-start cursor-pointer hover:bg-gray-50 transition-colors"
-                onClick={() => toggleExpand(cat.id)}
-              >
-                <div className="flex items-center gap-3">
-                  <input
-                    type="checkbox"
-                    checked={selectedCatIds.has(cat.id)}
-                    onChange={(e: React.ChangeEvent<HTMLInputElement>) => toggleSelect(cat.id, e)}
-                    onClick={(e) => e.stopPropagation()}
-                    className="w-4 h-4"
-                  />
-                  <button 
-                    onClick={(e) => { e.stopPropagation(); toggleExpand(cat.id, e); }} 
-                    className="text-gray-600 hover:text-gray-800"
-                  >
-                    {expandedCatIds.has(cat.id) ? <ChevronDown size={18} /> : <ChevronRight size={18} />}
-                  </button>
-                  <div className="flex gap-4">
-                    {cat.image && (
-                      <div className="flex-shrink-0">
-                        <img src={cat.image} className="w-16 h-16 object-cover rounded" alt="" />
+      {categories.map((cat: any) => {
+        // 获取二级分类数量（基于前端 cat.series 数组）
+        const subCategoryCount = cat.series?.length ?? 0;
+        return (
+          <div key={cat.id} className="border rounded-lg bg-white shadow-sm overflow-hidden">
+            {editingCat?.id === cat.id ? (
+              <div className="p-4">
+                <CategoryForm
+                  category={editingCat}
+                  onSave={(updated: any) => saveCategory(updated, false)}
+                  onCancel={() => setEditingCat(null)}
+                  productLines={productLines}
+                  attributeTemplates={attributeTemplates}
+                />
+              </div>
+            ) : (
+              <>
+                <div 
+                  className="p-4 border-b flex justify-between items-start cursor-pointer hover:bg-gray-50 transition-colors"
+                  onClick={() => toggleExpand(cat.id)}
+                >
+                  <div className="flex items-center gap-3">
+                    <input
+                      type="checkbox"
+                      checked={selectedCatIds.has(cat.id)}
+                      onChange={(e: React.ChangeEvent<HTMLInputElement>) => toggleSelect(cat.id, e)}
+                      onClick={(e) => e.stopPropagation()}
+                      className="w-4 h-4"
+                    />
+                    <button 
+                      onClick={(e) => { e.stopPropagation(); toggleExpand(cat.id, e); }} 
+                      className="text-gray-600 hover:text-gray-800"
+                    >
+                      {expandedCatIds.has(cat.id) ? <ChevronDown size={18} /> : <ChevronRight size={18} />}
+                    </button>
+                    <div className="flex gap-4">
+                      {cat.image && (
+                        <div className="flex-shrink-0">
+                          <img src={cat.image} className="w-16 h-16 object-cover rounded" alt="" />
+                        </div>
+                      )}
+                      <div>
+                        <h2 className="text-xl font-semibold">
+                          {cat.name}
+                          <span className="ml-2 text-sm font-normal text-gray-500">
+                            二级分类({subCategoryCount})
+                          </span>
+                        </h2>
+                        <p className="text-gray-500 text-sm">URL: {cat.slug}</p>
                       </div>
-                    )}
-                    <div>
-                      <h2 className="text-xl font-semibold">{cat.name}</h2>
-                      <p className="text-gray-500 text-sm">URL: {cat.slug}</p>
                     </div>
                   </div>
+                  <div className="flex gap-2 items-center" onClick={(e) => e.stopPropagation()}>
+                    <button onClick={(e) => { e.stopPropagation(); setEditingCat(cat); }} className="text-blue-600 hover:text-blue-800">
+                      <Edit size={18} />
+                    </button>
+                    <button onClick={(e) => deleteCategory(cat.id, e)} className="text-red-600 hover:text-red-800">
+                      <Trash2 size={18} />
+                    </button>
+                  </div>
                 </div>
-                <div className="flex gap-2 items-center" onClick={(e) => e.stopPropagation()}>
-                  <button onClick={(e) => { e.stopPropagation(); setEditingCat(cat); }} className="text-blue-600 hover:text-blue-800">
-                    <Edit size={18} />
-                  </button>
-                  <button onClick={(e) => deleteCategory(cat.id, e)} className="text-red-600 hover:text-red-800">
-                    <Trash2 size={18} />
-                  </button>
-                </div>
-              </div>
-              {expandedCatIds.has(cat.id) && (
-                <div className="p-4 bg-gray-50">
-                  <SeriesManager
-                    category={cat}
-                    attributeTemplates={attributeTemplates}
-                    onUpdate={(updatedCat: any) => handleSeriesUpdate(cat, updatedCat)}
-                  />
-                </div>
-              )}
-            </>
-          )}
-        </div>
-      ))}
+                {expandedCatIds.has(cat.id) && (
+                  <div className="p-4 bg-gray-50">
+                    <SeriesManager
+                      category={cat}
+                      attributeTemplates={attributeTemplates}
+                      onUpdate={(updatedCat: any) => handleSeriesUpdate(cat, updatedCat)}
+                    />
+                  </div>
+                )}
+              </>
+            )}
+          </div>
+        );
+      })}
     </div>
   );
 }

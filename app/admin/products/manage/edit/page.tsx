@@ -13,6 +13,7 @@ import { toPinyin } from '@/lib/utils/pinyin';
 import { TemplateSelector } from '@/components/webbuilder/TemplateSelector';
 import ProductRelatedVideos from '@/components/admin/products/ProductRelatedVideos';
 import { getLanguageDisplayName } from '@/lib/languages/config';
+import Toast from '@/components/Toast';
 
 const RichTextEditor = dynamic(() => import('@/components/RichTextEditor'), { ssr: false });
 
@@ -23,7 +24,6 @@ interface AttributeTemplate {
 }
 
 function SpecificationsInput({ value, onChange }: { value: string; onChange: (val: string) => void }) {
-  // ... 原有代码保持不变（省略以节省篇幅）...
   const [tags, setTags] = useState<string[]>(() => {
     if (!value) return [];
     return value.split(',').map(s => s.trim()).filter(Boolean);
@@ -132,6 +132,7 @@ export default function ProductEditPage() {
   const [attributeTemplate, setAttributeTemplate] = useState<AttributeTemplate | null>(null);
   const [titleLength, setTitleLength] = useState(0);
   const [templateList, setTemplateList] = useState<any[]>([]);
+  const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
 
   // 新建产品时，默认选中第一个产品模板
   useEffect(() => {
@@ -270,93 +271,94 @@ export default function ProductEditPage() {
     }));
   };
 
-  // 已删除 handleAutoGenerate 函数
-
   const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
+  e.preventDefault();
 
-    // 修改校验：SKU 不再是必填
-    if (!form.product_name || !form.price_tiers?.length) {
-      alert('请填写产品名称和至少一个价格阶梯');
-      return;
-    }
+  if (!form.product_name || !form.price_tiers?.length) {
+    setToast({ message: '请填写产品名称和至少一个价格阶梯', type: 'error' });
+    return;
+  }
 
-    let finalSlug = form.slug;
-    if (!finalSlug || finalSlug.trim() === '') {
-      finalSlug = generateSlugForProduct(form.product_name);
-      setForm((prev: any) => ({ ...prev, slug: finalSlug }));
-    }
+  let finalSlug = form.slug;
+  if (!finalSlug || finalSlug.trim() === '') {
+    finalSlug = generateSlugForProduct(form.product_name);
+    setForm((prev: any) => ({ ...prev, slug: finalSlug }));
+  }
 
-    const finalCategoryId = form.categoryId || urlCategoryId;
-    const finalSeriesId = form.seriesId || urlSeriesId;
+  const finalCategoryId = form.categoryId || urlCategoryId;
+  const finalSeriesId = form.seriesId || urlSeriesId;
 
-    if (!finalCategoryId) {
-      alert('分类信息缺失，请返回产品列表重新编辑');
-      return;
-    }
+  if (!finalCategoryId) {
+    setToast({ message: '分类信息缺失，请返回产品列表重新编辑', type: 'error' });
+    return;
+  }
 
-    const payload = {
-      id: form.id,
-      product_name: form.product_name,
-      sku: form.sku || '',   // SKU 可选，为空则后端生成
-      brand: form.brand,
-      price_tiers: form.price_tiers,
-      availability: form.availability,
-      min_order_quantity: form.min_order_quantity,
-      main_image_url: form.main_image_url,
-      additional_images: form.additional_images,
-      description: form.description,
-      short_description: form.short_description,
-      attributes: form.attributes,
-      spec_text: form.spec_text,
-      product_type: form.product_type,
-      google_product_category: form.google_product_category,
-      seo_title: form.seo_title,
-      seo_description: form.seo_description,
-      seo_keywords: form.seo_keywords,
-      slug: finalSlug,
-      shipping_cost: form.shipping_cost,
-      return_policy_days: form.return_policy_days,
-      content: form.content,
-      status: form.status,
-      categoryId: finalCategoryId,
-      seriesId: finalSeriesId,
-      locale,
-      currency: defaultCurrency,
-      variants: form.variants,
-      templateId: form.templateId,
-    };
-    if (parentId) (payload as any).parent_product_id = parentId;
+  const payload = {
+    id: form.id,
+    product_name: form.product_name,
+    sku: form.sku || '',
+    brand: form.brand,
+    price_tiers: form.price_tiers,
+    availability: form.availability,
+    min_order_quantity: form.min_order_quantity,
+    main_image_url: form.main_image_url,
+    additional_images: form.additional_images,
+    description: form.description,
+    short_description: form.short_description,
+    attributes: form.attributes,
+    spec_text: form.spec_text,
+    product_type: form.product_type,
+    google_product_category: form.google_product_category,
+    seo_title: form.seo_title,
+    seo_description: form.seo_description,
+    seo_keywords: form.seo_keywords,
+    slug: finalSlug,
+    shipping_cost: form.shipping_cost,
+    return_policy_days: form.return_policy_days,
+    content: form.content,
+    status: form.status,
+    categoryId: finalCategoryId,
+    seriesId: finalSeriesId,
+    locale,
+    currency: defaultCurrency,
+    variants: form.variants,
+    templateId: form.templateId,
+  };
+  if (parentId) (payload as any).parent_product_id = parentId;
 
-    setSaving(true);
-    const url = productId
-      ? `/api/admin/products/manage?productId=${productId}`
-      : '/api/admin/products/manage';
-    const method = productId ? 'PUT' : 'POST';
+  setSaving(true);
+  const url = productId
+    ? `/api/admin/products/manage?productId=${productId}`
+    : '/api/admin/products/manage';
+  const method = productId ? 'PUT' : 'POST';
 
+  try {
+    const res = await fetch(url, { method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+    const responseText = await res.text();
+    let result;
     try {
-      const res = await fetch(url, { method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
-      const responseText = await res.text();
-      let result;
-      try {
-        result = JSON.parse(responseText);
-      } catch {
-        result = { error: `服务器返回非JSON: ${responseText.substring(0, 200)}` };
-      }
-      if (res.ok) {
-        alert('保存成功');
+      result = JSON.parse(responseText);
+    } catch {
+      result = { error: `服务器返回非JSON: ${responseText.substring(0, 200)}` };
+    }
+    if (res.ok) {
+      setToast({ message: '保存成功', type: 'success' });
+      // 延迟 1.5 秒后跳转，期间按钮保持禁用
+      setTimeout(() => {
+        setSaving(false);
         router.push(`/admin/products/manage?locale=${locale}`);
-      } else {
-        console.error('Save failed:', result);
-        alert(result.error || `保存失败 (HTTP ${res.status})`);
-      }
-    } catch (err: any) {
-      console.error('Network error:', err);
-      alert('保存失败，请检查网络');
-    } finally {
+      }, 1500);
+    } else {
+      console.error('Save failed:', result);
+      setToast({ message: result.error || `保存失败 (HTTP ${res.status})`, type: 'error' });
       setSaving(false);
     }
-  };
+  } catch (err: any) {
+    console.error('Network error:', err);
+    setToast({ message: '保存失败，请检查网络', type: 'error' });
+    setSaving(false);
+  }
+};
 
   if (loading) return <div className="p-6">加载中...</div>;
   const MAX_TITLE = 128;
@@ -494,6 +496,8 @@ export default function ProductEditPage() {
         <button type="button" onClick={() => router.back()} className="bg-gray-300 px-4 py-2 rounded">取消</button>
         <button type="submit" disabled={saving} className="bg-blue-600 text-white px-6 py-2 rounded disabled:bg-gray-400">{saving ? '保存中...' : '保存产品'}</button>
       </div>
+
+      {toast && <Toast message={toast.message} type={toast.type} onClose={() => setToast(null)} />}
     </form>
   );
 }

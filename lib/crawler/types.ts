@@ -66,8 +66,9 @@ export interface TaskData {
   progress?: string;
   createdAt: string;
   updatedAt: string;
+  latestProducts?: any[]; // 最近添加的几条产品数据（用于预览）
 }
 
-export const DATA_ROOT = process.cwd() + '/data/crawler';
+export const DATA_ROOT = process.cwd() + '/crawler';
 export const RULES_DIR = DATA_ROOT + '/rules';
 export const TASKS_DIR = DATA_ROOT + '/tasks';

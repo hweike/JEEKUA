@@ -78,8 +78,8 @@ export default function VariantEditPage() {
   useEffect(() => {
     if (!settingsLoaded) return;
     if (!parentId) {
-      alert('缺少父产品 ID');
-      router.back();
+      setToast({ message: '缺少父产品 ID，即将返回', type: 'error' });
+      setTimeout(() => router.back(), 1500);
       return;
     }
     const loadData = async () => {
@@ -108,7 +108,6 @@ export default function VariantEditPage() {
             setForm({
               product_name: variant.product_name || '',
               sku: variant.sku || '',
-              // 品牌不再使用，不保存
               short_description: variant.short_description || '',
               main_image_url: variant.main_image_url || '',
               additional_images: variant.additional_images || [],
@@ -120,18 +119,17 @@ export default function VariantEditPage() {
             });
             setTitleLength(variant.product_name?.length || 0);
           } else {
-            alert('变体不存在');
-            router.back();
+            setToast({ message: '变体不存在，即将返回', type: 'error' });
+            setTimeout(() => router.back(), 1500);
           }
         } else {
-          // 新建变体：不需要品牌初始值
-          setForm(prev => ({
-            ...prev,
-          }));
+          // 新建变体
+          setForm(prev => ({ ...prev }));
         }
       } catch (err) {
         console.error(err);
-        alert('加载失败');
+        setToast({ message: '加载失败，即将返回', type: 'error' });
+        setTimeout(() => router.back(), 1500);
       } finally {
         setLoading(false);
       }
@@ -165,7 +163,7 @@ export default function VariantEditPage() {
     e.preventDefault();
 
     if (!form.product_name) {
-      alert('请填写变体名称');
+      setToast({ message: '请填写变体名称', type: 'error' });
       return;
     }
 
@@ -179,12 +177,11 @@ export default function VariantEditPage() {
     }
 
     if (!parentProduct || !parentProduct.categoryId) {
-      alert('父产品分类信息缺失，无法保存变体');
+      setToast({ message: '父产品分类信息缺失，无法保存变体', type: 'error' });
       return;
     }
 
     // ✅ 变体提交的 payload 只包含自身独立字段，不包含价格、库存、运费等继承字段
-    // 注意：不再包含 brand 字段
     const payload = {
       product_name: form.product_name,
       sku: form.sku,
@@ -217,15 +214,18 @@ export default function VariantEditPage() {
       }
       if (res.ok) {
         setToast({ message: '保存成功', type: 'success' });
-        setTimeout(() => router.push(`/admin/products/manage?locale=${locale}`), 1000);
+        setTimeout(() => {
+          setSaving(false);
+          router.push(`/admin/products/manage?locale=${locale}`);
+        }, 1500);
       } else {
         console.error('Save failed:', result);
         setToast({ message: result.error || `保存失败 (HTTP ${res.status})`, type: 'error' });
+        setSaving(false);
       }
     } catch (err: any) {
       console.error('Network error:', err);
       setToast({ message: '保存失败，请检查网络', type: 'error' });
-    } finally {
       setSaving(false);
     }
   };
@@ -238,10 +238,8 @@ export default function VariantEditPage() {
     <form onSubmit={handleSubmit} className="p-6 max-w-7xl mx-auto space-y-6 pb-24">
       <div className="flex justify-between items-center">
         <h1 className="text-2xl font-bold">{variantId ? '编辑变体' : '新增变体'}<span>-{getLanguageDisplayName(locale, 'zh')}站</span></h1>
-        {/* 移除自动生成 SEO 按钮 */}
       </div>
       <div className="flex items-center gap-2 text-sm text-gray-500 mb-2">
-        
         {parentProduct && <span>父产品：{parentProduct.product_name}</span>}
       </div>
 
@@ -280,7 +278,6 @@ export default function VariantEditPage() {
                   className="border rounded p-2 w-full"
                 />
               </div>
-              {/* 品牌字段已完全移除 */}
               <div>
                 <label className="block font-medium mb-1 flex items-center gap-2">
                   简短描述

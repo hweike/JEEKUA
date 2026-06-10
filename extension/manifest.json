@@ -1,0 +1,31 @@
+{
+  "manifest_version": 3,
+  "name": "产品采集助手",
+  "version": "1.0",
+  "permissions": ["storage", "activeTab", "cookies"],
+  "host_permissions": [
+    "http://localhost:3000/",
+    "https://yourdomain.com/",
+    "http://127.0.0.1:3000/",
+    "https://*.alibaba.com/",
+    "https://*.1688.com/*"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "action": {
+    "default_popup": "popup.html"
+  },
+  "content_scripts": [
+    {
+      "matches": ["https://*.alibaba.com/*", "https://*.1688.com/*"],
+      "js": ["content.js"]
+    }
+  ],
+  "web_accessible_resources": [
+    {
+      "resources": ["rules/*.json"],
+      "matches": ["<all_urls>"]
+    }
+  ]
+}

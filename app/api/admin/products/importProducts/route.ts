@@ -5,14 +5,16 @@ import { nanoid } from 'nanoid';
 import { getProductSettings } from '@/lib/products/productSettings';
 import {
   getProductLineIdFromCategory,
-  getProductIndex,
+  getAllProductIds,
   upsertProductIndex,
-  getAllProductIds
 } from '@/lib/products/indexDb';
 import { writeProduct, readProduct } from '@/lib/products/mdParser';
 import { generateSlug, generateSeoTitle, generateSeoDescription } from '@/lib/products/seoGenerator';
 import { downloadImage } from '@/lib/imageUtils';
 import { getPrivateStorage } from '@/lib/storage/factory';
+import { supabase } from '@/lib/supabase/client'; // 必须存在
+
+const DEFAULT_SITE_ID = '000001';
 
 interface PriceTier {
   min_qty: number;
@@ -20,10 +22,31 @@ interface PriceTier {
   price: number;
 }
 
+// 图片下载任务
+interface ImageTask {
+  url: string;
+  productId: string;
+  field: string;
+  index?: number;
+  variantId?: string;
+}
+
+// 简单内存缓存，避免重复下载同一图片
+const imageCache = new Map<string, string>();
+
+// 封装带缓存的下载函数
+async function downloadImageWithCache(url: string): Promise<string> {
+  if (!url) return '';
+  if (imageCache.has(url)) return imageCache.get(url)!;
+  const result = await downloadImage(url);
+  imageCache.set(url, result);
+  return result;
+}
+
 // 从私有桶读取站点设置
 async function getSiteName(): Promise<string> {
   const storage = getPrivateStorage();
-  const key = 'settings.json'; // 无 data/ 前缀
+  const key = 'settings.json';
   try {
     const content = await storage.read(key, 'utf8');
     const settings = JSON.parse(content as string);
@@ -33,34 +56,34 @@ async function getSiteName(): Promise<string> {
   }
 }
 
-// 从私有桶读取分类数据
+// 从私有桶读取分类数据（一次性加载）
+let categoriesCache: any[] | null = null;
 async function loadCategories(locale: string): Promise<any[]> {
+  if (categoriesCache) return categoriesCache;
   const storage = getPrivateStorage();
-  const key = `products/${locale}/categories.json`; // 无 data/ 前缀
+  const key = `products/${locale}/categories.json`;
   try {
     const content = await storage.read(key, 'utf8');
     const data = JSON.parse(content as string);
-    return data.categories || [];
+    categoriesCache = data.categories || [];
+    return categoriesCache;
   } catch {
+    categoriesCache = [];
     return [];
   }
 }
 
 async function getProductType(locale: string, categoryId: string, seriesId?: string): Promise<string> {
   if (!categoryId || categoryId === '__UNCATEGORIZED__') return '';
-  try {
-    const categories = await loadCategories(locale);
-    const cat = categories.find((c: any) => c.id === categoryId);
-    if (!cat) return '';
-    let type = cat.name;
-    if (seriesId && cat.series) {
-      const series = cat.series.find((s: any) => s.id === seriesId);
-      if (series) type = `${cat.name} > ${series.name}`;
-    }
-    return type;
-  } catch {
-    return '';
+  const categories = await loadCategories(locale);
+  const cat = categories.find((c: any) => c.id === categoryId);
+  if (!cat) return '';
+  let type = cat.name;
+  if (seriesId && cat.series) {
+    const series = cat.series.find((s: any) => s.id === seriesId);
+    if (series) type = `${cat.name} > ${series.name}`;
   }
+  return type;
 }
 
 function processMpn(defaultMpn: string, sku: string): string {
@@ -74,6 +97,7 @@ function generateSkuFromRule(rule: string): string {
 }
 
 export async function POST(req: NextRequest) {
+  const startTime = Date.now();
   const formData = await req.formData();
   const file = formData.get('file') as File;
   const locale = (formData.get('locale') as string) || 'zh';
@@ -95,7 +119,6 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Excel 文件为空' }, { status: 400 });
     }
 
-    // 全局 ID 生成机制：使用 nanoid(6)，保证不重复
     const existingIds = await getAllProductIds(locale);
     const usedIds = new Set(existingIds);
     const generateUniqueId = (): string => {
@@ -111,12 +134,12 @@ export async function POST(req: NextRequest) {
     const defaultSettings = (productSettings as any).defaultSettings || {};
     const siteName = await getSiteName();
     const skuRule = defaultSettings.sku_rule || 'P-{timestamp}';
-
-    // 加载分类数据（从私有桶）
     const categories = await loadCategories(locale);
 
     const results: { row: number; sku: string; success: boolean; error?: string }[] = [];
-    let parentProductId: string | null = null;
+    let currentParentProductId: string | null = null;
+    const parentProductsMap = new Map<string, any>();
+    const imageTasks: ImageTask[] = [];
 
     for (let idx = 0; idx < rows.length; idx++) {
       const row = rows[idx];
@@ -124,10 +147,36 @@ export async function POST(req: NextRequest) {
       try {
         const productType = row['产品类型']?.trim();
         if (productType !== 'parent' && productType !== 'variant') {
-          throw new Error('产品类型必须是 parent 或 variant');
+          throw new Error(`产品类型必须是 parent 或 variant，当前: ${productType}`);
+        }
+
+        let sku = row['SKU']?.trim();
+        if (!sku) {
+          sku = generateSkuFromRule(skuRule);
+        } else {
+          sku = sku.trim();
         }
 
         if (productType === 'parent') {
+          // 查询数据库是否存在相同 SKU 且不是变体
+          const { data: existingProduct, error: queryError } = await supabase
+            .from('products')
+            .select('productId, createdAt')
+            .eq('site_id', DEFAULT_SITE_ID)
+            .eq('locale', locale)
+            .eq('sku', sku)
+            .is('parent_product_id', null)
+            .maybeSingle();
+
+          if (queryError) {
+            console.error(`第 ${rowNum} 行查询失败:`, queryError);
+            throw new Error(`查询数据库失败: ${queryError.message}`);
+          }
+
+          const isUpdate = !!existingProduct;
+          const productId = isUpdate ? existingProduct.productId : generateUniqueId();
+
+          // 分类处理（容错）
           let categoryId = '__UNCATEGORIZED__';
           let seriesId = '';
           let productLineId = '';
@@ -141,11 +190,8 @@ export async function POST(req: NextRequest) {
               categoryId = category.id;
               if (seriesName) {
                 const series = category.series?.find((s: any) => s.name === seriesName);
-                if (series) {
-                  seriesId = series.id;
-                } else {
-                  console.warn(`行 ${rowNum}: 二级分类 "${seriesName}" 不存在于一级分类 "${categoryName}"，已忽略`);
-                }
+                if (series) seriesId = series.id;
+                else console.warn(`行 ${rowNum}: 二级分类 "${seriesName}" 不存在，只关联一级分类`);
               }
               try {
                 productLineId = await getProductLineIdFromCategory(locale, category.id);
@@ -153,12 +199,13 @@ export async function POST(req: NextRequest) {
                 console.warn(`行 ${rowNum}: 无法获取产品线ID，将留空`, err);
               }
             } else {
-              console.warn(`行 ${rowNum}: 一级分类 "${categoryName}" 不存在，产品将归类到"未分类"`);
+              console.warn(`行 ${rowNum}: 一级分类 "${categoryName}" 不存在，归类到未分类`);
             }
           } else {
-            console.warn(`行 ${rowNum}: 未填写一级分类，产品将归类到"未分类"`);
+            console.warn(`行 ${rowNum}: 未填写一级分类，归类到未分类`);
           }
 
+          // 解析价格阶梯
           const priceTiers: PriceTier[] = [];
           for (let i = 1; i <= 3; i++) {
             const minQty = row[`最小起订量${i}`];
@@ -186,16 +233,9 @@ export async function POST(req: NextRequest) {
             }
           }
 
-          const productId = generateUniqueId();
-
-          let sku = row['SKU']?.trim();
-          if (!sku) {
-            sku = generateSkuFromRule(skuRule);
-          }
-
           const productName = row['产品名称']?.trim();
           if (!productName) throw new Error('产品名称不能为空');
-          if (productName.length > 128) throw new Error('产品名称不能超过128字符');
+          if (productName.length > 128) throw new Error('产品名称超过128字符');
 
           let brand = row['品牌']?.trim();
           if (!brand) brand = defaultSettings.default_brand || 'Neutral';
@@ -203,13 +243,19 @@ export async function POST(req: NextRequest) {
           let slug = row['Slug']?.trim();
           if (!slug) slug = generateSlug(productName);
 
-          const mainImageUrl = await downloadImage(row['主图URL']);
-          const additionalImages: string[] = [];
+          // 主图
+          const mainImageUrlRaw = row['主图URL']?.trim();
+          if (mainImageUrlRaw) {
+            imageTasks.push({ url: mainImageUrlRaw, productId, field: 'main_image_url' });
+          }
+
+          // 附加图
+          const additionalImagesRaw: string[] = [];
           for (let i = 1; i <= 8; i++) {
-            const imgUrl = row[`附加图URL${i}`];
+            const imgUrl = row[`附加图URL${i}`]?.trim();
             if (imgUrl) {
-              const localUrl = await downloadImage(imgUrl);
-              if (localUrl) additionalImages.push(localUrl);
+              additionalImagesRaw.push(imgUrl);
+              imageTasks.push({ url: imgUrl, productId, field: 'additional_images', index: additionalImagesRaw.length - 1 });
             }
           }
 
@@ -261,6 +307,7 @@ export async function POST(req: NextRequest) {
 
           const product_type = await getProductType(locale, categoryId, seriesId);
 
+          // 构建产品完整数据
           const productData = {
             id: productId,
             product_name: productName,
@@ -275,8 +322,8 @@ export async function POST(req: NextRequest) {
             spec_text: specText,
             availability: defaultSettings.default_availability || 'in_stock',
             min_order_quantity: minOrderQuantity,
-            main_image_url: mainImageUrl,
-            additional_images: additionalImages,
+            main_image_url: '', // 稍后填充
+            additional_images: [] as string[],
             description,
             short_description: shortDescription,
             attributes: {},
@@ -290,136 +337,149 @@ export async function POST(req: NextRequest) {
             return_policy_days: row['退货天数'] !== undefined ? Number(row['退货天数']) : (defaultSettings.default_return_days ?? 30),
             aggregate_rating: null,
             categoryId,
-            seriesId,
+            seriesId: seriesId || '',
             parent_product_id: '',
             variants: [],
             templateId: 'default_product_published',
+            productLineId,
           };
 
-          await writeProduct(locale, productId, productData, '');
-
-          const now = new Date().toISOString();
-          await upsertProductIndex({
-            productId,
-            locale,
-            productLineId: productLineId || '',
-            categoryId,
-            seriesId: seriesId || '',
-            parent_product_id: null,
-            sku,
-            product_name: productName,
-            brand,
-            price_tiers: priceTiers,
-            currency: defaultSettings.default_currency || 'USD',
-            availability: defaultSettings.default_availability || 'in_stock',
-            min_order_quantity: minOrderQuantity,
-            main_image_url: mainImageUrl || '',
-            attributes: {},
-            slug,
-            status: 'published',
-            updatedAt: now,
-            createdAt: now,
-          });
-
-          parentProductId = productId;
-          results.push({ row: rowNum, sku, success: true });
-        } 
+          parentProductsMap.set(productId, productData);
+          currentParentProductId = productId;
+          results.push({ row: rowNum, sku, success: true, productId });
+        }
         else if (productType === 'variant') {
-          if (!parentProductId) {
+          if (!currentParentProductId) {
             throw new Error('变体前面没有父产品，请确保变体行紧跟在父产品之后');
           }
+          const parentId = currentParentProductId;
+          const parentData = parentProductsMap.get(parentId);
+          if (!parentData) throw new Error(`父产品数据不存在: ${parentId}`);
 
-          const parentProduct = await readProduct(locale, parentProductId);
-          if (!parentProduct) throw new Error('父产品不存在');
+          const variantName = row['产品名称']?.trim();
+          if (!variantName) throw new Error('变体产品名称不能为空');
+          if (variantName.length > 128) throw new Error('变体名称超过128字符');
 
-          let sku = row['SKU']?.trim();
-          if (!sku) {
-            sku = generateSkuFromRule(skuRule);
-          }
+          let variantSku = row['SKU']?.trim();
+          if (!variantSku) variantSku = generateSkuFromRule(skuRule);
+          else variantSku = variantSku.trim();
 
-          const productName = row['产品名称']?.trim();
-          if (!productName) throw new Error('变体产品名称不能为空');
-          if (productName.length > 128) throw new Error('变体产品名称不能超过128字符');
-
-          let slug = row['Slug']?.trim();
-          if (!slug) slug = generateSlug(productName);
-
-          const mainImageUrl = await downloadImage(row['主图URL']);
+          let variantSlug = row['Slug']?.trim();
+          if (!variantSlug) variantSlug = generateSlug(variantName);
 
           const variantId = generateUniqueId();
 
+          const mainImageUrlRaw = row['主图URL']?.trim();
+          if (mainImageUrlRaw) {
+            imageTasks.push({ url: mainImageUrlRaw, productId: parentId, field: 'variant_main_image', variantId });
+          }
+
           const variantData = {
             id: variantId,
-            product_name: productName,
-            sku,
+            product_name: variantName,
+            sku: variantSku,
             short_description: row['简短描述'] || '',
-            main_image_url: mainImageUrl,
+            main_image_url: '',
             additional_images: [],
             attributes: {},
-            slug,
+            slug: variantSlug,
             seo_keywords: row['SEO关键词'] || '',
             seo_title: row['SEO标题'] || '',
             seo_description: row['SEO描述'] || '',
           };
 
-          const variants = parentProduct.variants || [];
-          variants.push(variantData);
-          // 更新父产品的变体列表
-          const updatedParent = { ...parentProduct, variants };
-          await writeProduct(locale, parentProductId, updatedParent, parentProduct.content || '');
-
-          const parentIndex = await getProductIndex(parentProductId);
-          if (!parentIndex) throw new Error('父产品索引不存在');
-
-          const now = new Date().toISOString();
-          await upsertProductIndex({
-            productId: variantId,
-            locale,
-            productLineId: parentIndex.productLineId,
-            categoryId: parentIndex.categoryId,
-            seriesId: parentIndex.seriesId,
-            parent_product_id: parentProductId,
-            sku,
-            product_name: productName,
-            brand: parentIndex.brand,
-            price_tiers: [],
-            currency: parentIndex.currency,
-            availability: parentIndex.availability,
-            min_order_quantity: parentIndex.min_order_quantity,
-            main_image_url: mainImageUrl || '',
-            attributes: {},
-            slug,
-            status: 'published',
-            updatedAt: now,
-            createdAt: now,
-          });
-
-          const updatedVariants = variants.map((v: any) => ({
-            sku: v.sku,
-            name: v.product_name,
-            mainImage: v.main_image_url,
-          }));
-          await upsertProductIndex({
-            ...parentIndex,
-            variants: updatedVariants,
-            updatedAt: now,
-          } as any);
-
-          results.push({ row: rowNum, sku, success: true });
+          if (!parentData.variants) parentData.variants = [];
+          parentData.variants.push(variantData);
+          results.push({ row: rowNum, sku: variantSku, success: true, productId: variantId });
         }
       } catch (err: any) {
-        results.push({ row: rowNum, sku: '', success: false, error: err.message });
+        console.error(`第 ${rowNum} 行处理失败:`, err);
+        results.push({ row: rowNum, sku: row['SKU']?.trim() || '', success: false, error: err.message });
+        if (rows[idx]['产品类型']?.trim() === 'parent') {
+          currentParentProductId = null;
+        }
       }
     }
 
+    // 并发下载图片（使用缓存）
+    console.log(`开始下载 ${imageTasks.length} 个图片...`);
+    const downloadStart = Date.now();
+    const downloadResults = await Promise.all(
+      imageTasks.map(async (task) => {
+        try {
+          const localPath = await downloadImageWithCache(task.url);
+          return { task, localPath };
+        } catch (err) {
+          console.error(`下载图片失败: ${task.url}`, err);
+          return { task, localPath: task.url };
+        }
+      })
+    );
+    console.log(`图片下载完成，耗时 ${Date.now() - downloadStart}ms`);
+
+    // 回填图片到产品数据
+    for (const { task, localPath } of downloadResults) {
+      const productData = parentProductsMap.get(task.productId);
+      if (!productData) continue;
+      if (task.field === 'main_image_url') {
+        productData.main_image_url = localPath;
+      } else if (task.field === 'additional_images') {
+        if (!productData.additional_images) productData.additional_images = [];
+        productData.additional_images[task.index!] = localPath;
+      } else if (task.field === 'variant_main_image' && task.variantId) {
+        const variant = productData.variants?.find((v: any) => v.id === task.variantId);
+        if (variant) variant.main_image_url = localPath;
+      }
+    }
+
+    // 保存所有产品到数据库索引和 MD 文件
+    const saveStart = Date.now();
+    for (const [productId, productData] of parentProductsMap.entries()) {
+      const indexData = {
+        productId,
+        locale,
+        productLineId: productData.productLineId || '',
+        categoryId: productData.categoryId,
+        seriesId: productData.seriesId,
+        parent_product_id: null,
+        sku: productData.sku,
+        product_name: productData.product_name,
+        brand: productData.brand,
+        price_tiers: productData.price_tiers,
+        currency: productData.currency,
+        availability: productData.availability,
+        min_order_quantity: productData.min_order_quantity,
+        main_image_url: productData.main_image_url || '',
+        attributes: productData.attributes,
+        slug: productData.slug,
+        status: 'published',
+        updatedAt: new Date().toISOString(),
+        createdAt: new Date().toISOString(),
+        templateId: productData.templateId,
+      };
+      await upsertProductIndex(indexData);
+      await writeProduct(locale, productId, productData, '');
+    }
+    console.log(`保存完成，耗时 ${Date.now() - saveStart}ms`);
+
     const successCount = results.filter(r => r.success).length;
     const failCount = results.length - successCount;
+    const errors = results.filter(r => !r.success).map(r => `第${r.row}行: ${r.error}`);
     const message = failCount === 0
       ? `成功导入 ${successCount} 个产品`
-      : `成功 ${successCount} 个，失败 ${failCount} 个，请查看详情`;
-    return NextResponse.json({ message, results });
+      : `成功 ${successCount} 个，失败 ${failCount} 个。${errors.slice(0, 3).join('；')}${errors.length > 3 ? `等${errors.length}条错误` : ''}`;
+
+    console.log(`总耗时 ${Date.now() - startTime}ms`);
+    return NextResponse.json({
+      success: true,
+      message,
+      successCount,
+      failCount,
+      errors: errors.length > 0 ? errors : undefined,
+      results,
+    });
   } catch (err: any) {
-    console.error('导入失败', err);
-    return NextResponse.json({ error: '导入处理失败: ' + err.message }, { status: 500 });
+    console.error('导入整体失败:', err);
+    return NextResponse.json({ error: '导入处理失败: ' + err.message, success: false }, { status: 500 });
   }
 }

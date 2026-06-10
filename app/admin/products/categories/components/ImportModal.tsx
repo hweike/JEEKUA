@@ -1,9 +1,15 @@
 'use client';
 
 import { useState, useRef } from 'react';
-import * as XLSX from 'xlsx';
 
-export default function ImportModal({ locale, onClose, onSuccess }: any) {
+interface ImportModalProps {
+  locale: string;
+  onClose: () => void;
+  onSuccess: () => void;          // 原有回调，用于刷新数据
+  onImportResult?: (message: string, type: 'success' | 'error' | 'warning') => void; // 新增：传递提示信息给父页面
+}
+
+export default function ImportModal({ locale, onClose, onSuccess, onImportResult }: ImportModalProps) {
   const [file, setFile] = useState<File | null>(null);
   const [importing, setImporting] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -13,7 +19,7 @@ export default function ImportModal({ locale, onClose, onSuccess }: any) {
 
   const handleImport = async () => {
     if (!file) {
-      alert('请选择文件');
+      if (onImportResult) onImportResult('请选择文件', 'error');
       return;
     }
     setImporting(true);
@@ -28,14 +34,26 @@ export default function ImportModal({ locale, onClose, onSuccess }: any) {
       });
       const result = await res.json();
       if (res.ok) {
-        alert(result.message || '导入成功');
-        onSuccess();
-        onClose();
+        // 导入成功（可能有部分跳过）
+        let message = result.message || '导入完成';
+        let type: 'success' | 'error' | 'warning' = 'success';
+        if (result.errors && result.errors.length > 0) {
+          type = 'warning';
+          // 错误详情只显示前3条避免过长
+          const errorDetails = result.errors.slice(0, 3).join('；');
+          message = `${result.message}${errorDetails ? `（${errorDetails}）` : ''}`;
+          if (result.errors.length > 3) message += `等${result.errors.length}条错误`;
+        } else if (result.successCount === 0 && result.skipCount > 0) {
+          type = 'warning';
+        }
+        if (onImportResult) onImportResult(message, type);
+        onSuccess();   // 刷新列表
+        onClose();     // 关闭模态框
       } else {
-        alert('导入失败: ' + (result.error || '未知错误'));
+        if (onImportResult) onImportResult(`导入失败：${result.error || '未知错误'}`, 'error');
       }
     } catch (err) {
-      alert('导入失败');
+      if (onImportResult) onImportResult('网络错误，导入失败', 'error');
     } finally {
       setImporting(false);
     }
@@ -46,7 +64,7 @@ export default function ImportModal({ locale, onClose, onSuccess }: any) {
       <div className="bg-white p-6 rounded-lg w-96">
         <h2 className="text-xl font-bold mb-4">导入产品分类</h2>
 
-        {/* 1. 当前导入站点提示 */}
+        {/* 当前导入站点提示 */}
         <div className="mb-4 text-sm text-gray-700 bg-blue-50 p-2 rounded">
           当前导入站点：<strong>{siteName}</strong>
         </div>
@@ -60,7 +78,7 @@ export default function ImportModal({ locale, onClose, onSuccess }: any) {
             ref={fileInputRef}
             className="border rounded w-full p-2"
           />
-          {/* 2. 下载模板 + 填写说明链接（新开页面） */}
+          {/* 下载模板 + 填写说明链接 */}
           <p className="text-sm text-gray-500 mt-2 flex gap-3">
             <a
               href="/api/admin/download-template?file=产品分类导入模板.xlsx"

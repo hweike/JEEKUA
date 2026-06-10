@@ -9,7 +9,7 @@ export default function AdminLogin() {
   const [error, setError] = useState('');
   const router = useRouter();
   const searchParams = useSearchParams();
-  const callback = searchParams.get('callback') || '/admin/products';
+  const callback = searchParams.get('callback') || '/admin';
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();

@@ -86,13 +86,28 @@ export async function upsertProductIndex(item: ProductIndexItem) {
 }
 
 // 删除产品索引
-export async function deleteProductIndex(productId: string) {
-  const { error } = await supabase
-    .from('products')
-    .delete()
-    .eq('site_id', DEFAULT_SITE_ID)
-    .eq('productId', productId);
-  if (error) throw new Error(`deleteProductIndex failed: ${error.message}`);
+// 删除产品索引（带重试）
+export async function deleteProductIndex(productId: string, retries: number = 3): Promise<void> {
+  let lastError: Error | null = null;
+  for (let i = 0; i < retries; i++) {
+    try {
+      const { error } = await supabase
+        .from('products')
+        .delete()
+        .eq('site_id', DEFAULT_SITE_ID)
+        .eq('productId', productId);
+      if (error) throw new Error(`deleteProductIndex failed: ${error.message}`);
+      return; // 成功，退出
+    } catch (err: any) {
+      lastError = err;
+      console.warn(`删除产品索引重试 ${i+1}/${retries} for productId ${productId}: ${err.message}`);
+      if (i < retries - 1) {
+        // 指数退避：0.5s, 1s, 2s
+        await new Promise(resolve => setTimeout(resolve, 500 * Math.pow(2, i)));
+      }
+    }
+  }
+  throw lastError || new Error(`deleteProductIndex failed after ${retries} retries`);
 }
 
 // 获取单个产品索引

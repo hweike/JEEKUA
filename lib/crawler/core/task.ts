@@ -2,8 +2,8 @@
 import { getPrivateStorage } from '@/lib/storage/factory';
 import { CrawlerRule, TaskData } from '../types';
 
-// 私有桶中的存储前缀（对应原 data/crawler/）
-const STORAGE_PREFIX = 'data/crawler';
+// 私有桶中的存储前缀（对应原 data/crawler/，已去除 data/ 前缀）
+const STORAGE_PREFIX = 'crawler';
 
 /**
  * 获取规则文件在私有桶中的完整 key
@@ -27,6 +27,16 @@ export async function ensureDirs() {
 }
 
 /**
+ * 判断是否为文件不存在错误（兼容 AWS SDK 和原生错误）
+ */
+function isNotFoundError(error: any): boolean {
+  return error?.code === 'NoSuchKey' ||
+         error?.Code === 'NoSuchKey' ||
+         error?.message?.includes('not found') ||
+         error?.message?.includes('NoSuchKey');
+}
+
+/**
  * 获取爬虫规则
  */
 export async function getRule(ruleId: string): Promise<CrawlerRule | null> {
@@ -36,7 +46,7 @@ export async function getRule(ruleId: string): Promise<CrawlerRule | null> {
     const content = await storage.read(key, 'utf8');
     return JSON.parse(content as string);
   } catch (error: any) {
-    if (error?.message?.includes('File not found') || error?.code === 'NoSuchKey') {
+    if (isNotFoundError(error)) {
       return null;
     }
     console.error(`读取规则失败 [${ruleId}]:`, error);
@@ -63,10 +73,11 @@ export async function saveTask(taskId: string, data: Partial<TaskData>) {
     const content = await storage.read(metaKey, 'utf8');
     existing = JSON.parse(content as string);
   } catch (error: any) {
-    if (!(error?.message?.includes('File not found') || error?.code === 'NoSuchKey')) {
+    if (!isNotFoundError(error)) {
       console.error(`读取任务元数据失败 [${taskId}]:`, error);
       throw error;
     }
+    // 文件不存在时，使用默认 existing（静默忽略）
   }
 
   const merged = { ...existing, ...data, updatedAt: new Date().toISOString() };
@@ -85,7 +96,7 @@ export async function getTask(taskId: string): Promise<TaskData | null> {
     const content = await storage.read(metaKey, 'utf8');
     return JSON.parse(content as string);
   } catch (error: any) {
-    if (error?.message?.includes('File not found') || error?.code === 'NoSuchKey') {
+    if (isNotFoundError(error)) {
       return null;
     }
     console.error(`读取任务失败 [${taskId}]:`, error);

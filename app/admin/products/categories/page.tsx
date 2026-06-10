@@ -436,6 +436,7 @@ export default function CategoriesPage() {
             delete cache[locale];
             loadData(true);
           }}
+          onImportResult={(message, type) => setToast({ message, type })}  // 新增这一行
         />
       )}
 

@@ -1,3 +1,4 @@
+// lib/auth/jwt.ts
 import { SignJWT, jwtVerify } from 'jose';
 import { cookies } from 'next/headers';
 import { NextRequest, NextResponse } from 'next/server';
@@ -5,20 +6,25 @@ import { NextRequest, NextResponse } from 'next/server';
 const JWT_SECRET = process.env.JWT_SECRET || 'fallback-secret-do-not-use-in-production';
 const JWT_EXPIRES_IN = '24h';
 
-// 获取密钥的 Uint8Array 格式（jose 需要）
 function getSecretKey() {
   return new TextEncoder().encode(JWT_SECRET);
 }
 
 export interface JWTPayload {
-  username: string; // 存储邮箱
+  username: string; // 邮箱
   id: string;
+  siteId: string;   // 新增：站点标识
 }
 
-// 生成 JWT 并设置 HttpOnly Cookie
-export async function setAuthCookie(username: string, userId: string): Promise<void> {
+/**
+ * 生成 JWT 并设置 HttpOnly Cookie
+ * @param username 用户邮箱
+ * @param userId 用户ID
+ * @param siteId 用户所属站点ID
+ */
+export async function setAuthCookie(username: string, userId: string, siteId: string): Promise<void> {
   const secretKey = getSecretKey();
-  const token = await new SignJWT({ username, id: userId })
+  const token = await new SignJWT({ username, id: userId, siteId })
     .setProtectedHeader({ alg: 'HS256' })
     .setIssuedAt()
     .setExpirationTime(JWT_EXPIRES_IN)
@@ -34,7 +40,9 @@ export async function setAuthCookie(username: string, userId: string): Promise<v
   });
 }
 
-// 从请求中获取当前用户信息
+/**
+ * 从请求中获取当前用户信息
+ */
 export async function getCurrentUser(request?: NextRequest): Promise<JWTPayload | null> {
   let token: string | undefined;
   if (request) {
@@ -54,13 +62,17 @@ export async function getCurrentUser(request?: NextRequest): Promise<JWTPayload 
   }
 }
 
-// 清除 Cookie
+/**
+ * 清除 Cookie
+ */
 export async function clearAuthCookie(): Promise<void> {
   const cookieStore = await cookies();
   cookieStore.set('auth_token', '', { maxAge: 0, path: '/' });
 }
 
-// 验证 API 请求
+/**
+ * 验证 API 请求（中间件辅助）
+ */
 export async function validateAuth(request: NextRequest): Promise<JWTPayload | NextResponse> {
   const user = await getCurrentUser(request);
   if (!user) {

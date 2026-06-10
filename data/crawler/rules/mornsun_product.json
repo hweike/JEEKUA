@@ -2,14 +2,15 @@
   "name": "MORNSUN 产品列表（自动遍历二级分类）",
   "crawlType": "mornsun-products",
   "mornsunProducts": {
-    "tableContainer": ".scroll_box",
+    "tableContainer": ".scroll_box .tb_2",
     "headerSelector": ".table_field li",
     "parentRowSelector": "tr.slide_p",
     "childRowSelector": "tr.show_list",
     "dynamicHeaders": true,
+    "productLimit": 10,
     "categoriesSource": {
-      "type": "task",
-      "taskId": "1b58ff8c-d828-4833-93cd-d2b2624dc222"
+      "type": "file",
+      "filePath": "crawler/tasks/1b58ff8c-d828-4833-93cd-d2b2624dc222/meta.json"
     }
   },
   "maxRetries": 3,
