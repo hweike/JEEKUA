@@ -1,21 +1,20 @@
-import { NextResponse } from 'next/server';
-import { reorderDocuments, moveDocument } from '@/lib/docs';
+// app/api/admin/docs/reorder/route.ts
+import { NextRequest, NextResponse } from 'next/server';
+import { updateDocOrders } from '@/lib/docs/document';
 
-export async function POST(request: Request) {
+export async function POST(req: NextRequest) {
   try {
-    const { locale, docsLibId, items, id, direction } = await request.json();
-    if (!locale || !docsLibId) {
-      return NextResponse.json({ error: '缺少 locale 或 docsLibId' }, { status: 400 });
+    const body = await req.json();
+    const { locale, docsLibId, items } = body;
+
+    if (!locale || !docsLibId || !items || !Array.isArray(items)) {
+      return NextResponse.json({ error: '缺少必要参数 (locale, docsLibId, items)' }, { status: 400 });
     }
-    if (items) {
-      await reorderDocuments(locale, docsLibId, items);
-    } else if (id && direction) {
-      await moveDocument(locale, docsLibId, id, direction);
-    } else {
-      return NextResponse.json({ error: '无效请求' }, { status: 400 });
-    }
+
+    await updateDocOrders(locale, docsLibId, items);
     return NextResponse.json({ success: true });
   } catch (error: any) {
-    return NextResponse.json({ error: error.message }, { status: 500 });
+    console.error('更新排序失败:', error);
+    return NextResponse.json({ error: error.message || '更新排序失败' }, { status: 500 });
   }
 }

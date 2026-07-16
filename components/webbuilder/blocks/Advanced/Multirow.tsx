@@ -1,7 +1,19 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { useLocale } from 'next-intl';
+import { ChevronRight } from 'lucide-react';
+import { getImageUrl } from '@/lib/files/url';
+import { DEFAULT_MULTIROW } from '@/lib/webbuilder/defaults/Multirow';
+import { getAltSuffix } from '@/lib/webbuilder/alt-suffix-config';
+
+function getDisplayImageUrl(url: string, isEditMode: boolean): string {
+  if (!url) return '';
+  const fullUrl = getImageUrl(url);
+  if (isEditMode) {
+    return `/api/proxy-image?url=${encodeURIComponent(fullUrl)}`;
+  }
+  return fullUrl;
+}
 
 const HEIGHT_MAP: Record<string, string> = {
   auto: 'h-auto',
@@ -18,71 +30,24 @@ const WIDTH_MAP: Record<string, string> = {
 
 export function Multirow(props: any) {
   const isEditMode = !!props.puck?.isEditing;
-  const pageLocale = useLocale();
 
-  // 从分组中解构数据（提供默认值）
-  const bannerGroup = props.bannerGroup || {};
-  const imageGroup = props.imageGroup || {};
-  const contentGroup = props.contentGroup || {};
-  const paddingGroup = props.paddingGroup || {};
-  const items = props.items || [];
+  // 从嵌套分组中合并默认值
+  const bannerGroup = { ...DEFAULT_MULTIROW.bannerGroup, ...props.bannerGroup };
+  const imageGroup = { ...DEFAULT_MULTIROW.imageGroup, ...props.imageGroup };
+  const contentGroup = { ...DEFAULT_MULTIROW.contentGroup, ...props.contentGroup };
+  const paddingGroup = { ...DEFAULT_MULTIROW.paddingGroup, ...props.paddingGroup };
+  const spacingGroup = { ...DEFAULT_MULTIROW.spacingGroup, ...props.spacingGroup };
+  const mergedItems = props.items ?? DEFAULT_MULTIROW.items;
 
-  const bannerType = bannerGroup.bannerType || 'standard';
-  const backgroundColor = bannerGroup.backgroundColor || '#ffffff';
+  const mobileScaleFactor = spacingGroup.mobileScaleFactor ?? 0.7;
 
-  const imageHeight = imageGroup.imageHeight || 'auto';
-  const imageWidth = imageGroup.imageWidth || 'medium';
-  const imagePlacement = imageGroup.imagePlacement || 'alternate-left';
+  // Alt 自动生成
+  const __runtime = props.__runtime || {};
+  const seoTitle = __runtime.seoTitle || '';
+  const locale = __runtime.locale || 'zh';
+  const suffix = getAltSuffix('Multirow', locale);
 
-  const columnBgColor = contentGroup.columnBgColor || '#f9fafb';
-  const columnTitleColor = contentGroup.columnTitleColor || '#000000';
-  const columnTitleFontSize = contentGroup.columnTitleFontSize || 32;
-  const columnDescColor = contentGroup.columnDescColor || '#666666';
-  const columnDescFontSize = contentGroup.columnDescFontSize || 16;
-  const contentVertical = contentGroup.contentVertical || 'middle';
-  const textAlign = contentGroup.textAlign || 'left';
-  const mobileTextAlign = contentGroup.mobileTextAlign || 'center';
-
-  const paddingTop = paddingGroup.paddingTop ?? 32;
-  const paddingBottom = paddingGroup.paddingBottom ?? 32;
-
-  // 多语言逻辑
-  const [editLocale, setEditLocale] = useState<string>(() => {
-    if (typeof window !== 'undefined' && isEditMode) {
-      const stored = localStorage.getItem('webbuilder_edit_locale');
-      if (stored && (stored === 'zh' || stored === 'en')) return stored;
-    }
-    return pageLocale;
-  });
-
-  useEffect(() => {
-    if (!isEditMode) return;
-    const handler = (e: StorageEvent) => {
-      if (e.key === 'webbuilder_edit_locale' && e.newValue && (e.newValue === 'zh' || e.newValue === 'en')) {
-        setEditLocale(e.newValue);
-      }
-    };
-    window.addEventListener('storage', handler);
-    return () => window.removeEventListener('storage', handler);
-  }, [isEditMode]);
-
-  useEffect(() => {
-    if (!isEditMode) return;
-    const stored = localStorage.getItem('webbuilder_edit_locale');
-    if (!stored) setEditLocale(pageLocale);
-  }, [isEditMode, pageLocale]);
-
-  const displayLocale = isEditMode ? editLocale : pageLocale;
-
-  const getText = (field: any) => {
-    if (typeof field === 'string') return field;
-    if (!field || typeof field !== 'object') return '';
-    if (props.__runtime?.texts && field.textId && props.__runtime.texts[field.textId])
-      return props.__runtime.texts[field.textId];
-    return field[displayLocale] || field.en || field.zh || '';
-  };
-
-  // 响应式检测
+  // 移动端检测
   const [isMobile, setIsMobile] = useState(false);
   useEffect(() => {
     const checkMobile = () => setIsMobile(window.innerWidth < 768);
@@ -91,66 +56,94 @@ export function Multirow(props: any) {
     return () => window.removeEventListener('resize', checkMobile);
   }, []);
 
-  const currentTextAlign = isMobile ? mobileTextAlign : textAlign;
+  const currentTextAlign = isMobile ? contentGroup.mobileTextAlign : contentGroup.textAlign;
 
-  // 计算当前行的图片位置
+  // 获取图片放置位置
   const getImagePosition = (index: number) => {
-    if (imagePlacement === 'alternate-left') {
+    const placement = imageGroup.imagePlacement;
+    if (placement === 'alternate-left') {
       return index % 2 === 0 ? 'left' : 'right';
     }
-    if (imagePlacement === 'alternate-right') {
+    if (placement === 'alternate-right') {
       return index % 2 === 0 ? 'right' : 'left';
     }
-    return imagePlacement; // 'left' or 'right'
+    return placement;
   };
 
-  // 通栏样式
-  const outerClasses = `relative overflow-hidden ${
-    bannerType === 'fullwidth'
-      ? 'w-screen left-1/2 right-1/2 -ml-[50vw] mr-[50vw]'
-      : 'max-w-7xl mx-auto'
-  }`;
-  const outerMargin = bannerType === 'standard' ? { marginTop: '10px', marginBottom: '10px' } : {};
-  const outerStyle: React.CSSProperties = { backgroundColor, ...outerMargin };
-  const contentStyle: React.CSSProperties = { paddingTop: `${paddingTop}px`, paddingBottom: `${paddingBottom}px` };
+  // 通栏统一实现
+  const isFullwidth = bannerGroup.bannerType === 'fullwidth';
+  const outerStyle: React.CSSProperties = {
+    backgroundColor: bannerGroup.backgroundColor,
+    ...(isFullwidth
+      ? {
+          position: 'relative',
+          left: '50%',
+          transform: 'translateX(-50%)',
+          width: '100vw',
+          maxWidth: '100vw',
+        }
+      : {
+          maxWidth: '80rem',
+          marginLeft: 'auto',
+          marginRight: 'auto',
+        }),
+    ...(bannerGroup.bannerType === 'standard' ? { marginTop: '10px', marginBottom: '10px' } : {}),
+  };
+  const outerClasses = 'relative overflow-hidden';
 
-  // 垂直对齐类
-  const verticalAlignClass =
-    contentVertical === 'top' ? 'items-start' : contentVertical === 'bottom' ? 'items-end' : 'items-center';
+  const contentStyle: React.CSSProperties = {
+    paddingTop: `${paddingGroup.paddingTop}px`,
+    paddingBottom: `${paddingGroup.paddingBottom}px`,
+    maxWidth: '80rem',
+    margin: '0 auto',
+    width: '100%',
+    paddingLeft: 'clamp(1rem, 2vw, 2rem)',
+    paddingRight: 'clamp(1rem, 2vw, 2rem)',
+  };
 
-  // 图片尺寸类
-  const imageHeightClass = HEIGHT_MAP[imageHeight] || 'h-auto';
-  const imageWidthClass = WIDTH_MAP[imageWidth] || 'w-full md:w-1/2';
+  // 响应式字体
+  const titleClamp = `clamp(${contentGroup.columnTitleFontSize * mobileScaleFactor}px, 2.5vw, ${contentGroup.columnTitleFontSize}px)`;
+  const descClamp = `clamp(${contentGroup.columnDescFontSize * mobileScaleFactor}px, 1.2vw, ${contentGroup.columnDescFontSize}px)`;
 
-  // 文本区域样式
+  const imageHeightClass = HEIGHT_MAP[imageGroup.imageHeight] || 'h-auto';
+  const imageWidthClass = WIDTH_MAP[imageGroup.imageWidth] || 'w-full md:w-1/2';
+
   const textAreaStyle: React.CSSProperties = {
-    backgroundColor: columnBgColor,
+    backgroundColor: contentGroup.columnBgColor,
     borderRadius: '0.5rem',
     padding: '1.5rem',
     textAlign: currentTextAlign as any,
   };
 
   const titleStyle: React.CSSProperties = {
-    fontSize: `${columnTitleFontSize}px`,
-    color: columnTitleColor,
+    fontSize: titleClamp,
+    color: contentGroup.columnTitleColor,
+    fontWeight: 'bold',
     marginBottom: '0.5rem',
   };
 
   const descStyle: React.CSSProperties = {
-    fontSize: `${columnDescFontSize}px`,
-    color: columnDescColor,
+    fontSize: descClamp,
+    color: contentGroup.columnDescColor,
     marginBottom: '1rem',
   };
 
   const linkStyle: React.CSSProperties = {
-    color: columnDescColor,
+    color: contentGroup.columnDescColor,
     textDecoration: 'none',
     display: 'inline-flex',
     alignItems: 'center',
     gap: '4px',
   };
 
-  if (isEditMode && items.length === 0) {
+  const verticalAlignClass =
+    contentGroup.contentVertical === 'top'
+      ? 'items-start'
+      : contentGroup.contentVertical === 'bottom'
+        ? 'items-end'
+        : 'items-center';
+
+  if (isEditMode && mergedItems.length === 0) {
     return (
       <div ref={props.puck?.dragRef} className={outerClasses} style={outerStyle}>
         <div className="border-2 border-dashed border-gray-300 p-8 text-center text-gray-400">
@@ -164,29 +157,27 @@ export function Multirow(props: any) {
     <div ref={props.puck?.dragRef} className={outerClasses} style={outerStyle}>
       <div className="relative w-full">
         <div style={contentStyle}>
-          <div className="max-w-7xl mx-auto w-full px-4 sm:px-6 lg:px-8">
+          <div className="w-full">
             <div className="space-y-8">
-              {items.map((item: any, idx: number) => {
-                const titleText = getText(item.title);
-                const descText = getText(item.description);
-                const linkLabelText = getText(item.linkLabel);
-                const imageUrl = item.imageUrl;
+              {mergedItems.map((item: any, idx: number) => {
+                const alt = seoTitle ? `${seoTitle} - ${suffix} ${idx + 1}` : `${suffix} ${idx + 1}`;
+                const displayImageUrl = getDisplayImageUrl(item.imageUrl, isEditMode);
                 const imgPosition = getImagePosition(idx);
                 const flexDirection = imgPosition === 'left' ? 'md:flex-row' : 'md:flex-row-reverse';
 
                 return (
                   <div
-                    key={item.id}
+                    key={idx}
                     className={`flex flex-col ${flexDirection} gap-6 ${verticalAlignClass}`}
                   >
-                    {/* 图片区域 */}
                     <div className={`${imageWidthClass} flex-shrink-0`}>
                       <div className={`${imageHeightClass} overflow-hidden rounded-lg`}>
-                        {imageUrl ? (
+                        {item.imageUrl ? (
                           <img
-                            src={imageUrl}
-                            alt={titleText || 'image'}
+                            src={displayImageUrl}
+                            alt={alt}
                             className="w-full h-full object-cover"
+                            loading="lazy"
                           />
                         ) : (
                           <div className="w-full h-full bg-gray-200 flex items-center justify-center text-gray-400">
@@ -195,12 +186,11 @@ export function Multirow(props: any) {
                         )}
                       </div>
                     </div>
-                    {/* 文本区域 */}
                     <div className="flex-1">
                       <div style={textAreaStyle}>
-                        {titleText && <div style={titleStyle}>{titleText}</div>}
-                        {descText && <div style={descStyle}>{descText}</div>}
-                        {linkLabelText && item.linkUrl && (
+                        {item.title && <div style={titleStyle}>{item.title}</div>}
+                        {item.description && <div style={descStyle}>{item.description}</div>}
+                        {item.linkLabel && item.linkUrl && (
                           <a
                             href={item.linkUrl}
                             style={linkStyle}
@@ -208,22 +198,8 @@ export function Multirow(props: any) {
                             target="_blank"
                             rel="noopener noreferrer"
                           >
-                            {linkLabelText}
-                            <span className="icon-wrap">
-                              <svg
-                                xmlns="http://www.w3.org/2000/svg"
-                                fill="none"
-                                viewBox="0 0 14 10"
-                                style={{ width: '12px', height: '12px' }}
-                              >
-                                <path
-                                  fill="currentColor"
-                                  fillRule="evenodd"
-                                  d="M8.537.808a.5.5 0 0 1 .817-.162l4 4a.5.5 0 0 1 0 .708l-4 4a.5.5 0 1 1-.708-.708L11.793 5.5H1a.5.5 0 0 1 0-1h10.793L8.646 1.354a.5.5 0 0 1-.109-.546"
-                                  clipRule="evenodd"
-                                />
-                              </svg>
-                            </span>
+                            {item.linkLabel}
+                            <ChevronRight size={14} />
                           </a>
                         )}
                       </div>

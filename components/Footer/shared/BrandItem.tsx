@@ -2,6 +2,7 @@
 
 import Link from 'next/link';
 import { useLocale } from 'next-intl';
+import { getImageUrl } from '@/lib/files/url'; // 公共函数
 
 interface BrandItemProps {
   imageUrl: string;
@@ -25,7 +26,7 @@ export default function BrandItem({ imageUrl, imageWidth, imageAlign, siteName }
       <Link href={homeUrl} className="inline-block">
         {imageUrl ? (
           <img 
-            src={imageUrl} 
+            src={getImageUrl(imageUrl)} // 使用公共函数转换
             alt={siteName} 
             width={imageWidth} 
             height="auto"

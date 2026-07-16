@@ -2,6 +2,7 @@
 
 import { useState, useCallback, useRef } from 'react';
 import { X, Upload, Link as LinkIcon, GripVertical, Loader2 } from 'lucide-react';
+import { getImageUrl } from '@/lib/files/url'; // 公共函数，用于拼接完整图片URL
 
 interface ProductImageManagerProps {
   mainImage: string;
@@ -17,11 +18,11 @@ export default function ProductImageManager({
   onAdditionalImagesChange,
 }: ProductImageManagerProps) {
   const [uploading, setUploading] = useState(false);
-  const [downloading, setDownloading] = useState(false);  // 新增：网络图片下载中状态
+  const [downloading, setDownloading] = useState(false);
   const [showUrlModal, setShowUrlModal] = useState(false);
   const [urlList, setUrlList] = useState('');
   const [dragSrcIndex, setDragSrcIndex] = useState<number | null>(null);
-  const [errorMsg, setErrorMsg] = useState<string | null>(null);  // 新增：错误提示
+  const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const allImages = useCallback(() => {
@@ -43,18 +44,19 @@ export default function ProductImageManager({
     onAdditionalImagesChange(newAdditional);
   }, [onMainImageChange, onAdditionalImagesChange]);
 
+  // 统一上传接口：本地上传使用 multipart/form-data
   const uploadFile = async (file: File): Promise<string> => {
     const formData = new FormData();
     formData.append('file', file);
-    const res = await fetch('/api/upload', { method: 'POST', body: formData });
+    const res = await fetch('/api/images', { method: 'POST', body: formData });
     if (!res.ok) throw new Error('上传失败');
     const data = await res.json();
     return data.url;
   };
 
-  // 下载单张网络图片到服务器
+  // 统一上传接口：网络图片使用 JSON
   const downloadNetworkImage = async (url: string): Promise<string> => {
-    const res = await fetch('/api/download-image', {
+    const res = await fetch('/api/images', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ url }),
@@ -64,7 +66,7 @@ export default function ProductImageManager({
       throw new Error(error.error || '下载失败');
     }
     const data = await res.json();
-    return data.url; // 本地路径，如 '/uploads/xxx.jpg'
+    return data.url;
   };
 
   const handleLocalUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -90,7 +92,6 @@ export default function ProductImageManager({
     }
   };
 
-  // 修改：网络图片添加，先下载再保存
   const handleAddNetworkImages = async () => {
     const urls = urlList.split('\n').map(u => u.trim()).filter(u => u);
     if (urls.length === 0) return;
@@ -100,13 +101,11 @@ export default function ProductImageManager({
       return;
     }
     const toAdd = urls.slice(0, remainingSlots);
-    
     setDownloading(true);
     setErrorMsg(null);
     const downloadedUrls: string[] = [];
     const failedUrls: string[] = [];
 
-    // 依次下载（避免并发过大，也可以改为 Promise.all，但建议串行以减轻服务器压力）
     for (const url of toAdd) {
       try {
         const localUrl = await downloadNetworkImage(url);
@@ -115,7 +114,7 @@ export default function ProductImageManager({
         } else {
           failedUrls.push(url);
         }
-      } catch (err: any) {
+      } catch (err) {
         console.error(`下载失败 ${url}:`, err);
         failedUrls.push(url);
       }
@@ -204,15 +203,11 @@ export default function ProductImageManager({
             onDrop={() => handleDrop(idx)}
             className="relative aspect-square border rounded overflow-hidden bg-gray-50 group cursor-move"
           >
+            {/* 使用公共函数 getImageUrl 转换图片地址，不再依赖代理组件 */}
             <img
-              src={url}
+              src={getImageUrl(url)}
               alt={`产品图${idx + 1}`}
               className="w-full h-full object-cover"
-              referrerPolicy="no-referrer"
-              onError={(e) => {
-                e.currentTarget.src = '/placeholder.png';
-                e.currentTarget.onerror = null;
-              }}
             />
             {idx === 0 && (
               <div className="absolute top-1 left-1 bg-blue-500 text-white text-xs px-1 rounded">主图</div>

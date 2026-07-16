@@ -1,4 +1,5 @@
-import { S3Client, PutObjectCommand, GetObjectCommand, DeleteObjectCommand, ListObjectsV2Command } from "@aws-sdk/client-s3";
+// lib/storage/r2-storage.ts
+import { S3Client, PutObjectCommand, GetObjectCommand, DeleteObjectCommand, ListObjectsV2Command, HeadObjectCommand } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 
 export type BucketType = 'public' | 'private';
@@ -74,6 +75,37 @@ export class R2Storage {
     const command = new ListObjectsV2Command({ Bucket: this.bucketName, Prefix: prefix });
     const response = await this.client.send(command);
     return response.Contents?.map(item => item.Key!) || [];
+  }
+
+  /**
+   * 获取文件元数据（包括 Content-Type, Content-Length, Last-Modified 等）
+   */
+  async head(localPath: string): Promise<{ contentType?: string; contentLength?: number; lastModified?: Date; etag?: string } | null> {
+    const key = this.localPathToKey(localPath);
+    try {
+      const command = new HeadObjectCommand({ Bucket: this.bucketName, Key: key });
+      const response = await this.client.send(command);
+      return {
+        contentType: response.ContentType,
+        contentLength: response.ContentLength,
+        lastModified: response.LastModified,
+        etag: response.ETag,
+      };
+    } catch (error) {
+      // 如果文件不存在，返回 null
+      if ((error as any).name === 'NotFound') {
+        return null;
+      }
+      throw error;
+    }
+  }
+
+  /**
+   * 检查文件是否存在
+   */
+  async exists(localPath: string): Promise<boolean> {
+    const metadata = await this.head(localPath);
+    return metadata !== null;
   }
 
   async getPresignedUploadUrl(localPath: string, expiresIn: number = 3600): Promise<string> {

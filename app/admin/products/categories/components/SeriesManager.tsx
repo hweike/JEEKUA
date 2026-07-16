@@ -5,6 +5,7 @@ import { Edit, Trash2, Plus } from 'lucide-react';
 import ImageUpload from '@/components/ImageUpload';
 import SeoFields from '@/components/common/SeoFields';
 import { getFieldHint, getFieldPlaceholder, HINT_PATHS, InfoTooltip } from '@/config/fieldHints';
+import { getImageUrl } from '@/lib/files/url'; // 新增导入
 
 interface Series {
   id: string;
@@ -132,7 +133,8 @@ export default function SeriesManager({ category, attributeTemplates, onUpdate }
               <div className="flex justify-between items-center">
                 <div className="flex gap-3 items-center">
                   {series.image && (
-                    <img src={series.image} className="w-12 h-12 object-cover rounded flex-shrink-0" alt="" />
+                    // 使用 getImageUrl 转换图片地址
+                    <img src={getImageUrl(series.image)} className="w-12 h-12 object-cover rounded flex-shrink-0" alt="" />
                   )}
                   <div>
                     <div className="font-medium">{series.name}</div>

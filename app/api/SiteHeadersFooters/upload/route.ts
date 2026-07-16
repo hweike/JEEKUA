@@ -1,5 +1,5 @@
-// app/api/SiteHeadersFooters/upload/route.ts
 import { NextRequest, NextResponse } from 'next/server';
+import { downloadAndSaveImage } from '@/lib/files/download';
 import { getPublicStorage } from '@/lib/storage/factory';
 
 export async function POST(request: NextRequest) {
@@ -16,22 +16,17 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Invalid file type' }, { status: 400 });
     }
 
-    const bytes = await file.arrayBuffer();
-    const buffer = Buffer.from(bytes);
+    const buffer = Buffer.from(await file.arrayBuffer());
 
-    // 生成唯一文件名
-    const timestamp = Date.now();
-    const ext = file.name.split('.').pop();
-    const fileName = `${timestamp}.${ext}`;
-    // 在公开桶中的存储路径（与原 public/uploads/headers-footers 对应）
-    const key = `uploads/headers-footers/${fileName}`;
+    // 调用公共函数上传图片（返回相对路径 storage_key）
+    // 不传 referenceType/referenceId，只存储图片，不创建业务引用
+    const storageKey = await downloadAndSaveImage(buffer);
 
+    // 转换为完整 URL（保持原有返回格式）
     const storage = getPublicStorage();
-    await storage.write(key, buffer, { contentType: file.type });
+    const fullUrl = storage.getPublicUrl(storageKey);
 
-    // 获取公开访问 URL（优先使用自定义域名，否则使用 R2 默认域名）
-    const publicUrl = storage.getPublicUrl(key);
-    return NextResponse.json({ url: publicUrl });
+    return NextResponse.json({ url: fullUrl });
   } catch (error) {
     console.error('Upload error:', error);
     return NextResponse.json({ error: 'Upload failed' }, { status: 500 });

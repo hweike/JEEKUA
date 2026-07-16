@@ -2,17 +2,56 @@
 import type { Config } from '@puckeditor/core';
 import type { Components } from './types';
 import components from './components.aggregate';
-import { customFieldTypes } from './field-types'; // 导入自定义字段类型（包含 slide-list）
+import { customFieldTypes } from './field-types';
 
-// 开发环境可打印注册的组件列表（可选）
 if (process.env.NODE_ENV === 'development') {
   console.log('[WebBuilder Config] Registered component keys:', Object.keys(components));
 }
 
 export const config: Config<Components> = {
-  components,
-  fieldTypes: customFieldTypes, // ⬅️ 仅添加这一行
-  // 不定义 root.render，布局由全局 layout.tsx 提供
+  components: components as any,
+  fieldTypes: customFieldTypes,
+
+  categories: {
+    layout: {
+      components: ['BlankBlock', 'Section'],
+      title: '布局容器',
+      defaultExpanded: true,
+    },
+    basic: {
+      components: ['Heading', 'Paragraph', 'Button', 'List', 'DividingLine'],
+      title: '基础内容',
+      defaultExpanded: true,
+    },
+    media: {
+      // 移除了 'WidthSlider'
+      components: ['ImageBanner', 'Video', 'FullwidthSlider', 'PicwithText'],
+      title: '媒体与图文',
+      defaultExpanded: true,
+    },
+    advanced: {
+      components: ['Richtext', 'Accordion', 'Collapsible', 'Multicolumn', 'Multirow'],
+      title: '高级布局',
+      defaultExpanded: false,
+    },
+    product: {
+      components: [
+        'ProductLineBlock',
+        'ProductCollectionsBlock',
+        'ProductDetailsBlock',
+        'DocumentLibraryBlock',
+        'BlogBlock',
+        'BlogCollectionBlock',
+        'VideoCategoryBlock',
+      ],
+      title: '产品与内容',
+      defaultExpanded: false,
+    },
+    other: {
+      title: '其他',
+      visible: false,
+    },
+  },
 };
 
 export default config;

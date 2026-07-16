@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { getCustomerByEmail, createCustomer, updateCustomer } from '@/lib/CRM/repository';
+import { getCustomerByEmailAndSource, createCustomer, updateCustomer } from '@/lib/CRM/repository';
 import { generateId, getClientIp, getCountryFromIp } from '@/lib/CRM/utils';
 import type { Customer } from '@/lib/CRM/types';
 
@@ -19,21 +19,21 @@ export async function POST(request: Request) {
       console.error('获取国家失败:', err);
     }
 
-    // 检查是否已存在相同邮箱
-    const existing = await getCustomerByEmail(email); // ✅ 添加 await
+    // 仅查找注册用户（source='register'）
+    const existing = await getCustomerByEmailAndSource(email, 'register');
 
     if (existing) {
-      // 只更新订阅状态，如果国家为空则补上
+      // 更新订阅状态，保留 source='register' 不变
       const updated = {
         ...existing,
         emailSubscribed: '已订阅' as const,
         ...(!existing.country && country !== 'Unknown' ? { country } : {}),
       };
-      await updateCustomer(updated); // ✅ 添加 await
+      await updateCustomer(updated);
       return NextResponse.json({ success: true, customerId: existing.id, updated: true });
     }
 
-    // 创建新客户
+    // 创建新客户（注册用户，source='register'）
     const now = new Date().toISOString().slice(0, 19).replace('T', ' ');
     const newCustomer: Customer = {
       id: generateId(),
@@ -52,8 +52,9 @@ export async function POST(request: Request) {
       flag: '',
       emailSubscribed: '已订阅',
       createdAt: now,
+      source: 'register', // 注册用户
     };
-    await createCustomer(newCustomer); // ✅ 添加 await
+    await createCustomer(newCustomer);
     return NextResponse.json({ success: true, customerId: newCustomer.id });
   } catch (error) {
     console.error('Subscription error:', error);

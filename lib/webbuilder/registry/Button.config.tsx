@@ -1,31 +1,33 @@
+// lib/webbuilder/registry/Button.config.tsx
+
 import type { ComponentConfig } from '@measured/puck';
 import { Button } from '@/components/webbuilder/blocks/basic/Button';
-import { ButtonTextField } from '@/components/webbuilder/fields/ButtonTextField';
 import { ColorPickerField } from '@/components/webbuilder/fields/ColorPickerField';
+import { DEFAULT_BUTTON } from '@/lib/webbuilder/defaults/Button';
 import type { ButtonProps } from '@/lib/webbuilder/types';
 
 export const config: ComponentConfig<ButtonProps> = {
   label: '按钮',
   category: 'Basic',
   defaultProps: {
-    text: { zh: '', en: '', textId: '' },
-    buttonColor: '#000000',
-    textColor: '#ffffff',
-    fontSize: 16,
-    bold: false,
-    italic: false,
-    underline: false,
-    textAlign: 'center',
-    buttonAlign: 'center',
-    link: '',
-    borderRadius: '0.5rem',   // 默认中圆角
+    text: DEFAULT_BUTTON.text,
+    buttonColor: DEFAULT_BUTTON.buttonColor,
+    textColor: DEFAULT_BUTTON.textColor,
+    fontSize: DEFAULT_BUTTON.fontSize,
+    bold: DEFAULT_BUTTON.bold,
+    italic: DEFAULT_BUTTON.italic,
+    underline: DEFAULT_BUTTON.underline,
+    // textAlign 在 defaultProps 中保留或移除均可，不影响属性面板
+    textAlign: DEFAULT_BUTTON.textAlign,  // 可保留，也可删除
+    buttonAlign: DEFAULT_BUTTON.buttonAlign,
+    link: DEFAULT_BUTTON.link,
+    borderRadius: DEFAULT_BUTTON.borderRadius,
+    paddingX: DEFAULT_BUTTON.paddingX,
+    paddingY: DEFAULT_BUTTON.paddingY,
+    spacingGroup: { ...DEFAULT_BUTTON.spacingGroup },
   },
   fields: {
-    text: {
-      label: '按钮文字',
-      type: 'custom',
-      render: ({ value, onChange }) => <ButtonTextField value={value} onChange={onChange} />,
-    },
+    text: { label: '按钮文字', type: 'text' },
     buttonColor: {
       label: '按钮颜色',
       type: 'custom',
@@ -71,15 +73,8 @@ export const config: ComponentConfig<ButtonProps> = {
         { label: '否', value: false },
       ],
     },
-    textAlign: {
-      label: '文字对齐',
-      type: 'radio',
-      options: [
-        { label: '左对齐', value: 'left' },
-        { label: '居中', value: 'center' },
-        { label: '右对齐', value: 'right' },
-      ],
-    },
+    // ✅ 移除 textAlign 字段（属性面板不再显示）
+    // textAlign: { ... },
     buttonAlign: {
       label: '按钮对齐',
       type: 'radio',
@@ -89,10 +84,7 @@ export const config: ComponentConfig<ButtonProps> = {
         { label: '右对齐', value: 'right' },
       ],
     },
-    link: {
-      label: '链接地址',
-      type: 'text',
-    },
+    link: { label: '链接地址', type: 'text' },
     borderRadius: {
       label: '圆角',
       type: 'select',
@@ -104,6 +96,8 @@ export const config: ComponentConfig<ButtonProps> = {
         { label: '圆形', value: '9999px' },
       ],
     },
+    paddingX: { label: '左右边距 (px)', type: 'number', min: 0, max: 200, step: 1 },
+    paddingY: { label: '上下边距 (px)', type: 'number', min: 0, max: 100, step: 1 },
   },
   render: ({ puck, ...props }) => <Button puck={puck} {...props} />,
 };

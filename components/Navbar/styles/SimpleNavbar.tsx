@@ -149,7 +149,7 @@ export default function NavbarClient({ headerConfig, menuTree, siteSettings }: N
           {searchConfig.enabled && <SearchButton placeholder={searchConfig.placeholder} />}
         </div>
         <div className="flex-1 flex justify-center" ref={logoContainerRef}>
-          <Logo logoConfig={logoConfig} siteName={siteSettings?.siteName || 'FEISMAN POWER'} />
+          <Logo logoConfig={logoConfig} siteName={siteSettings?.siteName || 'My Web'} />
         </div>
         <div className="flex-1 flex justify-end">
           {utilities.showLanguageSelector && <LanguageSwitcher />}
@@ -165,7 +165,7 @@ export default function NavbarClient({ headerConfig, menuTree, siteSettings }: N
   const renderMiddleLeft = () => (
     <div className="flex items-center justify-between w-full">
       <div className="flex items-center gap-10">
-        <Logo logoConfig={logoConfig} siteName={siteSettings?.siteName || 'FEISMAN POWER'} />
+        <Logo logoConfig={logoConfig} siteName={siteSettings?.siteName || 'My Web'} />
         <MenuItems items={menuTree} pathname={pathname} menuType={menuType} />
       </div>
       <div className="flex items-center gap-4">
@@ -185,7 +185,7 @@ export default function NavbarClient({ headerConfig, menuTree, siteSettings }: N
 
       {/* 中间 Logo：全局居中 */}
       <div className="flex justify-center">
-        <Logo logoConfig={logoConfig} siteName={siteSettings?.siteName || 'FEISMAN POWER'} />
+        <Logo logoConfig={logoConfig} siteName={siteSettings?.siteName || 'My Web'} />
       </div>
 
       {/* 右侧工具：右对齐 */}
@@ -218,7 +218,7 @@ export default function NavbarClient({ headerConfig, menuTree, siteSettings }: N
             </svg>
           </button>
           <div className="flex justify-center flex-1">
-            <Logo logoConfig={logoConfig} siteName={siteSettings?.siteName || 'FEISMAN POWER'} />
+            <Logo logoConfig={logoConfig} siteName={siteSettings?.siteName || 'My Web'} />
           </div>
           <div className="flex items-center gap-2">
             {searchConfig.enabled && <SearchButton placeholder={searchConfig.placeholder} />}
@@ -231,7 +231,7 @@ export default function NavbarClient({ headerConfig, menuTree, siteSettings }: N
       return (
         <div className="flex items-center justify-between w-full">
           <div className="flex justify-start">
-            <Logo logoConfig={logoConfig} siteName={siteSettings?.siteName || 'FEISMAN POWER'} />
+            <Logo logoConfig={logoConfig} siteName={siteSettings?.siteName || 'My Web'} />
           </div>
           <div className="flex items-center gap-2">
             {searchConfig.enabled && <SearchButton placeholder={searchConfig.placeholder} />}

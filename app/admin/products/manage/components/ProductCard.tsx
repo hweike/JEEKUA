@@ -1,9 +1,9 @@
 'use client';
 
-import { useState, useCallback } from 'react';
+import { useState, useCallback, memo } from 'react';
 import Link from 'next/link';
-import ProxyImage from '@/components/ProxyImage';
 import { Edit, Trash2, Plus, ChevronDown, ChevronRight } from 'lucide-react';
+import { getImageUrl } from '@/lib/files/url';
 
 interface ProductCardProps {
   product: any;
@@ -16,7 +16,6 @@ interface ProductCardProps {
 }
 
 function getPriceRange(p: any) {
-  // 确保 price_tiers 是数组
   const tiers = Array.isArray(p.price_tiers) ? p.price_tiers : [];
   if (tiers.length === 0) return '联系客服报价';
   const prices = tiers.map((t: any) => t.price).filter((v: any) => typeof v === 'number');
@@ -33,7 +32,7 @@ const statusMap: Record<string, { label: string; className: string }> = {
   draft: { label: '草稿', className: 'bg-gray-100 text-gray-800' },
 };
 
-export function ProductCard({
+export const ProductCard = memo(function ProductCard({
   product,
   locale,
   onDelete,
@@ -51,6 +50,7 @@ export function ProductCard({
   const productSku = product.sku;
   const minOrderQty = product.min_order_quantity;
 
+  // 稳定加载变体函数
   const loadChildren = useCallback(async () => {
     if (children.length > 0 || loadingChildren) return;
     setLoadingChildren(true);
@@ -65,39 +65,43 @@ export function ProductCard({
     }
   }, [product.productId, locale, children.length, loadingChildren]);
 
-  const toggleExpand = () => {
+  const toggleExpand = useCallback(() => {
     if (!expanded && children.length === 0 && !loadingChildren) {
       loadChildren();
     }
     setExpanded(!expanded);
-  };
+  }, [expanded, children.length, loadingChildren, loadChildren]);
 
-  const handleCheckboxChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleCheckboxChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
     e.stopPropagation();
     onSelectChange(product.productId);
-  };
+  }, [onSelectChange, product.productId]);
 
-  const handleDelete = (e: React.MouseEvent) => {
+  const handleDelete = useCallback((e: React.MouseEvent) => {
     e.stopPropagation();
     onDelete(product.productId);
-  };
+  }, [onDelete, product.productId]);
 
-  const handleEditVariant = (e: React.MouseEvent, parentId: string, variant: any) => {
+  const handleEditVariant = useCallback((e: React.MouseEvent, parentId: string, variant: any) => {
     e.stopPropagation();
     onEditVariant(parentId, variant);
-  };
+  }, [onEditVariant]);
 
-  const handleAddVariant = (e: React.MouseEvent) => {
+  const handleAddVariant = useCallback((e: React.MouseEvent) => {
     e.stopPropagation();
     // 直接通过 Link 跳转，无需额外处理
-  };
+  }, []);
+
+  // 稳定删除变体的回调（避免内联函数）
+  const handleDeleteVariant = useCallback((variantId: string) => (e: React.MouseEvent) => {
+    e.stopPropagation();
+    onDelete(variantId);
+  }, [onDelete]);
 
   return (
     <div className="border rounded-lg bg-white shadow-sm overflow-hidden hover:shadow-md transition-shadow">
-      {/* 整个卡片主体点击区域（除操作按钮、复选框） */}
       <div className="cursor-pointer" onClick={toggleExpand}>
         <div className="flex p-4 gap-4">
-          {/* 复选框区域，阻止冒泡 */}
           <div className="flex-shrink-0 pt-2" onClick={(e) => e.stopPropagation()}>
             <input
               type="checkbox"
@@ -107,14 +111,12 @@ export function ProductCard({
             />
           </div>
 
-          {/* 图片 */}
           <div className="flex-shrink-0 w-[150px] h-[150px] bg-gray-100 rounded overflow-hidden relative">
             {imageUrl ? (
-              <ProxyImage
-                src={imageUrl}
+              <img
+                src={getImageUrl(imageUrl)}
                 alt={productName}
-                fill
-                className="object-contain"
+                className="w-full h-full object-contain"
               />
             ) : (
               <div className="w-full h-full flex items-center justify-center text-gray-400">
@@ -125,16 +127,13 @@ export function ProductCard({
             )}
           </div>
 
-          {/* 信息区 */}
           <div className="flex-1 flex flex-col min-w-0">
             <div className="flex justify-between items-start gap-4">
-              {/* 标题容器：限制宽度，2行截断 */}
               <div className="flex-1 min-w-0">
                 <h3 className="text-lg font-semibold text-gray-900 break-words line-clamp-2">
                   {productName}
                 </h3>
               </div>
-              {/* 右侧操作按钮，固定宽度不收缩 */}
               <div className="flex gap-2 items-center flex-shrink-0" onClick={(e) => e.stopPropagation()}>
                 <span className={`text-xs px-2 py-1 rounded-full ${statusMap[product.status]?.className || 'bg-gray-100'}`}>
                   {statusMap[product.status]?.label || product.status}
@@ -180,7 +179,6 @@ export function ProductCard({
         </div>
       </div>
 
-      {/* 变体列表 */}
       {expanded && (
         <div className="border-t bg-gray-50 p-4 space-y-2">
           <div className="flex justify-between items-center">
@@ -203,11 +201,10 @@ export function ProductCard({
                 <div className="flex items-center gap-3">
                   <div className="w-12 h-12 bg-gray-100 rounded overflow-hidden relative">
                     {child.main_image_url && (
-                      <ProxyImage
-                        src={child.main_image_url}
+                      <img
+                        src={getImageUrl(child.main_image_url)}
                         alt={child.product_name}
-                        fill
-                        className="object-cover"
+                        className="w-full h-full object-cover"
                       />
                     )}
                   </div>
@@ -220,7 +217,7 @@ export function ProductCard({
                   <button onClick={(e) => handleEditVariant(e, product.productId, child)} className="text-blue-600">
                     <Edit size={16} />
                   </button>
-                  <button onClick={(e) => { e.stopPropagation(); onDelete(child.productId); }} className="text-red-600">
+                  <button onClick={handleDeleteVariant(child.productId)} className="text-red-600">
                     <Trash2 size={16} />
                   </button>
                 </div>
@@ -231,4 +228,4 @@ export function ProductCard({
       )}
     </div>
   );
-}
+});

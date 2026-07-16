@@ -18,6 +18,7 @@ interface MenuTreeEditorProps {
   initialItems: MenuItem[];
   onSave: (items: MenuItem[]) => void;
   onCancel: () => void;
+  locale?: string; // 新增 locale prop
 }
 
 function buildFlatList(items: MenuItem[]): FlatNode[] {
@@ -60,7 +61,7 @@ function rebuildItems(flatList: FlatNode[]): MenuItem[] {
 }
 
 const MenuTreeEditor = forwardRef<MenuTreeEditorRef, MenuTreeEditorProps>(
-  ({ initialItems, onSave, onCancel }, ref) => {
+  ({ initialItems, onSave, onCancel, locale = 'zh' }, ref) => {
     const [allNodes, setAllNodes] = useState<FlatNode[]>([]);
     const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set());
     const [editingId, setEditingId] = useState<string | null>(null);
@@ -467,6 +468,7 @@ const MenuTreeEditor = forwardRef<MenuTreeEditorRef, MenuTreeEditorProps>(
                           value={editForm.linkValue}
                           onChange={val => setEditForm({ ...editForm, linkValue: val })}
                           placeholder="搜索或粘贴链接"
+                          locale={locale} // 传递 locale
                         />
                         <button onClick={() => saveEdit(node.id)} className="p-1 text-green-600 hover:text-green-800">
                           <Check className="w-4 h-4" />

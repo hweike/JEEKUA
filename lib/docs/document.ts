@@ -1,285 +1,570 @@
 // lib/docs/document.ts
+import { supabase } from '@/lib/supabase/client';
 import { getPrivateStorage } from '@/lib/storage/factory';
-import type { Doc, DocIndex } from './types';
+import type { Doc } from './types';
+import { registerEntity } from '@/lib/discovery/services/business-register-pages.service';
+import { deletePage } from '@/lib/discovery/register';
+import { getDocsLib } from './docs-lib';
 
-// 私有桶中的基础路径（对应原 data/docs）
-const STORAGE_BASE = 'data/docs';
+const DEFAULT_SITE_ID = process.env.NEXT_PUBLIC_SITE_ID || '000001';
 
-/**
- * 获取文档库索引文件的存储 Key
- */
-function getIndexKey(locale: string, libId: string): string {
-  return `${STORAGE_BASE}/${locale}/${libId}/index.json`;
+// ============================================================
+// 辅助函数（内部复用）
+// ============================================================
+
+function mapRowToDoc(row: any): Doc {
+  return {
+    id: row.id,
+    libId: row.lib_id,
+    title: row.title,
+    slug: row.slug,
+    parentId: row.parent_id,
+    order: row.order_index,
+    file: row.file,
+    templateId: row.template_id,
+    seo_title: row.seo_title,
+    seo_description: row.seo_description,
+    seo_keywords: row.seo_keywords,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
 }
 
-/**
- * 获取文档 Markdown 文件的存储 Key
- */
-function getMdKey(locale: string, libId: string, fileName: string): string {
-  return `${STORAGE_BASE}/${locale}/${libId}/${fileName}`;
-}
-
-/**
- * 读取 JSON 文件（从私有桶）
- */
-async function readJsonFile<T>(key: string): Promise<T | null> {
+async function readMarkdown(locale: string, libId: string, file: string): Promise<string> {
   const storage = getPrivateStorage();
+  const key = `docs/${locale}/${libId}/${file}`;
   try {
     const content = await storage.read(key, 'utf8');
-    return JSON.parse(content as string);
-  } catch (error: any) {
-    if (error?.message?.includes('File not found') || error?.code === 'NoSuchKey') {
-      return null;
-    }
-    throw error;
+    return content as string;
+  } catch {
+    return '';
   }
 }
 
-/**
- * 写入 JSON 文件到私有桶
- */
-async function writeJsonFile(key: string, data: any): Promise<void> {
+async function writeMarkdown(locale: string, libId: string, file: string, content: string): Promise<void> {
   const storage = getPrivateStorage();
-  await storage.write(key, JSON.stringify(data, null, 2), {
-    contentType: 'application/json',
-  });
+  const key = `docs/${locale}/${libId}/${file}`;
+  await storage.write(key, content || '', { contentType: 'text/markdown' });
 }
 
-/**
- * 读取文本文件（从私有桶）
- */
-async function readTextFile(key: string): Promise<string> {
-  const storage = getPrivateStorage();
-  const content = await storage.read(key, 'utf8');
-  return content as string;
-}
-
-/**
- * 写入文本文件到私有桶
- */
-async function writeTextFile(key: string, content: string, contentType?: string): Promise<void> {
-  const storage = getPrivateStorage();
-  await storage.write(key, content, { contentType: contentType || 'text/plain' });
-}
-
-/**
- * 删除文件（从私有桶）
- */
-async function deleteFile(key: string): Promise<void> {
-  const storage = getPrivateStorage();
+async function getLibSlug(libId: string): Promise<string> {
   try {
-    await storage.delete(key);
-  } catch (error: any) {
-    if (!error?.message?.includes('NoSuchKey')) {
-      throw error;
-    }
+    const lib = await getDocsLib(libId);
+    return lib?.slug || libId;
+  } catch {
+    return libId;
   }
 }
 
-/**
- * 复制文件（私有桶内复制，用于重命名）
- */
-async function copyFile(srcKey: string, destKey: string): Promise<void> {
-  const storage = getPrivateStorage();
-  const content = await storage.read(srcKey, 'utf8');
-  await storage.write(destKey, content);
-  await storage.delete(srcKey);
+async function getNextOrderIndex(locale: string, libId: string, parentId: string | null): Promise<number> {
+  const { data: siblings } = await supabase
+    .from('documents')
+    .select('order_index')
+    .eq('site_id', DEFAULT_SITE_ID)
+    .eq('lib_id', libId)
+    .eq('locale', locale)
+    .eq('parent_id', parentId ?? null)
+    .order('order_index', { ascending: false })
+    .limit(1);
+  return (siblings && siblings.length > 0) ? siblings[0].order_index + 1 : 0;
 }
 
 /**
- * 获取文档索引（内部使用，也对外导出供 tree.ts 使用）
+ * 注册文档到 pages 表（异步，不阻塞主流程）
  */
-export async function getDocIndex(locale: string, libId: string): Promise<DocIndex> {
-  const index = await readJsonFile<DocIndex>(getIndexKey(locale, libId));
-  return index ?? { docs: [] };
+async function registerDocToPages(
+  doc: Doc,
+  locale: string,
+  libId: string,
+  content?: string
+): Promise<void> {
+  const libSlug = await getLibSlug(libId);
+  const pageData = {
+    id: doc.id,
+    title: doc.title,
+    slug: doc.slug,
+    lib_id: libId,
+    lib_slug: libSlug,
+    seo_title: doc.seo_title,
+    seo_description: doc.seo_description,
+    seo_keywords: doc.seo_keywords,
+    content_full: content || '',
+    updated_at: doc.updatedAt,
+  };
+  registerEntity({
+    type: 'doc',
+    id: doc.id,
+    locale,
+    data: pageData,
+    updatedAt: doc.updatedAt,
+  }).catch(err => console.error(`注册文档失败 (${doc.id}):`, err));
 }
 
 /**
- * 保存文档索引（内部使用）
+ * 确保目标语言存在该文档，若不存在则从源复制
+ * 返回 { libId, existed } 其中 existed 表示是否原本已存在
  */
-async function saveDocIndex(locale: string, libId: string, index: DocIndex): Promise<void> {
-  await writeJsonFile(getIndexKey(locale, libId), index);
+async function ensureDocExistsInTarget(
+  targetLocale: string,
+  docId: string,
+  sourceLocale?: string
+): Promise<{ libId: string; existed: boolean }> {
+  const { data: targetData, error: targetError } = await supabase
+    .from('documents')
+    .select('lib_id')
+    .eq('site_id', DEFAULT_SITE_ID)
+    .eq('id', docId)
+    .eq('locale', targetLocale)
+    .maybeSingle();
+
+  if (targetData) {
+    return { libId: targetData.lib_id, existed: true };
+  }
+
+  if (!sourceLocale) {
+    throw new Error(`文档 ${docId} 在目标语言中不存在且未提供源语言`);
+  }
+
+  const { data: sourceData, error: sourceError } = await supabase
+    .from('documents')
+    .select('lib_id')
+    .eq('site_id', DEFAULT_SITE_ID)
+    .eq('id', docId)
+    .eq('locale', sourceLocale)
+    .maybeSingle();
+
+  if (sourceError || !sourceData) {
+    throw new Error(`无法从源语言获取文档 ${docId} 的信息: ${sourceError?.message || '不存在'}`);
+  }
+
+  const libId = sourceData.lib_id;
+  await copyDocument(sourceLocale, targetLocale, libId, docId);
+  return { libId, existed: false };
 }
 
-/**
- * 获取单个文档（包括 md 内容）
- */
+// ============================================================
+// 公开导出函数
+// ============================================================
+
+export async function getDocsByLib(locale: string, libId: string): Promise<Doc[]> {
+  const { data, error } = await supabase
+    .from('documents')
+    .select('*')
+    .eq('site_id', DEFAULT_SITE_ID)
+    .eq('lib_id', libId)
+    .eq('locale', locale)
+    .order('order_index', { ascending: true });
+
+  if (error) {
+    console.error('获取文档列表失败:', error);
+    return [];
+  }
+  return data.map(mapRowToDoc);
+}
+
 export async function getDocument(locale: string, libId: string, docId: string) {
-  const { docs } = await getDocIndex(locale, libId);
-  const docMeta = docs.find(d => d.id === docId);
-  if (!docMeta) return null;
-  const mdKey = getMdKey(locale, libId, docMeta.file);
-  let content = '';
-  try {
-    content = await readTextFile(mdKey);
-  } catch {}
-  return { ...docMeta, content };
+  const { data, error } = await supabase
+    .from('documents')
+    .select('*')
+    .eq('site_id', DEFAULT_SITE_ID)
+    .eq('lib_id', libId)
+    .eq('id', docId)
+    .eq('locale', locale)
+    .maybeSingle();
+
+  if (error || !data) return null;
+
+  const doc = mapRowToDoc(data);
+  const content = await readMarkdown(locale, libId, doc.file);
+  return { ...doc, content };
 }
 
-/**
- * 保存文档（新建或更新）
- */
 export async function saveDocument(
   locale: string,
   libId: string,
   docData: Partial<Doc> & { id?: string },
   content: string
 ): Promise<Doc> {
-  // 强制从元数据中删除 content 字段（内容单独存储）
-  if (docData && typeof docData === 'object') {
-    delete (docData as any).content;
-  }
-
-  const index = await getDocIndex(locale, libId);
   const now = new Date().toISOString();
-  let doc: Doc;
+  const docId = docData.id || generateDocId();
+  const file = docData.file || `${docId}.md`;
 
-  if (docData.id) {
-    // 更新已有文档
-    const existingIndex = index.docs.findIndex(d => d.id === docData.id);
-    if (existingIndex === -1) throw new Error('文档不存在');
-    const existingDoc = index.docs[existingIndex];
-    
-    // 强制保留原有的 libId，不允许更新
-    const { libId: _, ...safeData } = docData;
-    doc = { ...existingDoc, ...safeData, updatedAt: now };
+  const { data: existing } = await supabase
+    .from('documents')
+    .select('*')
+    .eq('site_id', DEFAULT_SITE_ID)
+    .eq('id', docId)
+    .eq('locale', locale)
+    .maybeSingle();
 
-    // 如果文件名变化，重命名对应的 .md 文件
-    if (docData.file && docData.file !== existingDoc.file) {
-      const oldKey = getMdKey(locale, libId, existingDoc.file);
-      const newKey = getMdKey(locale, libId, docData.file);
-      await copyFile(oldKey, newKey).catch(() => {});
-    }
-    index.docs[existingIndex] = doc;
+  const isNew = !existing;
+
+  let orderIndex = docData.order ?? 0;
+  if (isNew) {
+    orderIndex = await getNextOrderIndex(locale, libId, docData.parentId ?? null);
   } else {
-    // 新建文档：生成 ID，文件名与 ID 一致
-    const newId = generateDocId(); // 需要从 './utils' 导入或自行实现
-    const fileName = `${newId}.md`;
-    doc = {
-      id: newId,
-      libId: libId,
-      title: docData.title || '未命名文档',
-      slug: docData.slug || '',
-      parentId: docData.parentId || null,
-      order: docData.order ?? index.docs.length,
-      file: fileName,
-      templateId: docData.templateId ?? null,
-      seo_title: docData.seo_title || '',
-      seo_description: docData.seo_description || '',
-      seo_keywords: docData.seo_keywords || '',
-      createdAt: now,
-      updatedAt: now,
-    };
-    index.docs.push(doc);
+    orderIndex = docData.order ?? existing.order_index;
   }
 
-  // 写入 Markdown 文件（内容）
-  const mdKey = getMdKey(locale, libId, doc.file);
-  await writeTextFile(mdKey, content || '', 'text/markdown');
+  const docPayload = {
+    id: docId,
+    lib_id: libId,
+    locale,
+    title: docData.title ?? existing?.title ?? '未命名文档',
+    slug: docData.slug ?? existing?.slug ?? '',
+    parent_id: docData.parentId !== undefined ? docData.parentId : (existing?.parent_id ?? null),
+    order_index: orderIndex,
+    file: docData.file ?? existing?.file ?? file,
+    template_id: docData.templateId ?? existing?.template_id ?? null,
+    seo_title: docData.seo_title ?? existing?.seo_title ?? '',
+    seo_description: docData.seo_description ?? existing?.seo_description ?? '',
+    seo_keywords: docData.seo_keywords ?? existing?.seo_keywords ?? '',
+    updated_at: now,
+  };
 
-  // 保存索引（此时索引中绝对不包含 content）
-  await saveDocIndex(locale, libId, index);
+  let createdAt = now;
 
-  return doc;
+  if (isNew) {
+    const { error } = await supabase
+      .from('documents')
+      .insert({
+        site_id: DEFAULT_SITE_ID,
+        ...docPayload,
+        created_at: now,
+      });
+    if (error) throw new Error('插入文档失败: ' + error.message);
+    createdAt = now;
+  } else {
+    const { error } = await supabase
+      .from('documents')
+      .update({
+        ...docPayload,
+        created_at: existing.created_at,
+      })
+      .eq('site_id', DEFAULT_SITE_ID)
+      .eq('id', docId)
+      .eq('locale', locale);
+    if (error) throw new Error('更新文档失败: ' + error.message);
+    createdAt = existing.created_at;
+  }
+
+  await writeMarkdown(locale, libId, docPayload.file, content);
+
+  const resultDoc: Doc = {
+    id: docId,
+    libId,
+    title: docPayload.title,
+    slug: docPayload.slug,
+    parentId: docPayload.parent_id,
+    order: docPayload.order_index,
+    file: docPayload.file,
+    templateId: docPayload.template_id,
+    seo_title: docPayload.seo_title,
+    seo_description: docPayload.seo_description,
+    seo_keywords: docPayload.seo_keywords,
+    createdAt,
+    updatedAt: now,
+  };
+
+  await registerDocToPages(resultDoc, locale, libId, content);
+
+  return resultDoc;
+}
+
+export async function copyDocument(
+  sourceLocale: string,
+  targetLocale: string,
+  libId: string,
+  docId: string
+): Promise<void> {
+  const sourceDoc = await getDocument(sourceLocale, libId, docId);
+  if (!sourceDoc) throw new Error('源文档不存在');
+  await saveDocument(
+    targetLocale,
+    libId,
+    {
+      id: docId,
+      title: sourceDoc.title,
+      slug: sourceDoc.slug,
+      parentId: sourceDoc.parentId,
+      order: sourceDoc.order,
+      templateId: sourceDoc.templateId,
+      seo_title: sourceDoc.seo_title,
+      seo_description: sourceDoc.seo_description,
+      seo_keywords: sourceDoc.seo_keywords,
+      file: sourceDoc.file,
+    },
+    sourceDoc.content || ''
+  );
 }
 
 /**
- * 删除文档及其子文档
+ * 删除文档（仅删除当前文档，子文档保留并提升为顶级文档）
  */
 export async function deleteDocument(locale: string, libId: string, docId: string): Promise<void> {
-  const index = await getDocIndex(locale, libId);
-  // 收集所有需要删除的文档 ID（包括子文档）
-  const toDelete = new Set<string>();
-  const collect = (id: string) => {
-    toDelete.add(id);
-    index.docs.filter(d => d.parentId === id).forEach(child => collect(child.id));
-  };
-  collect(docId);
-  const remaining = index.docs.filter(d => !toDelete.has(d.id));
-  // 删除对应的 md 文件
-  for (const doc of index.docs) {
-    if (toDelete.has(doc.id)) {
-      const mdKey = getMdKey(locale, libId, doc.file);
-      await deleteFile(mdKey);
+  // 1. 查找当前文档的直接子文档（parent_id == docId）
+  const { data: children, error: childError } = await supabase
+    .from('documents')
+    .select('id')
+    .eq('site_id', DEFAULT_SITE_ID)
+    .eq('lib_id', libId)
+    .eq('locale', locale)
+    .eq('parent_id', docId);
+
+  if (childError) {
+    throw new Error('查询子文档失败: ' + childError.message);
+  }
+
+  // 2. 更新所有子文档的 parent_id 为 null（提升为顶级）
+  if (children && children.length > 0) {
+    const childIds = children.map(c => c.id);
+    const { error: updateError } = await supabase
+      .from('documents')
+      .update({ parent_id: null })
+      .eq('site_id', DEFAULT_SITE_ID)
+      .eq('lib_id', libId)
+      .eq('locale', locale)
+      .in('id', childIds);
+    if (updateError) {
+      throw new Error('更新子文档父级失败: ' + updateError.message);
     }
   }
-  // 更新索引
-  await saveDocIndex(locale, libId, { docs: remaining });
+
+  // 3. 删除当前文档的 Markdown 文件
+  const { data: docFile } = await supabase
+    .from('documents')
+    .select('file')
+    .eq('site_id', DEFAULT_SITE_ID)
+    .eq('lib_id', libId)
+    .eq('locale', locale)
+    .eq('id', docId)
+    .maybeSingle();
+
+  if (docFile) {
+    const key = `docs/${locale}/${libId}/${docFile.file}`;
+    try {
+      const storage = getPrivateStorage();
+      await storage.delete(key);
+    } catch {}
+  }
+
+  // 4. 删除当前文档的数据库记录
+  const { error: deleteError } = await supabase
+    .from('documents')
+    .delete()
+    .eq('site_id', DEFAULT_SITE_ID)
+    .eq('lib_id', libId)
+    .eq('locale', locale)
+    .eq('id', docId);
+
+  if (deleteError) {
+    throw new Error('删除文档失败: ' + deleteError.message);
+  }
+
+   // 5. 删除当前文档的 pages 记录（使用统一的 deletePage 函数）
+  const pageId = `doc:${docId}`;
+  try {
+    await deletePage(pageId, locale);
+  } catch (err) {
+    console.error(`删除文档 pages 失败 (${pageId}):`, err);
+  }
 }
 
 /**
- * 批量重新排序（拖拽后）
+ * 批量更新排序（单语言）- 增加重试机制
  */
-export async function reorderDocuments(
+export async function updateDocOrders(
   locale: string,
+  libId: string,
+  items: Array<{ id: string; parentId: string | null; order: number }>,
+  retries = 2
+): Promise<void> {
+  for (const item of items) {
+    let attempt = 0;
+    while (attempt <= retries) {
+      try {
+        const { error } = await supabase
+          .from('documents')
+          .update({
+            parent_id: item.parentId,
+            order_index: item.order,
+            updated_at: new Date().toISOString(),
+          })
+          .eq('site_id', DEFAULT_SITE_ID)
+          .eq('id', item.id)
+          .eq('locale', locale);
+        if (error) throw error;
+        break; // 成功则退出重试循环
+      } catch (err) {
+        attempt++;
+        if (attempt > retries) {
+          throw new Error(`更新排序失败 (locale: ${locale}, id: ${item.id}): ${err.message}`);
+        }
+        // 指数退避等待
+        await new Promise(r => setTimeout(r, 100 * Math.pow(2, attempt - 1)));
+      }
+    }
+  }
+}
+
+
+/**
+ * 跨语言同步排序（所有语言）- 限制并发数
+ */
+export async function syncDocOrdersAllLocales(
   libId: string,
   items: Array<{ id: string; parentId: string | null; order: number }>
 ): Promise<void> {
-  const index = await getDocIndex(locale, libId);
-  const updated = index.docs.map(doc => {
-    const item = items.find(i => i.id === doc.id);
-    if (item) {
-      return { ...doc, parentId: item.parentId, order: item.order };
+  // 获取该文档库的所有语言
+  const { data: localesData } = await supabase
+    .from('documents')
+    .select('locale')
+    .eq('site_id', DEFAULT_SITE_ID)
+    .eq('lib_id', libId);
+  const locales = [...new Set(localesData?.map(row => row.locale) || [])];
+  if (locales.length === 0) return;
+
+  // 限制并发数：每次最多处理 2 个语言
+  const concurrency = 2;
+  const errors: string[] = [];
+
+  for (let i = 0; i < locales.length; i += concurrency) {
+    const batch = locales.slice(i, i + concurrency);
+    await Promise.all(
+      batch.map(async (locale) => {
+        try {
+          await updateDocOrders(locale, libId, items);
+        } catch (err) {
+          const msg = `语言 ${locale} 更新失败: ${err.message}`;
+          errors.push(msg);
+          console.error(msg);
+        }
+      })
+    );
+  }
+
+  if (errors.length > 0) {
+    throw new Error(`部分语言同步失败:\n${errors.join('\n')}`);
+  }
+}
+
+/**
+ * 获取文档树（层级结构，含子文档）
+ * 自动修复悬空父ID：若父文档不存在，则置为 null
+ */
+export async function getDocTree(locale: string, libId: string): Promise<any[]> {
+  const docs = await getDocsByLib(locale, libId);
+  if (!docs || docs.length === 0) {
+    return [];
+  }
+
+  // 收集所有文档ID，用于验证父ID是否存在
+  const allIds = new Set(docs.map(d => d.id));
+
+  // 修复悬空父ID：将指向不存在文档的 parentId 置为 null
+  const cleanedDocs = docs.map(doc => {
+    if (doc.parentId && !allIds.has(doc.parentId)) {
+      console.warn(`[getDocTree] 孤儿文档: ${doc.id} 的 parentId ${doc.parentId} 不存在，已提升为一级文档`);
+      return { ...doc, parentId: null };
     }
     return doc;
   });
-  await saveDocIndex(locale, libId, { docs: updated });
+
+  // 构建树形结构
+  const map = new Map<string, any>();
+  const roots: any[] = [];
+
+  cleanedDocs.forEach(doc => {
+    map.set(doc.id, { ...doc, children: [] });
+  });
+
+  cleanedDocs.forEach(doc => {
+    const node = map.get(doc.id);
+    if (doc.parentId && map.has(doc.parentId)) {
+      map.get(doc.parentId).children.push(node);
+    } else {
+      roots.push(node);
+    }
+  });
+
+  // 递归排序
+  const sortTree = (nodes: any[]) => {
+    nodes.sort((a, b) => a.order - b.order);
+    nodes.forEach(node => sortTree(node.children));
+  };
+  sortTree(roots);
+  return roots;
 }
 
-/**
- * 单个文档上下移动（按钮操作）
- */
-export async function moveDocument(
-  locale: string,
-  libId: string,
-  id: string,
-  direction: 'up' | 'down'
-): Promise<void> {
-  const index = await getDocIndex(locale, libId);
-  const doc = index.docs.find(d => d.id === id);
-  if (!doc) throw new Error('文档不存在');
-  // 获取同一父级下的兄弟文档
-  const siblings = index.docs
-    .filter(d => d.parentId === doc.parentId)
-    .sort((a, b) => a.order - b.order);
-  const currentIdx = siblings.findIndex(d => d.id === id);
-  if (direction === 'up' && currentIdx > 0) {
-    const prev = siblings[currentIdx - 1];
-    doc.order = prev.order;
-    prev.order = siblings[currentIdx].order;
-  } else if (direction === 'down' && currentIdx < siblings.length - 1) {
-    const next = siblings[currentIdx + 1];
-    doc.order = next.order;
-    next.order = siblings[currentIdx].order;
-  } else {
-    return; // 无变化
-  }
-  await saveDocIndex(locale, libId, index);
-}
-
-/**
- * 根据文档库 slug 和文档 slug 获取完整文档（含内容）
- */
-export async function getDocBySlug(locale: string, libSlug: string, docSlug: string) {
-  const { getDocsLibBySlug } = await import('./docs-lib');
-  const lib = await getDocsLibBySlug(locale, libSlug);
-  if (!lib) return null;
-  
-  const { docs } = await getDocIndex(locale, lib.id);
-  const docMeta = docs.find(d => d.slug === docSlug);
-  if (!docMeta) return null;
-  
-  const mdKey = getMdKey(locale, lib.id, docMeta.file);
-  let content = '';
-  try {
-    content = await readTextFile(mdKey);
-  } catch {}
-  return { doc: docMeta, content, lib };
-}
-
-/**
- * 辅助函数：生成文档 ID（如果原项目已导出 generateDocId，应从 './utils' 导入，这里提供默认实现）
- */
 function generateDocId(): string {
   return Date.now().toString() + '-' + Math.random().toString(36).substring(2, 8);
+}
+
+export async function updateDocTranslations(
+  targetLocale: string,
+  translations: Array<{
+    docId: string;
+    title?: string;
+    content?: string;
+    seo_title?: string;
+    seo_description?: string;
+    seo_keywords?: string;
+  }>,
+  sourceLocale?: string
+): Promise<{ success: number; failed: number; errors: string[] }> {
+  let success = 0;
+  let failed = 0;
+  const errors: string[] = [];
+
+  for (const trans of translations) {
+    const { docId, title, content, seo_title, seo_description, seo_keywords } = trans;
+
+    try {
+      const { libId, existed } = await ensureDocExistsInTarget(targetLocale, docId, sourceLocale);
+
+      const targetDoc = await getDocument(targetLocale, libId, docId);
+      if (!targetDoc) {
+        throw new Error(`无法获取目标文档 ${docId}`);
+      }
+
+      const updateData: any = {};
+      if (title !== undefined) updateData.title = title;
+      if (seo_title !== undefined) updateData.seo_title = seo_title;
+      if (seo_description !== undefined) updateData.seo_description = seo_description;
+      if (seo_keywords !== undefined) updateData.seo_keywords = seo_keywords;
+
+      let newContent = targetDoc.content;
+      if (content !== undefined) newContent = content;
+
+      const hasChanges = Object.keys(updateData).length > 0 || content !== undefined;
+      if (!hasChanges) {
+        success++;
+        continue;
+      }
+
+      await saveDocument(
+        targetLocale,
+        libId,
+        {
+          id: docId,
+          title: updateData.title ?? targetDoc.title,
+          slug: targetDoc.slug,
+          parentId: targetDoc.parentId,
+          order: targetDoc.order,
+          templateId: targetDoc.templateId,
+          seo_title: updateData.seo_title ?? targetDoc.seo_title,
+          seo_description: updateData.seo_description ?? targetDoc.seo_description,
+          seo_keywords: updateData.seo_keywords ?? targetDoc.seo_keywords,
+          file: targetDoc.file,
+        },
+        newContent
+      );
+      success++;
+    } catch (err: any) {
+      errors.push(`文档 ${docId}: ${err.message}`);
+      failed++;
+    }
+  }
+
+  return { success, failed, errors };
 }

@@ -1,27 +1,28 @@
 import type { ComponentConfig } from '@measured/puck';
 import { Paragraph } from '@/components/webbuilder/blocks/basic/Paragraph';
-import { ParagraphField } from '@/components/webbuilder/fields/ParagraphField';
 import { ColorPickerField } from '@/components/webbuilder/fields/ColorPickerField';
+import { DEFAULT_PARAGRAPH } from '@/lib/webbuilder/defaults/Paragraph';
 import type { ParagraphProps } from '@/lib/webbuilder/types';
 
 export const config: ComponentConfig<ParagraphProps> = {
   label: '段落',
   category: 'Basic',
   defaultProps: {
-    text: { zh: '', en: '', textId: '' },
-    fontSize: 16,
-    textAlign: 'left',
-    bold: false,
-    italic: false,
-    underline: false,
-    color: '#333333',
-    link: '',
+    text: DEFAULT_PARAGRAPH.text,
+    fontSize: DEFAULT_PARAGRAPH.fontSize,
+    textAlign: DEFAULT_PARAGRAPH.textAlign,
+    bold: DEFAULT_PARAGRAPH.bold,
+    italic: DEFAULT_PARAGRAPH.italic,
+    underline: DEFAULT_PARAGRAPH.underline,
+    color: DEFAULT_PARAGRAPH.color,
+    link: DEFAULT_PARAGRAPH.link,
+    spacingGroup: { ...DEFAULT_PARAGRAPH.spacingGroup },
   },
   fields: {
     text: {
       label: '段落文本',
-      type: 'custom',
-      render: ({ value, onChange }) => <ParagraphField value={value} onChange={onChange} />,
+      type: 'textarea',
+      rows: 4,
     },
     fontSize: {
       label: '文字大小 (px)',

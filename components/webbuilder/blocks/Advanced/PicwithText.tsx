@@ -1,7 +1,18 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { useLocale } from 'next-intl';
+import { getImageUrl } from '@/lib/files/url';
+import { DEFAULT_PICWITH_TEXT } from '@/lib/webbuilder/defaults/PicwithText';
+import { getAltSuffix } from '@/lib/webbuilder/alt-suffix-config';
+
+function getDisplayImageUrl(url: string, isEditMode: boolean): string {
+  if (!url) return '';
+  const fullUrl = getImageUrl(url);
+  if (isEditMode) {
+    return `/api/proxy-image?url=${encodeURIComponent(fullUrl)}`;
+  }
+  return fullUrl;
+}
 
 const HEIGHT_MAP: Record<string, string> = {
   small: '200px',
@@ -22,102 +33,136 @@ const ANIMATION_CLASS: Record<string, string> = {
   zoom: 'transition-transform duration-500 hover:scale-110',
 };
 
+const VERTICAL_ALIGN_MAP: Record<string, string> = {
+  top: 'start',
+  center: 'center',
+  bottom: 'end',
+};
+
 export function PicwithText(props: any) {
   const isEditMode = !!props.puck?.isEditing;
-  const pageLocale = useLocale();
 
-  const [editLocale, setEditLocale] = useState<string>(() => {
-    if (typeof window !== 'undefined' && isEditMode) {
-      const stored = localStorage.getItem('webbuilder_edit_locale');
-      if (stored && (stored === 'zh' || stored === 'en')) return stored;
-    }
-    return pageLocale;
-  });
+  // 合并默认值
+  const mergedBannerType = props.bannerType ?? DEFAULT_PICWITH_TEXT.bannerType;
+  const mergedBackgroundColor = props.backgroundColor ?? DEFAULT_PICWITH_TEXT.backgroundColor;
+  const mergedImageGroup = { ...DEFAULT_PICWITH_TEXT.imageGroup, ...props.imageGroup };
+  const mergedTitleGroup = { ...DEFAULT_PICWITH_TEXT.titleGroup, ...props.titleGroup };
+  const mergedTextGroup = { ...DEFAULT_PICWITH_TEXT.textGroup, ...props.textGroup };
+  const mergedButtonGroup = { ...DEFAULT_PICWITH_TEXT.buttonGroup, ...props.buttonGroup };
+  const mergedLayoutGroup = { ...DEFAULT_PICWITH_TEXT.layoutGroup, ...props.layoutGroup };
+  const mergedPaddingGroup = { ...DEFAULT_PICWITH_TEXT.paddingGroup, ...props.paddingGroup };
+  const mergedSpacingGroup = { ...DEFAULT_PICWITH_TEXT.spacingGroup, ...props.spacingGroup };
 
-  useEffect(() => {
-    if (!isEditMode) return;
-    const handler = (e: StorageEvent) => {
-      if (e.key === 'webbuilder_edit_locale') {
-        const newLocale = e.newValue;
-        if (newLocale && (newLocale === 'zh' || newLocale === 'en')) setEditLocale(newLocale);
-      }
-    };
-    window.addEventListener('storage', handler);
-    return () => window.removeEventListener('storage', handler);
-  }, [isEditMode]);
+  const {
+    imageUrl,
+    imageHeight,
+    imageWidth,
+    imagePosition,
+    animation,
+  } = mergedImageGroup;
 
-  useEffect(() => {
-    if (!isEditMode) return;
-    const stored = localStorage.getItem('webbuilder_edit_locale');
-    if (!stored) setEditLocale(pageLocale);
-  }, [isEditMode, pageLocale]);
+  const {
+    title,
+    titleFontSize,
+    titleColor,
+  } = mergedTitleGroup;
 
-  const displayLocale = isEditMode ? editLocale : pageLocale;
+  const {
+    text,
+    textFontSize,
+    textColor,
+  } = mergedTextGroup;
 
-  const getText = (field: any) => {
-    if (typeof field === 'string') return field;
-    if (!field || typeof field !== 'object') return '';
-    if (props.__runtime?.texts && field.textId && props.__runtime.texts[field.textId])
-      return props.__runtime.texts[field.textId];
-    if (field[displayLocale]) return field[displayLocale];
-    if (field.en) return field.en;
-    if (field.zh) return field.zh;
-    return '';
-  };
+  const {
+    buttonText,
+    buttonFontSize,
+    buttonColor,
+    buttonLink,
+    buttonPaddingX,
+    buttonPaddingY,
+    buttonBorderRadius,
+  } = mergedButtonGroup;
 
-  const titleText = getText(props.title);
-  const descText = getText(props.text);
-  const btnText = getText(props.buttonText);
+  const {
+    contentVertical,
+    textAlign,
+    textAreaBackgroundColor,
+  } = mergedLayoutGroup;
 
-  const outerClasses = `relative overflow-hidden ${
-    props.bannerType === 'fullwidth'
-      ? 'w-screen left-1/2 right-1/2 -ml-[50vw] mr-[50vw]'
-      : 'max-w-7xl mx-auto'
-  }`;
-  const outerMargin = props.bannerType === 'standard' ? { marginTop: '10px', marginBottom: '10px' } : {};
+  const {
+    paddingTop,
+    paddingBottom,
+  } = mergedPaddingGroup;
+
+  const {
+    mobileScaleFactor = 0.7,  // 默认 0.7
+  } = mergedSpacingGroup;
+
+  // Alt 自动生成
+  const __runtime = props.__runtime || {};
+  const seoTitle = __runtime.seoTitle || '';
+  const locale = __runtime.locale || 'zh';
+  const suffix = getAltSuffix('PicwithText', locale);
+  const alt = seoTitle ? `${seoTitle} - ${suffix}` : suffix;
+
+  const displayImageUrl = getDisplayImageUrl(imageUrl, isEditMode);
 
   const outerStyle: React.CSSProperties = {
-    backgroundColor: props.backgroundColor,
-    ...outerMargin,
+    backgroundColor: mergedBackgroundColor,
+    ...(mergedBannerType === 'fullwidth'
+      ? {
+          position: 'relative',
+          left: '50%',
+          transform: 'translateX(-50%)',
+          width: '100vw',
+          maxWidth: '100vw',
+        }
+      : {
+          maxWidth: '80rem',
+          marginLeft: 'auto',
+          marginRight: 'auto',
+        }),
+    ...(mergedBannerType === 'standard' ? { marginTop: '10px', marginBottom: '10px' } : {}),
   };
+
+  const outerClasses = 'relative overflow-hidden';
 
   const contentStyle: React.CSSProperties = {
-    paddingTop: `${props.paddingTop ?? 0}px`,
-    paddingBottom: `${props.paddingBottom ?? 0}px`,
+    paddingTop: `${paddingTop ?? 0}px`,
+    paddingBottom: `${paddingBottom ?? 0}px`,
   };
 
-  const imageHeight = HEIGHT_MAP[props.imageHeight] || 'auto';
-  const imageWidthClass = WIDTH_MAP[props.imageWidth] || 'w-1/2';
-  const animationClass = ANIMATION_CLASS[props.animation] || '';
+  const imageHeightStyle = HEIGHT_MAP[imageHeight] || 'auto';
+  const imageWidthClass = WIDTH_MAP[imageWidth] || 'w-1/2';
+  const animationClass = ANIMATION_CLASS[animation] || '';
 
   const textAreaStyle: React.CSSProperties = {
-    backgroundColor: props.textAreaBackgroundColor || 'transparent',
+    backgroundColor: textAreaBackgroundColor || 'transparent',
     borderRadius: '0.5rem',
-    padding: '1.5rem',
+    padding: 'clamp(1rem, 2vw, 1.5rem)',
   };
 
-  const getAlignItems = () => {
-    switch (props.contentVertical) {
-      case 'top': return 'flex-start';
-      case 'bottom': return 'flex-end';
-      default: return 'center';
-    }
-  };
+  const verticalAlignClass = VERTICAL_ALIGN_MAP[contentVertical] || 'center';
+
+  const titleFontSizeClamp = `clamp(${titleFontSize * mobileScaleFactor}px, 4vw, ${titleFontSize}px)`;
+  const textFontSizeClamp = `clamp(${textFontSize * mobileScaleFactor}px, 2.5vw, ${textFontSize}px)`;
+  const buttonFontSizeClamp = `clamp(${buttonFontSize * mobileScaleFactor}px, 2vw, ${buttonFontSize}px)`;
 
   const buttonStyle: React.CSSProperties = {
-    fontSize: `${props.buttonFontSize ?? 16}px`,
-    backgroundColor: props.buttonColor || '#000000',
+    fontSize: buttonFontSizeClamp,
+    backgroundColor: buttonColor || '#000000',
     color: '#ffffff',
-    padding: '0.5rem 1rem',
-    borderRadius: '0.375rem',
+    padding: `${buttonPaddingY ?? 8}px ${buttonPaddingX ?? 16}px`,
+    borderRadius: `${buttonBorderRadius ?? 6}px`,
     display: 'inline-block',
     textDecoration: 'none',
     transition: 'opacity 0.2s',
+    cursor: 'pointer',
   };
 
-  const imageFirst = props.imagePosition === 'left';
+  const imageFirst = imagePosition === 'left';
 
-  if (isEditMode && !props.imageUrl) {
+  if (isEditMode && !imageUrl) {
     return (
       <div ref={props.puck?.dragRef} className={outerClasses} style={outerStyle}>
         <div className="border-2 border-dashed border-gray-300 p-8 text-center text-gray-400">
@@ -131,19 +176,28 @@ export function PicwithText(props: any) {
     <div ref={props.puck?.dragRef} className={outerClasses} style={outerStyle}>
       <div className="relative w-full">
         <div style={contentStyle}>
-          <div className="max-w-7xl mx-auto w-full">
+          <div
+            style={{
+              maxWidth: '80rem',
+              margin: '0 auto',
+              width: '100%',
+              paddingLeft: 'clamp(1rem, 2vw, 2rem)',
+              paddingRight: 'clamp(1rem, 2vw, 2rem)',
+            }}
+          >
             <div
-              className={`flex flex-col md:flex-row gap-8 items-${getAlignItems()}`}
-              style={{ flexDirection: imageFirst ? 'row' : 'row-reverse' }}
+              className={`flex flex-col md:flex-row gap-8 items-${verticalAlignClass} ${
+                imageFirst ? '' : 'md:flex-row-reverse'
+              }`}
             >
-              {/* 图片区域 */}
-              <div className={`${imageWidthClass} flex-shrink-0`}>
-                <div className={`relative overflow-hidden rounded-lg ${animationClass}`} style={{ height: imageHeight }}>
-                  {props.imageUrl ? (
+              <div className={`w-full md:${imageWidthClass} flex-shrink-0`}>
+                <div className={`relative overflow-hidden rounded-lg ${animationClass}`} style={{ height: imageHeightStyle }}>
+                  {displayImageUrl ? (
                     <img
-                      src={props.imageUrl}
-                      alt={titleText || 'image'}
+                      src={displayImageUrl}
+                      alt={alt}
                       className="w-full h-full object-cover"
+                      loading="lazy"
                     />
                   ) : (
                     <div className="w-full h-full bg-gray-200 flex items-center justify-center text-gray-400">
@@ -153,29 +207,40 @@ export function PicwithText(props: any) {
                 </div>
               </div>
 
-              {/* 文本区域 */}
-              <div className={`flex-1 text-${props.textAlign}`}>
+              <div className={`flex-1 text-${textAlign}`}>
                 <div style={textAreaStyle}>
-                  {titleText && (
+                  {title && (
                     <div
                       className="mb-2"
-                      style={{ fontSize: `${props.titleFontSize ?? 32}px`, color: props.titleColor ?? '#000000' }}
+                      style={{
+                        fontSize: titleFontSizeClamp,
+                        color: titleColor ?? '#000000',
+                      }}
                     >
-                      {titleText}
+                      {title}
                     </div>
                   )}
-                  {descText && (
+                  {text && (
                     <div
                       className="mb-4"
-                      style={{ fontSize: `${props.textFontSize ?? 16}px`, color: props.textColor ?? '#000000' }}
+                      style={{
+                        fontSize: textFontSizeClamp,
+                        color: textColor ?? '#000000',
+                      }}
                     >
-                      {descText}
+                      {text}
                     </div>
                   )}
-                  {btnText && props.buttonLink && (
-                    <a href={props.buttonLink} style={buttonStyle} target="_blank" rel="noopener noreferrer">
-                      {btnText}
-                    </a>
+                  {buttonText && (
+                    buttonLink ? (
+                      <a href={buttonLink} style={buttonStyle} target="_blank" rel="noopener noreferrer">
+                        {buttonText}
+                      </a>
+                    ) : (
+                      <span style={{ ...buttonStyle, opacity: 0.6, cursor: 'default' }}>
+                        {buttonText}
+                      </span>
+                    )
                   )}
                 </div>
               </div>

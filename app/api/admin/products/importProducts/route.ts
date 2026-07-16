@@ -10,9 +10,9 @@ import {
 } from '@/lib/products/indexDb';
 import { writeProduct, readProduct } from '@/lib/products/mdParser';
 import { generateSlug, generateSeoTitle, generateSeoDescription } from '@/lib/products/seoGenerator';
-import { downloadImage } from '@/lib/imageUtils';
-import { getPrivateStorage } from '@/lib/storage/factory';
-import { supabase } from '@/lib/supabase/client'; // 必须存在
+import { getPrivateStorage, getPublicStorage } from '@/lib/storage/factory';
+import { supabase } from '@/lib/supabase/client';
+import { downloadAndSaveImage } from '@/lib/files/download';
 
 const DEFAULT_SITE_ID = '000001';
 
@@ -22,7 +22,6 @@ interface PriceTier {
   price: number;
 }
 
-// 图片下载任务
 interface ImageTask {
   url: string;
   productId: string;
@@ -31,19 +30,8 @@ interface ImageTask {
   variantId?: string;
 }
 
-// 简单内存缓存，避免重复下载同一图片
 const imageCache = new Map<string, string>();
 
-// 封装带缓存的下载函数
-async function downloadImageWithCache(url: string): Promise<string> {
-  if (!url) return '';
-  if (imageCache.has(url)) return imageCache.get(url)!;
-  const result = await downloadImage(url);
-  imageCache.set(url, result);
-  return result;
-}
-
-// 从私有桶读取站点设置
 async function getSiteName(): Promise<string> {
   const storage = getPrivateStorage();
   const key = 'settings.json';
@@ -56,7 +44,6 @@ async function getSiteName(): Promise<string> {
   }
 }
 
-// 从私有桶读取分类数据（一次性加载）
 let categoriesCache: any[] | null = null;
 async function loadCategories(locale: string): Promise<any[]> {
   if (categoriesCache) return categoriesCache;
@@ -136,11 +123,12 @@ export async function POST(req: NextRequest) {
     const skuRule = defaultSettings.sku_rule || 'P-{timestamp}';
     const categories = await loadCategories(locale);
 
-    const results: { row: number; sku: string; success: boolean; error?: string }[] = [];
+    const results: { row: number; sku: string; success: boolean; error?: string; productId?: string }[] = [];
     let currentParentProductId: string | null = null;
     const parentProductsMap = new Map<string, any>();
     const imageTasks: ImageTask[] = [];
 
+    // 第一遍解析：构建父产品和变体的内存数据，收集图片任务
     for (let idx = 0; idx < rows.length; idx++) {
       const row = rows[idx];
       const rowNum = idx + 2;
@@ -151,14 +139,11 @@ export async function POST(req: NextRequest) {
         }
 
         let sku = row['SKU']?.trim();
-        if (!sku) {
-          sku = generateSkuFromRule(skuRule);
-        } else {
-          sku = sku.trim();
-        }
+        if (!sku) sku = generateSkuFromRule(skuRule);
+        else sku = sku.trim();
 
         if (productType === 'parent') {
-          // 查询数据库是否存在相同 SKU 且不是变体
+          // 查询父产品是否存在（SKU 匹配且不是变体）
           const { data: existingProduct, error: queryError } = await supabase
             .from('products')
             .select('productId, createdAt')
@@ -174,9 +159,17 @@ export async function POST(req: NextRequest) {
           }
 
           const isUpdate = !!existingProduct;
-          const productId = isUpdate ? existingProduct.productId : generateUniqueId();
+          let productId: string;
+          if (isUpdate) {
+            productId = existingProduct.productId;
+            usedIds.add(productId);
+            console.log(`[行${rowNum}] 复用已有父产品 ID: ${productId} (SKU: ${sku})`);
+          } else {
+            productId = generateUniqueId();
+            console.log(`[行${rowNum}] 生成新父产品 ID: ${productId} (SKU: ${sku})`);
+          }
 
-          // 分类处理（容错）
+          // 分类处理
           let categoryId = '__UNCATEGORIZED__';
           let seriesId = '';
           let productLineId = '';
@@ -205,7 +198,7 @@ export async function POST(req: NextRequest) {
             console.warn(`行 ${rowNum}: 未填写一级分类，归类到未分类`);
           }
 
-          // 解析价格阶梯
+          // 价格阶梯
           const priceTiers: PriceTier[] = [];
           for (let i = 1; i <= 3; i++) {
             const minQty = row[`最小起订量${i}`];
@@ -213,9 +206,7 @@ export async function POST(req: NextRequest) {
             if (minQty && price) {
               const minQtyNum = Number(minQty);
               const priceNum = Number(price);
-              if (isNaN(minQtyNum) || isNaN(priceNum)) {
-                throw new Error(`阶梯 ${i} 的价格或数量格式错误`);
-              }
+              if (isNaN(minQtyNum) || isNaN(priceNum)) throw new Error(`阶梯 ${i} 格式错误`);
               if (priceTiers.length > 0 && minQtyNum <= priceTiers[priceTiers.length - 1].min_qty) {
                 throw new Error(`阶梯 ${i} 的最小起订量必须大于前一级`);
               }
@@ -226,11 +217,8 @@ export async function POST(req: NextRequest) {
           }
           if (priceTiers.length === 0) throw new Error('至少提供一个价格阶梯');
           for (let i = 0; i < priceTiers.length; i++) {
-            if (i < priceTiers.length - 1) {
-              priceTiers[i].max_qty = priceTiers[i + 1].min_qty - 1;
-            } else {
-              priceTiers[i].max_qty = null;
-            }
+            if (i < priceTiers.length - 1) priceTiers[i].max_qty = priceTiers[i + 1].min_qty - 1;
+            else priceTiers[i].max_qty = null;
           }
 
           const productName = row['产品名称']?.trim();
@@ -243,13 +231,11 @@ export async function POST(req: NextRequest) {
           let slug = row['Slug']?.trim();
           if (!slug) slug = generateSlug(productName);
 
-          // 主图
+          // 主图任务
           const mainImageUrlRaw = row['主图URL']?.trim();
-          if (mainImageUrlRaw) {
-            imageTasks.push({ url: mainImageUrlRaw, productId, field: 'main_image_url' });
-          }
+          if (mainImageUrlRaw) imageTasks.push({ url: mainImageUrlRaw, productId, field: 'main_image_url' });
 
-          // 附加图
+          // 附加图任务
           const additionalImagesRaw: string[] = [];
           for (let i = 1; i <= 8; i++) {
             const imgUrl = row[`附加图URL${i}`]?.trim();
@@ -261,11 +247,7 @@ export async function POST(req: NextRequest) {
 
           let description = row['详细描述'] || '';
           if (description && !description.includes('<')) {
-            description = description
-              .split(/\r?\n/)
-              .filter((p: string) => p.trim())
-              .map((p: string) => `<p>${p.trim()}</p>`)
-              .join('');
+            description = description.split(/\r?\n/).filter(p => p.trim()).map(p => `<p>${p.trim()}</p>`).join('');
           }
 
           const shortDescription = row['简短描述'] || '';
@@ -281,33 +263,24 @@ export async function POST(req: NextRequest) {
           let seoTitle = seoTitleFromExcel;
           if (!seoTitle) {
             seoTitle = generateSeoTitle(
-              productName,
-              brand,
-              minOrderQuantity,
-              siteName,
+              productName, brand, minOrderQuantity, siteName,
               defaultSettings.auto_seo_title_template || ''
             );
           }
-
           let seoDescription = seoDescriptionFromExcel;
           if (!seoDescription) {
             seoDescription = generateSeoDescription(
-              description,
-              priceTiers,
-              specText,
+              description, priceTiers, specText,
               defaultSettings.auto_seo_desc_template || '',
               defaultSettings.default_currency || 'USD'
             );
           }
 
           let mpn = row['MPN'] || '';
-          if (!mpn && defaultSettings.default_mpn) {
-            mpn = processMpn(defaultSettings.default_mpn, sku);
-          }
+          if (!mpn && defaultSettings.default_mpn) mpn = processMpn(defaultSettings.default_mpn, sku);
 
           const product_type = await getProductType(locale, categoryId, seriesId);
 
-          // 构建产品完整数据
           const productData = {
             id: productId,
             product_name: productName,
@@ -322,8 +295,8 @@ export async function POST(req: NextRequest) {
             spec_text: specText,
             availability: defaultSettings.default_availability || 'in_stock',
             min_order_quantity: minOrderQuantity,
-            main_image_url: '', // 稍后填充
-            additional_images: [] as string[],
+            main_image_url: '',
+            additional_images: [],
             description,
             short_description: shortDescription,
             attributes: {},
@@ -349,9 +322,7 @@ export async function POST(req: NextRequest) {
           results.push({ row: rowNum, sku, success: true, productId });
         }
         else if (productType === 'variant') {
-          if (!currentParentProductId) {
-            throw new Error('变体前面没有父产品，请确保变体行紧跟在父产品之后');
-          }
+          if (!currentParentProductId) throw new Error('变体前面没有父产品，请确保变体行紧跟在父产品之后');
           const parentId = currentParentProductId;
           const parentData = parentProductsMap.get(parentId);
           if (!parentData) throw new Error(`父产品数据不存在: ${parentId}`);
@@ -368,6 +339,7 @@ export async function POST(req: NextRequest) {
           if (!variantSlug) variantSlug = generateSlug(variantName);
 
           const variantId = generateUniqueId();
+          console.log(`[行${rowNum}] 生成变体 ID: ${variantId}，关联父产品: ${parentId}`);
 
           const mainImageUrlRaw = row['主图URL']?.trim();
           if (mainImageUrlRaw) {
@@ -395,48 +367,74 @@ export async function POST(req: NextRequest) {
       } catch (err: any) {
         console.error(`第 ${rowNum} 行处理失败:`, err);
         results.push({ row: rowNum, sku: row['SKU']?.trim() || '', success: false, error: err.message });
-        if (rows[idx]['产品类型']?.trim() === 'parent') {
-          currentParentProductId = null;
-        }
+        if (rows[idx]['产品类型']?.trim() === 'parent') currentParentProductId = null;
       }
     }
 
-    // 并发下载图片（使用缓存）
+    // 并发下载图片（使用公共函数）
     console.log(`开始下载 ${imageTasks.length} 个图片...`);
     const downloadStart = Date.now();
     const downloadResults = await Promise.all(
       imageTasks.map(async (task) => {
         try {
-          const localPath = await downloadImageWithCache(task.url);
-          return { task, localPath };
+          // 调用公共函数，获取相对路径（storage_key）
+          const relativePath = await downloadAndSaveImage(task.url, {
+            referenceType: 'product',
+            referenceId: task.productId,
+            cache: imageCache,
+          });
+          // 转换为完整 URL（保持与原数据结构兼容）
+          const storage = getPublicStorage();
+          const fullUrl = storage.getPublicUrl(relativePath);
+          return { task, finalUrl: fullUrl };
         } catch (err) {
           console.error(`下载图片失败: ${task.url}`, err);
-          return { task, localPath: task.url };
+          return { task, finalUrl: task.url };
         }
       })
     );
     console.log(`图片下载完成，耗时 ${Date.now() - downloadStart}ms`);
 
-    // 回填图片到产品数据
-    for (const { task, localPath } of downloadResults) {
+    // 回填图片到内存数据
+    for (const { task, finalUrl } of downloadResults) {
       const productData = parentProductsMap.get(task.productId);
       if (!productData) continue;
       if (task.field === 'main_image_url') {
-        productData.main_image_url = localPath;
+        productData.main_image_url = finalUrl;
       } else if (task.field === 'additional_images') {
         if (!productData.additional_images) productData.additional_images = [];
-        productData.additional_images[task.index!] = localPath;
+        productData.additional_images[task.index!] = finalUrl;
       } else if (task.field === 'variant_main_image' && task.variantId) {
         const variant = productData.variants?.find((v: any) => v.id === task.variantId);
-        if (variant) variant.main_image_url = localPath;
+        if (variant) variant.main_image_url = finalUrl;
       }
     }
 
-    // 保存所有产品到数据库索引和 MD 文件
+    // 保存父产品到数据库索引和 MD 文件
     const saveStart = Date.now();
     for (const [productId, productData] of parentProductsMap.entries()) {
+      // 再次确认数据库中是否存在相同 SKU 但不同 ID 的父产品（防止并发冲突）
+      const { data: existingSameSku, error: checkError } = await supabase
+        .from('products')
+        .select('productId')
+        .eq('site_id', DEFAULT_SITE_ID)
+        .eq('locale', locale)
+        .eq('sku', productData.sku)
+        .is('parent_product_id', null)
+        .maybeSingle();
+
+      if (checkError) {
+        console.error(`保存前检查 SKU ${productData.sku} 失败:`, checkError);
+      } else if (existingSameSku && existingSameSku.productId !== productId) {
+        console.warn(`⚠️ SKU ${productData.sku} 已存在于父产品 ${existingSameSku.productId}，但当前准备写入的 ID 为 ${productId}。将复用已有 ID 并覆盖当前数据。`);
+        parentProductsMap.delete(productId);
+        productData.id = existingSameSku.productId;
+        parentProductsMap.set(existingSameSku.productId, productData);
+        console.log(`已将父产品 ID 从 ${productId} 更正为 ${existingSameSku.productId}`);
+      }
+
       const indexData = {
-        productId,
+        productId: productData.id,
         locale,
         productLineId: productData.productLineId || '',
         categoryId: productData.categoryId,
@@ -458,8 +456,117 @@ export async function POST(req: NextRequest) {
         templateId: productData.templateId,
       };
       await upsertProductIndex(indexData);
-      await writeProduct(locale, productId, productData, '');
+      await writeProduct(locale, productData.id, productData, '');
     }
+
+    // ========== 保存变体到 products 表和索引表 ==========
+    for (const [parentId, parentData] of parentProductsMap.entries()) {
+      const variants = parentData.variants || [];
+      for (const variant of variants) {
+        const variantId = variant.id;
+        const variantSku = variant.sku;
+        
+        // 检查 SKU 是否已被其他产品（父产品或变体）占用
+        const { data: existingSku, error: skuCheckErr } = await supabase
+          .from('products')
+          .select('productId')
+          .eq('site_id', DEFAULT_SITE_ID)
+          .eq('locale', locale)
+          .eq('sku', variantSku)
+          .maybeSingle();
+
+        if (skuCheckErr) {
+          console.error(`检查变体 SKU 失败: ${variantSku}`, skuCheckErr);
+          continue;
+        }
+        if (existingSku && existingSku.productId !== variantId) {
+          console.error(`变体 SKU 冲突: ${variantSku} (已存在产品 ${existingSku.productId})，跳过保存`);
+          continue;
+        }
+
+        // 继承父产品的必要字段
+        const variantRecord = {
+          productId: variantId,
+          site_id: DEFAULT_SITE_ID,
+          locale,
+          sku: variantSku,
+          product_name: variant.product_name,
+          parent_product_id: parentId,
+          brand: parentData.brand,
+          currency: parentData.currency,
+          availability: parentData.availability,
+          min_order_quantity: parentData.min_order_quantity,
+          price_tiers: JSON.stringify(parentData.price_tiers),
+          main_image_url: variant.main_image_url || '',
+          slug: variant.slug,
+          status: 'published',
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+          productLineId: parentData.productLineId || '',
+          categoryId: parentData.categoryId,
+          seriesId: parentData.seriesId,
+          templateId: parentData.templateId,
+        };
+
+        // 检查变体是否已存在（基于 productId）
+        const { data: existingVariant, error: findErr } = await supabase
+          .from('products')
+          .select('productId')
+          .eq('productId', variantId)
+          .maybeSingle();
+
+        if (findErr) {
+          console.error(`查询变体是否存在失败: ${variantId}`, findErr);
+          continue;
+        }
+
+        if (existingVariant) {
+          // 更新现有变体
+          const { error: updateErr } = await supabase
+            .from('products')
+            .update(variantRecord)
+            .eq('productId', variantId);
+          if (updateErr) {
+            console.error(`更新变体 ${variantId} 到 products 表失败:`, updateErr);
+            continue;
+          }
+        } else {
+          // 插入新变体
+          const { error: insertErr } = await supabase
+            .from('products')
+            .insert(variantRecord);
+          if (insertErr) {
+            console.error(`插入变体 ${variantId} 到 products 表失败:`, insertErr);
+            continue;
+          }
+        }
+
+        // 写入索引表
+        await upsertProductIndex({
+          productId: variantId,
+          locale,
+          productLineId: parentData.productLineId || '',
+          categoryId: parentData.categoryId,
+          seriesId: parentData.seriesId,
+          parent_product_id: parentId,
+          sku: variantSku,
+          product_name: variant.product_name,
+          brand: parentData.brand,
+          price_tiers: parentData.price_tiers,
+          currency: parentData.currency,
+          availability: parentData.availability,
+          min_order_quantity: parentData.min_order_quantity,
+          main_image_url: variant.main_image_url || '',
+          attributes: variant.attributes || {},
+          slug: variant.slug,
+          status: 'published',
+          updatedAt: new Date().toISOString(),
+          createdAt: new Date().toISOString(),
+          templateId: parentData.templateId,
+        });
+      }
+    }
+
     console.log(`保存完成，耗时 ${Date.now() - saveStart}ms`);
 
     const successCount = results.filter(r => r.success).length;

@@ -7,13 +7,14 @@ import { X } from 'lucide-react';
 import ImageUpload from '@/components/ImageUpload';
 import ResourceAssociation from '@/components/admin/products/ResourceAssociation';
 import SeoFields from '@/components/common/SeoFields';
+import Toast from '@/components/Toast';
 
 const RichTextEditor = dynamic(() => import('@/components/RichTextEditor'), { ssr: false });
 
 interface Category {
   id: string;
   title: string;
-  template: string;      // 分类的模板ID
+  template: string;
 }
 
 export default function BlogEdit() {
@@ -26,6 +27,8 @@ export default function BlogEdit() {
   const [saving, setSaving] = useState(false);
   const [categories, setCategories] = useState<Category[]>([]);
   const [categoryTemplateMap, setCategoryTemplateMap] = useState<Map<string, string>>(new Map());
+  const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
+  const [isExisting, setIsExisting] = useState(false);
 
   const [formData, setFormData] = useState({
     id: '',
@@ -45,7 +48,7 @@ export default function BlogEdit() {
 
   const [tagInput, setTagInput] = useState('');
 
-  // 加载分类列表并建立模板映射
+  // 加载分类列表
   useEffect(() => {
     fetch(`/api/admin/blog/categories?locale=${locale}`)
       .then(res => res.json())
@@ -60,31 +63,92 @@ export default function BlogEdit() {
       .catch(console.error);
   }, [locale]);
 
-  // 加载文章数据（编辑模式）
+  // 加载文章数据（编辑或新增其他语言版本）
   useEffect(() => {
     if (id) {
       fetch(`/api/admin/blog?locale=${locale}&id=${id}`)
-        .then(res => res.json())
+        .then(res => {
+          if (!res.ok) throw new Error('加载失败');
+          return res.json();
+        })
         .then(data => {
+          if (data && data.id) {
+            // 存在数据 -> 编辑模式
+            setIsExisting(true);
+            setFormData({
+              id: data.id,
+              slug: data.slug || '',
+              title: data.title || '',
+              excerpt: data.excerpt || '',
+              content: data.content || '',
+              visibility: data.visibility || 'visible',
+              featured_image: data.featured_image || '',
+              author: data.author || '',
+              category_id: data.category_id || '',
+              tags: data.tags ? JSON.parse(data.tags) : [],
+              seo_keywords: data.seo_keywords || '',
+              seo_title: data.seo_title || '',
+              seo_description: data.seo_description || '',
+            });
+          } else {
+            // 数据不存在（data 为 null）
+            setIsExisting(false);
+            setFormData({
+              id: id,
+              slug: '',
+              title: '',
+              excerpt: '',
+              content: '',
+              visibility: 'visible',
+              featured_image: '',
+              author: '',
+              category_id: '',
+              tags: [],
+              seo_keywords: '',
+              seo_title: '',
+              seo_description: '',
+            });
+          }
+        })
+        .catch(err => {
+          console.error(err);
+          setToast({ message: '加载失败', type: 'error' });
+          setIsExisting(false);
           setFormData({
-            id: data.id,
-            slug: data.slug,
-            title: data.title,
-            excerpt: data.excerpt || '',
-            content: data.content || '',
-            visibility: data.visibility || 'visible',
-            featured_image: data.featured_image || '',
-            author: data.author || '',
-            category_id: data.category_id || '',
-            tags: data.tags ? JSON.parse(data.tags) : [],
-            seo_keywords: data.seo_keywords || '',
-            seo_title: data.seo_title || '',
-            seo_description: data.seo_description || '',
+            id: id || '',
+            slug: '',
+            title: '',
+            excerpt: '',
+            content: '',
+            visibility: 'visible',
+            featured_image: '',
+            author: '',
+            category_id: '',
+            tags: [],
+            seo_keywords: '',
+            seo_title: '',
+            seo_description: '',
           });
         })
-        .catch(console.error)
         .finally(() => setLoading(false));
     } else {
+      // 完全新建（无 id）
+      setIsExisting(false);
+      setFormData({
+        id: '',
+        slug: '',
+        title: '',
+        excerpt: '',
+        content: '',
+        visibility: 'visible',
+        featured_image: '',
+        author: '',
+        category_id: '',
+        tags: [],
+        seo_keywords: '',
+        seo_title: '',
+        seo_description: '',
+      });
       setLoading(false);
     }
   }, [id, locale]);
@@ -115,48 +179,58 @@ export default function BlogEdit() {
       return;
     }
 
-    if (!formData.title || !formData.slug) {
-      alert('请填写标题和 URL 名称');
+    // 必填验证
+    if (!formData.title.trim()) {
+      setToast({ message: '请填写文章标题', type: 'error' });
+      return;
+    }
+    if (!formData.slug.trim()) {
+      setToast({ message: '请填写 URL 名称 (slug)', type: 'error' });
+      return;
+    }
+    if (!formData.category_id) {
+      setToast({ message: '请选择分类', type: 'error' });
       return;
     }
 
-    // 获取分类的模板ID（如果没有分类，则使用 'default'）
     const templateValue = formData.category_id && categoryTemplateMap.has(formData.category_id)
       ? categoryTemplateMap.get(formData.category_id)
       : 'default';
 
     setSaving(true);
     try {
+      const payload = {
+        locale,
+        id: formData.id || undefined,
+        slug: formData.slug,
+        title: formData.title,
+        excerpt: formData.excerpt,
+        content: formData.content,
+        visibility: formData.visibility,
+        featured_image: formData.featured_image,
+        author: formData.author,
+        category_id: formData.category_id,
+        tags: formData.tags,
+        template: templateValue,
+        seo_keywords: formData.seo_keywords,
+        seo_title: formData.seo_title,
+        seo_description: formData.seo_description,
+      };
+
       const res = await fetch('/api/admin/blog', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          locale,
-          id: formData.id || undefined,
-          slug: formData.slug,
-          title: formData.title,
-          excerpt: formData.excerpt,
-          content: formData.content,
-          visibility: formData.visibility,
-          featured_image: formData.featured_image,
-          author: formData.author,
-          category_id: formData.category_id,
-          tags: formData.tags,
-          template: templateValue,
-          seo_keywords: formData.seo_keywords,
-          seo_title: formData.seo_title,
-          seo_description: formData.seo_description,
-        }),
+        body: JSON.stringify(payload),
       });
       const data = await res.json();
       if (res.ok) {
-        alert(id ? '更新成功' : '创建成功');
+        setToast({ message: isExisting ? '更新成功' : '创建成功', type: 'success' });
         router.push('/admin/blog');
       } else {
-        alert(data.error || '保存失败');
+        setToast({ message: data.error || '保存失败', type: 'error' });
       }
-    } catch (err) {
-      alert('网络错误');
+    } catch {
+      setToast({ message: '网络错误', type: 'error' });
     } finally {
       setSaving(false);
     }
@@ -166,13 +240,16 @@ export default function BlogEdit() {
 
   return (
     <div className="p-6 max-w-7xl mx-auto pb-24">
-      <h1 className="text-2xl font-bold mb-6">{id ? '编辑文章' : '新建文章'}</h1>
+      {toast && <Toast message={toast.message} type={toast.type} onClose={() => setToast(null)} />}
+
+      <h1 className="text-2xl font-bold mb-6">
+        {isExisting ? '编辑文章' : '新建文章'}
+      </h1>
 
       <form onSubmit={(e) => { e.preventDefault(); handleSave(); }}>
         <div className="grid grid-cols-1 lg:grid-cols-[65%_30%] gap-6">
           {/* 左侧列 */}
           <div className="space-y-6">
-            {/* 标题与内容 */}
             <div className="bg-white rounded-lg shadow p-6">
               <h2 className="text-lg font-semibold mb-4">标题与内容</h2>
               <div className="space-y-4">
@@ -191,7 +268,6 @@ export default function BlogEdit() {
               </div>
             </div>
 
-            {/* 相关商品 */}
             <div className="bg-white rounded-lg shadow p-6">
               <h2 className="text-lg font-semibold mb-4">相关商品</h2>
               {formData.id ? (
@@ -207,7 +283,6 @@ export default function BlogEdit() {
               )}
             </div>
 
-            {/* 摘要 */}
             <div className="bg-white rounded-lg shadow p-6">
               <h2 className="text-lg font-semibold mb-4">摘要</h2>
               <textarea
@@ -219,7 +294,6 @@ export default function BlogEdit() {
               />
             </div>
 
-            {/* SEO */}
             <div className="bg-white rounded-lg shadow p-6">
               <h2 className="text-lg font-semibold mb-4">搜索引擎优化</h2>
               <SeoFields
@@ -245,7 +319,6 @@ export default function BlogEdit() {
 
           {/* 右侧列 */}
           <div className="space-y-6">
-            {/* 可见性 */}
             <div className="bg-white rounded-lg shadow p-6">
               <h2 className="text-lg font-semibold mb-4">可见性</h2>
               <select
@@ -258,13 +331,11 @@ export default function BlogEdit() {
               </select>
             </div>
 
-            {/* 封面图片 */}
             <div className="bg-white rounded-lg shadow p-6">
               <h2 className="text-lg font-semibold mb-4">封面图片</h2>
               <ImageUpload
                 value={formData.featured_image}
                 onChange={(url) => {
-                  // 处理 url 可能是 string 或 string[] 的情况
                   const imageUrl = Array.isArray(url) ? url[0] : url;
                   setFormData({ ...formData, featured_image: imageUrl || '' });
                 }}
@@ -274,7 +345,6 @@ export default function BlogEdit() {
               />
             </div>
 
-            {/* 其他信息（作者、分类、标记） */}
             <div className="bg-white rounded-lg shadow p-6">
               <h2 className="text-lg font-semibold mb-4">其他信息</h2>
               <div className="space-y-4">
@@ -330,7 +400,7 @@ export default function BlogEdit() {
         </div>
       </form>
 
-      {/* 悬浮按钮条 - 固定底部 */}
+      {/* 悬浮按钮条 */}
       <div className="fixed bottom-0 left-0 right-0 bg-white border-t shadow-lg p-4 flex justify-end gap-4 z-50">
         <button
           type="button"

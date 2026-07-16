@@ -311,7 +311,7 @@ export function SlideListField({ field, value = [], onChange, readOnly }: any) {
       </div>
 
       <div className="flex items-center justify-between">
-        <label className="block text-sm font-medium text-foreground">{field.label || '幻灯片'}</label>
+        <label className="block text-sm font-medium text-foreground">{field?.label || '幻灯片'}</label>
         <button
           type="button"
           onClick={handleAdd}

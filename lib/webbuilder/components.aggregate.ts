@@ -27,7 +27,7 @@ import { config as SectionConfig } from './registry/Section.config';
 import { config as TableConfig } from './registry/Table.config';
 import { config as VideoConfig } from './registry/Video.config';
 import { config as VideoCategoryBlockConfig } from './registry/VideoCategoryBlock.config';
-import { config as WidthSliderConfig } from './registry/WidthSlider.config';
+
 
 // 🔥 直接导出组件配置对象，符合 Puck Config 的 components 字段格式
 export default {
@@ -52,8 +52,8 @@ export default {
   ProductLineBlock: ProductLineBlockConfig,
   Richtext: RichtextConfig,
   Section: SectionConfig,
-  Table: TableConfig,
+  // Table: TableConfig,
   Video: VideoConfig,
   VideoCategoryBlock: VideoCategoryBlockConfig,
-  WidthSlider: WidthSliderConfig,
+  
 };

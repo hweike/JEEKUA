@@ -32,26 +32,20 @@ export default function ProxyImage({
   useEffect(() => {
     if (!src) return;
 
-    // 1. 本地相对路径（以 /uploads/ 或 /api/upload 开头）直接使用
-    if (src.startsWith('/uploads/') || src.startsWith('/api/upload')) {
-      setProxyUrl(src);
-      return;
-    }
-
-    // 2. 本地开发地址直接使用
+    // 1. 本地开发地址（绝对路径且包含 localhost）直接使用
     if (src.includes('localhost') || src.includes('127.0.0.1')) {
       setProxyUrl(src);
       return;
     }
 
-    // 3. 云存储公开 URL（包含 /uploads/ 的绝对路径）直接使用
-    //    这包括 R2 默认域名或自定义 CDN 域名下的图片
-    if (src.includes('/uploads/')) {
+    // 2. 完整的云存储公开 URL（以 http 开头且包含 /uploads/ 的绝对路径）直接使用
+    if ((src.startsWith('http://') || src.startsWith('https://')) && src.includes('/uploads/')) {
       setProxyUrl(src);
       return;
     }
 
-    // 4. 其他外部图片，走代理（防止防盗链、跨域等问题）
+    // 3. 所有其他情况（包括相对路径、外部域名等）统一走代理
+    //    这样可以确保 uploads/ 开头的相对路径也能被代理正确处理
     setProxyUrl(`/api/proxy-image?url=${encodeURIComponent(src)}`);
   }, [src]);
 

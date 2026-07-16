@@ -1,104 +1,63 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { useLocale } from 'next-intl';
 import { ChevronLeft, ChevronRight } from 'lucide-react';
+import { getImageUrl } from '@/lib/files/url';
+import { DEFAULT_MULTICOLUMN } from '@/lib/webbuilder/defaults/Multicolumn';
+import { getAltSuffix } from '@/lib/webbuilder/alt-suffix-config';
+
+function getDisplayImageUrl(url: string, isEditMode: boolean): string {
+  if (!url) return '';
+  const fullUrl = getImageUrl(url);
+  if (isEditMode) {
+    return `/api/proxy-image?url=${encodeURIComponent(fullUrl)}`;
+  }
+  return fullUrl;
+}
 
 const IMAGE_WIDTH_MAP = {
   full: 'w-full',
   half: 'w-1/2',
   third: 'w-1/3',
-};
-
-const getImageClass = (shape: string) => {
-  switch (shape) {
-    case 'adapt':
-      return 'w-full object-contain';
-    case 'portrait':
-      return 'w-full aspect-[4/5] object-cover';
-    case 'square':
-      return 'w-full aspect-square object-cover';
-    case 'circle':
-      return 'w-full aspect-square rounded-full object-cover';
-    default:
-      return 'w-full object-cover';
-  }
-};
+} as const;
 
 export function Multicolumn(props: any) {
   const isEditMode = !!props.puck?.isEditing;
-  const pageLocale = useLocale();
 
-  const bannerGroup = props.bannerGroup || {};
-  const globalSettings = props.globalSettings || {};
-  const layoutGroup = props.layoutGroup || {};
-  const styleGroup = props.styleGroup || {};
-  const items = props.items || [];
+  // 从嵌套分组中合并默认值
+  const bannerGroup = { ...DEFAULT_MULTICOLUMN.bannerGroup, ...props.bannerGroup };
+  const globalGroup = { ...DEFAULT_MULTICOLUMN.globalGroup, ...props.globalGroup };
+  const imageGroup = { ...DEFAULT_MULTICOLUMN.imageGroup, ...props.imageGroup };
+  const layoutGroup = { ...DEFAULT_MULTICOLUMN.layoutGroup, ...props.layoutGroup };
+  const styleGroup = { ...DEFAULT_MULTICOLUMN.styleGroup, ...props.styleGroup };
+  const paddingGroup = { ...DEFAULT_MULTICOLUMN.paddingGroup, ...props.paddingGroup };
+  const spacingGroup = { ...DEFAULT_MULTICOLUMN.spacingGroup, ...props.spacingGroup };
+  const mergedItems = props.items ?? DEFAULT_MULTICOLUMN.items;
 
-  const bannerType = bannerGroup.bannerType || 'standard';
-  const backgroundColor = bannerGroup.backgroundColor || '#ffffff';
-  const paddingTop = bannerGroup.paddingTop ?? 10;
-  const paddingBottom = bannerGroup.paddingBottom ?? 10;
+  // ✅ 解构 buttonGroup，包含所有字段
+  const buttonGroup = { ...DEFAULT_MULTICOLUMN.buttonGroup, ...props.buttonGroup };
+  const {
+    buttonText,
+    buttonFontSize,
+    buttonColor,
+    buttonLink,
+    buttonPaddingX,
+    buttonPaddingY,
+    buttonBorderRadius,
+  } = buttonGroup;
 
-  const multicolumnTitle = globalSettings.multicolumnTitle ?? props.globalTitle;
-  const multicolumnTitleFontSize = globalSettings.multicolumnTitleFontSize ?? props.globalTitleFontSize ?? 40;
-  const multicolumnTitleColor = globalSettings.multicolumnTitleColor ?? props.globalTitleColor ?? '#000000';
-  const multicolumnImageWidth = globalSettings.multicolumnImageWidth ?? props.imageWidth ?? 'third';
-  const multicolumnImageShape = globalSettings.multicolumnImageShape ?? props.imageShape ?? 'square';
-  const multicolumnButtonText = globalSettings.multicolumnButtonText ?? props.buttonText;
-  const multicolumnButtonFontSize = globalSettings.multicolumnButtonFontSize ?? props.buttonFontSize ?? 16;
-  const multicolumnButtonColor = globalSettings.multicolumnButtonColor ?? props.buttonColor ?? '#000000';
-  const multicolumnButtonLink = globalSettings.multicolumnButtonLink ?? props.buttonLink ?? '';
+  const mobileScaleFactor = spacingGroup.mobileScaleFactor ?? 0.7;
 
-  const columnsDesktop = layoutGroup.columnsDesktop || 3;
-  const columnsAlign = layoutGroup.columnsAlign || 'center';
-  const columnsMobile = layoutGroup.columnsMobile || 1;
-  const mobileCarousel = layoutGroup.mobileCarousel || false;
+  // Alt 自动生成
+  const __runtime = props.__runtime || {};
+  const seoTitle = __runtime.seoTitle || '';
+  const locale = __runtime.locale || 'zh';
+  const suffix = getAltSuffix('Multicolumn', locale);
 
-  const columnBgColor = styleGroup.columnBgColor || '#f9fafb';
-  const columnTitleColor = styleGroup.columnTitleColor || '#000000';
-  const columnDescColor = styleGroup.columnDescColor || '#666666';
-
-  const [editLocale, setEditLocale] = useState<string>(() => {
-    if (typeof window !== 'undefined' && isEditMode) {
-      const stored = localStorage.getItem('webbuilder_edit_locale');
-      if (stored && (stored === 'zh' || stored === 'en')) return stored;
-    }
-    return pageLocale;
-  });
-
-  useEffect(() => {
-    if (!isEditMode) return;
-    const handler = (e: StorageEvent) => {
-      if (e.key === 'webbuilder_edit_locale' && e.newValue && (e.newValue === 'zh' || e.newValue === 'en')) {
-        setEditLocale(e.newValue);
-      }
-    };
-    window.addEventListener('storage', handler);
-    return () => window.removeEventListener('storage', handler);
-  }, [isEditMode]);
-
-  useEffect(() => {
-    if (!isEditMode) return;
-    const stored = localStorage.getItem('webbuilder_edit_locale');
-    if (!stored) setEditLocale(pageLocale);
-  }, [isEditMode, pageLocale]);
-
-  const displayLocale = isEditMode ? editLocale : pageLocale;
-
-  const getText = (field: any) => {
-    if (typeof field === 'string') return field;
-    if (!field || typeof field !== 'object') return '';
-    if (props.__runtime?.texts && field.textId && props.__runtime.texts[field.textId])
-      return props.__runtime.texts[field.textId];
-    return field[displayLocale] || field.en || field.zh || '';
-  };
-
-  const globalTitleText = getText(multicolumnTitle);
-  const buttonText = getText(multicolumnButtonText);
-
+  // 移动端轮播状态
   const [currentSlide, setCurrentSlide] = useState(0);
   const [isMobile, setIsMobile] = useState(false);
+
   useEffect(() => {
     const checkMobile = () => setIsMobile(window.innerWidth < 768);
     checkMobile();
@@ -106,52 +65,95 @@ export function Multicolumn(props: any) {
     return () => window.removeEventListener('resize', checkMobile);
   }, []);
 
-  const useCarousel = isMobile && mobileCarousel && items.length > columnsMobile;
+  const useCarousel = isMobile && layoutGroup.mobileCarousel && mergedItems.length > layoutGroup.columnsMobile;
 
   const nextSlide = () => {
-    setCurrentSlide((prev) => (prev + 1) % Math.ceil(items.length / columnsMobile));
+    const slidesCount = Math.ceil(mergedItems.length / layoutGroup.columnsMobile);
+    setCurrentSlide((prev) => (prev + 1) % slidesCount);
   };
   const prevSlide = () => {
-    setCurrentSlide((prev) => (prev - 1 + Math.ceil(items.length / columnsMobile)) % Math.ceil(items.length / columnsMobile));
+    const slidesCount = Math.ceil(mergedItems.length / layoutGroup.columnsMobile);
+    setCurrentSlide((prev) => (prev - 1 + slidesCount) % slidesCount);
   };
 
-  const outerClasses = `relative overflow-hidden ${
-    bannerType === 'fullwidth'
-      ? 'w-screen left-1/2 right-1/2 -ml-[50vw] mr-[50vw]'
-      : 'max-w-7xl mx-auto'
-  }`;
-  const outerMargin = bannerType === 'standard' ? { marginTop: '10px', marginBottom: '10px' } : {};
-
-  const outerStyle: React.CSSProperties = { backgroundColor, ...outerMargin };
-  const contentStyle: React.CSSProperties = { paddingTop: `${paddingTop}px`, paddingBottom: `${paddingBottom}px` };
-
-  const gridColsDesktop = `grid-cols-${columnsDesktop}`;
-  const gridColsMobile = `grid-cols-${columnsMobile}`;
-
-  const buttonStyle: React.CSSProperties = {
-    fontSize: `${multicolumnButtonFontSize}px`,
-    backgroundColor: multicolumnButtonColor,
-    color: '#ffffff',
-    padding: '0.5rem 1rem',
-    borderRadius: '0.375rem',
-    display: 'inline-block',
-    textDecoration: 'none',
-    transition: 'opacity 0.2s',
+  // 通栏统一实现
+  const isFullwidth = bannerGroup.bannerType === 'fullwidth';
+  const outerStyle: React.CSSProperties = {
+    backgroundColor: bannerGroup.backgroundColor,
+    ...(isFullwidth
+      ? {
+          position: 'relative',
+          left: '50%',
+          transform: 'translateX(-50%)',
+          width: '100vw',
+          maxWidth: '100vw',
+        }
+      : {
+          maxWidth: '80rem',
+          marginLeft: 'auto',
+          marginRight: 'auto',
+        }),
+    ...(bannerGroup.bannerType === 'standard' ? { marginTop: '10px', marginBottom: '10px' } : {}),
   };
+  const outerClasses = 'relative overflow-hidden';
+
+  const contentStyle: React.CSSProperties = {
+    paddingTop: `${paddingGroup.paddingTop}px`,
+    paddingBottom: `${paddingGroup.paddingBottom}px`,
+    maxWidth: '80rem',
+    margin: '0 auto',
+    width: '100%',
+    paddingLeft: 'clamp(1rem, 2vw, 2rem)',
+    paddingRight: 'clamp(1rem, 2vw, 2rem)',
+  };
+
+  // 响应式字体
+  const globalTitleClamp = `clamp(${globalGroup.globalTitleFontSize * mobileScaleFactor}px, 3vw, ${globalGroup.globalTitleFontSize}px)`;
+  const buttonFontClamp = `clamp(${buttonFontSize * mobileScaleFactor}px, 1.2vw, ${buttonFontSize}px)`;
+
+  const imageWidthClass = IMAGE_WIDTH_MAP[imageGroup.imageWidth as keyof typeof IMAGE_WIDTH_MAP] || 'w-full';
+
+  const getImageClass = (shape: string) => {
+    switch (shape) {
+      case 'adapt':
+        return 'w-full h-auto object-contain rounded-lg';
+      case 'portrait':
+        return 'w-full h-auto aspect-[4/5] object-cover rounded-lg';
+      case 'square':
+        return 'w-full h-auto aspect-square object-cover rounded-lg';
+      case 'circle':
+        return 'w-full h-auto aspect-square rounded-full object-cover';
+      default:
+        return 'w-full h-auto object-contain rounded-lg';
+    }
+  };
+
+  const imageClassName = getImageClass(imageGroup.imageShape);
 
   const columnStyle: React.CSSProperties = {
-    backgroundColor: columnBgColor,
+    backgroundColor: styleGroup.columnBgColor,
     borderRadius: '0.5rem',
     padding: '1.5rem',
     height: '100%',
     display: 'flex',
     flexDirection: 'column',
+    textAlign: layoutGroup.columnsAlign === 'center' ? 'center' : 'left',
+    alignItems: layoutGroup.columnsAlign === 'center' ? 'center' : 'flex-start',
   };
 
-  const imageWidthClass = IMAGE_WIDTH_MAP[multicolumnImageWidth] || 'w-full';
-  const imageClass = getImageClass(multicolumnImageShape);
+  // ✅ 使用解构出的按钮样式字段
+  const buttonStyle: React.CSSProperties = {
+    fontSize: buttonFontClamp,
+    backgroundColor: buttonColor,
+    color: '#ffffff',
+    padding: `${buttonPaddingY}px ${buttonPaddingX}px`,
+    borderRadius: `${buttonBorderRadius}px`,
+    display: 'inline-block',
+    textDecoration: 'none',
+    transition: 'opacity 0.2s',
+  };
 
-  if (isEditMode && items.length === 0) {
+  if (isEditMode && mergedItems.length === 0 && !globalGroup.globalTitle) {
     return (
       <div ref={props.puck?.dragRef} className={outerClasses} style={outerStyle}>
         <div className="border-2 border-dashed border-gray-300 p-8 text-center text-gray-400">
@@ -161,57 +163,64 @@ export function Multicolumn(props: any) {
     );
   }
 
+  const gridStyle: React.CSSProperties = {
+    display: 'grid',
+    gridTemplateColumns: `repeat(${layoutGroup.columnsDesktop}, minmax(0, 1fr))`,
+    gap: '1.5rem',
+    justifyContent: layoutGroup.columnsAlign === 'center' ? 'center' : 'flex-start',
+  };
+
+  const mobileGridStyle: React.CSSProperties = {
+    display: 'grid',
+    gridTemplateColumns: `repeat(${layoutGroup.columnsMobile}, minmax(0, 1fr))`,
+    gap: '1.5rem',
+    justifyContent: layoutGroup.columnsAlign === 'center' ? 'center' : 'flex-start',
+  };
+
   const renderColumns = () => {
-    const columnElements = items.map((item: any, idx: number) => {
-      const titleText = getText(item.title);
-      const descText = getText(item.description);
-      const buttonLabelText = getText(item.buttonLabel);
-      const imageUrl = item.imageUrl;
+    const columnElements = mergedItems.map((item: any, idx: number) => {
+      const alt = seoTitle ? `${seoTitle} - ${suffix} ${idx + 1}` : `${suffix} ${idx + 1}`;
+      const displayImageUrl = getDisplayImageUrl(item.imageUrl, isEditMode);
 
       return (
-        <div key={item.id} className="flex-shrink-0 w-full md:w-auto">
+        <div key={idx} style={{ display: 'flex', justifyContent: 'center', width: '100%' }}>
           <div style={columnStyle}>
-            {imageUrl && (
-              <div className={`${imageWidthClass} ml-0 mr-auto mb-4`}>
-                <img src={imageUrl} alt={titleText || 'image'} className={imageClass} />
+            {item.imageUrl && (
+              <div className={`${imageWidthClass} mb-4 ${layoutGroup.columnsAlign === 'center' ? 'mx-auto' : 'ml-0 mr-auto'}`}>
+                {displayImageUrl ? (
+                  <img
+                    src={displayImageUrl}
+                    alt={alt}
+                    className={imageClassName}
+                    loading="lazy"
+                  />
+                ) : (
+                  <div className="w-full h-48 flex items-center justify-center bg-gray-100 text-gray-400 rounded-lg">
+                    图片加载失败
+                  </div>
+                )}
               </div>
             )}
-            {titleText && (
-              <h3 className="text-xl font-semibold mb-2" style={{ color: columnTitleColor }}>
-                {titleText}
+            {item.title && (
+              <h3 className="text-xl font-semibold mb-2 w-full" style={{ color: styleGroup.columnTitleColor }}>
+                {item.title}
               </h3>
             )}
-            {descText && (
-              <p className="text-sm mb-4 flex-grow" style={{ color: columnDescColor }}>
-                {descText}
+            {item.description && (
+              <p className="text-sm mb-4 flex-grow w-full" style={{ color: styleGroup.columnDescColor }}>
+                {item.description}
               </p>
             )}
-            {/* 修改：去掉下划线，添加箭头 SVG */}
-            {buttonLabelText && item.buttonLink && (
+            {item.buttonLabel && item.buttonLink && (
               <a
                 href={item.buttonLink}
                 className="inline-flex items-center gap-1 mt-2 hover:opacity-70 transition"
-                style={{ color: columnDescColor, textDecoration: 'none' }}
+                style={{ color: styleGroup.columnDescColor, textDecoration: 'none' }}
                 target="_blank"
                 rel="noopener noreferrer"
               >
-                {buttonLabelText}
-                <span className="icon-wrap">
-                  <svg
-                    xmlns="http://www.w3.org/2000/svg"
-                    fill="none"
-                    className="icon icon-arrow"
-                    viewBox="0 0 14 10"
-                    style={{ width: '12px', height: '12px' }}
-                  >
-                    <path
-                      fill="currentColor"
-                      fillRule="evenodd"
-                      d="M8.537.808a.5.5 0 0 1 .817-.162l4 4a.5.5 0 0 1 0 .708l-4 4a.5.5 0 1 1-.708-.708L11.793 5.5H1a.5.5 0 0 1 0-1h10.793L8.646 1.354a.5.5 0 0 1-.109-.546"
-                      clipRule="evenodd"
-                    />
-                  </svg>
-                </span>
+                {item.buttonLabel}
+                <ChevronRight size={14} />
               </a>
             )}
           </div>
@@ -220,13 +229,15 @@ export function Multicolumn(props: any) {
     });
 
     if (useCarousel) {
-      const slidesCount = Math.ceil(items.length / columnsMobile);
-      const startIdx = currentSlide * columnsMobile;
-      const visibleItems = items.slice(startIdx, startIdx + columnsMobile);
+      const slidesCount = Math.ceil(mergedItems.length / layoutGroup.columnsMobile);
+      const startIdx = currentSlide * layoutGroup.columnsMobile;
+      const visibleItems = mergedItems.slice(startIdx, startIdx + layoutGroup.columnsMobile);
+      const visibleIndices = visibleItems.map((_: any, i: number) => startIdx + i);
+
       return (
         <div className="relative">
-          <div className="grid grid-cols-1 md:hidden gap-6">
-            {visibleItems.map((_, idx) => columnElements[startIdx + idx])}
+          <div style={mobileGridStyle} className="md:hidden">
+            {visibleIndices.map((idx: number) => columnElements[idx])}
           </div>
           {slidesCount > 1 && (
             <div className="flex justify-center items-center gap-4 mt-6 md:hidden">
@@ -239,38 +250,53 @@ export function Multicolumn(props: any) {
               </button>
             </div>
           )}
-          <div className={`hidden md:grid ${gridColsMobile} lg:${gridColsDesktop} gap-6 ${columnsAlign === 'center' ? 'justify-items-center' : ''}`}>
+          <div style={gridStyle} className="hidden md:grid">
             {columnElements}
           </div>
         </div>
       );
     }
 
-    return (
-      <div className={`grid grid-cols-1 ${gridColsMobile} lg:${gridColsDesktop} gap-6 ${columnsAlign === 'center' ? 'justify-items-center' : ''}`}>
-        {columnElements}
-      </div>
-    );
+    if (isMobile) {
+      return <div style={mobileGridStyle}>{columnElements}</div>;
+    }
+
+    return <div style={gridStyle}>{columnElements}</div>;
   };
 
   return (
     <div ref={props.puck?.dragRef} className={outerClasses} style={outerStyle}>
       <div className="relative w-full">
         <div style={contentStyle}>
-          <div className="max-w-7xl mx-auto w-full px-4 sm:px-6 lg:px-8">
-            {globalTitleText && (
+          <div className="w-full">
+            {globalGroup.globalTitle && (
               <div className="text-center mb-12">
-                <h2 className="font-bold" style={{ fontSize: `${multicolumnTitleFontSize}px`, color: multicolumnTitleColor }}>
-                  {globalTitleText}
+                <h2
+                  className="font-bold"
+                  style={{
+                    fontSize: globalTitleClamp,
+                    color: globalGroup.globalTitleColor,
+                  }}
+                >
+                  {globalGroup.globalTitle}
                 </h2>
               </div>
             )}
             {renderColumns()}
-            {buttonText && multicolumnButtonLink && (
+            {buttonText && (
               <div className="text-center mt-12">
-                <a href={multicolumnButtonLink} style={buttonStyle} target="_blank" rel="noopener noreferrer">
-                  {buttonText}
-                </a>
+                {buttonLink ? (
+                  <a
+                    href={buttonLink}
+                    style={buttonStyle}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                  >
+                    {buttonText}
+                  </a>
+                ) : (
+                  <span style={buttonStyle}>{buttonText}</span>
+                )}
               </div>
             )}
           </div>

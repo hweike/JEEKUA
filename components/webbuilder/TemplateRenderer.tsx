@@ -3,14 +3,15 @@
 import React from 'react';
 import { Heading } from '@/components/webbuilder/blocks/basic/Heading';
 import { Paragraph } from '@/components/webbuilder/blocks/basic/Paragraph';
-import { Table } from '@/components/webbuilder/blocks/Table';
+// import { Table } from '@/components/webbuilder/blocks/Table';
 import { BlankBlock } from '@/components/webbuilder/blocks/containers/BlankBlock';
 import { Section } from '@/components/webbuilder/blocks/containers/Section';
 import { ProductLineBlock } from '@/components/webbuilder/blocks/product-line/ProductLineBlock';
 import { ProductCollectionsBlock } from '@/components/webbuilder/blocks/product-collections/ProductCollectionsBlock';
-import { ProductDetailsBlock } from '@/components/webbuilder/blocks/product-details/ProductDetailsBlock'; // ✅ 新增
+import { ProductDetailsBlock } from '@/components/webbuilder/blocks/product-details/ProductDetailsBlock';
 import { FullwidthSlider } from '@/components/webbuilder/blocks/media/FullwidthSlider';
-import { WidthSlider } from '@/components/webbuilder/blocks/media/WidthSlider';
+// 移除 WidthSlider 导入
+// import { WidthSlider } from '@/components/webbuilder/blocks/media/WidthSlider';
 import { Button } from '@/components/webbuilder/blocks/basic/Button';
 import { List } from '@/components/webbuilder/blocks/basic/List';
 import { DividingLine } from '@/components/webbuilder/blocks/basic/DividingLine';
@@ -27,14 +28,14 @@ import { Accordion } from '@/components/webbuilder/blocks/Advanced/Accordion';
 const componentMap: Record<string, React.ComponentType<any>> = {
   Heading,
   Paragraph,
-  Table,
+  // Table,
   BlankBlock,
   Section,
   ProductLineBlock,
   ProductCollectionsBlock,
-  ProductDetailsBlock, 
+  ProductDetailsBlock,
   FullwidthSlider,
-  WidthSlider, 
+  // WidthSlider, // 移除
   Button,
   List,
   DividingLine,
@@ -45,14 +46,20 @@ const componentMap: Record<string, React.ComponentType<any>> = {
   Multicolumn,
   Multirow,
   Collapsible,
-  Accordion
+  Accordion,
 };
 
 interface TemplateRendererProps {
   data: any;
+  /** 运行时注入数据，如当前语言、SEO标题、多语言文本等 */
+  runtime?: {
+    seoTitle?: string;
+    locale?: string;
+    texts?: Record<string, string>;
+  };
 }
 
-export function TemplateRenderer({ data }: TemplateRendererProps) {
+export function TemplateRenderer({ data, runtime }: TemplateRendererProps) {
   const renderContent = (content: any[], depth = 0): React.ReactNode => {
     if (!content || !Array.isArray(content)) return null;
     return content.map((item, index) => {
@@ -76,6 +83,12 @@ export function TemplateRenderer({ data }: TemplateRendererProps) {
         }
       }
 
+      // 为所有组件注入 __runtime
+      const componentProps = {
+        ...props,
+        __runtime: runtime,
+      };
+
       if (type === 'Section') {
         const { layoutGroup, sizeGroup, spacingGroup, backgroundGroup, borderGroup, ...rest } = props;
         const sectionElement = (
@@ -92,6 +105,7 @@ export function TemplateRenderer({ data }: TemplateRendererProps) {
             contentWidth={layoutGroup?.contentWidth}
             customContentWidth={layoutGroup?.customContentWidth}
             {...rest}
+            __runtime={runtime}
           >
             {children}
           </Section>
@@ -110,14 +124,14 @@ export function TemplateRenderer({ data }: TemplateRendererProps) {
 
       if (type === 'ProductLineBlock') {
         return (
-          <ProductLineBlock key={props.id || index} {...props}>
+          <ProductLineBlock key={props.id || index} {...componentProps}>
             {children}
           </ProductLineBlock>
         );
       }
 
       return (
-        <Component key={props.id || index} {...props}>
+        <Component key={props.id || index} {...componentProps}>
           {children}
         </Component>
       );

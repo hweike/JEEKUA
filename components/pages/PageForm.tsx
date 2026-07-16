@@ -1,11 +1,10 @@
-// components/pages/PageForm.tsx
 'use client';
 
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import dynamic from 'next/dynamic';
 import { Eye, EyeOff, Settings, FileText, Globe } from 'lucide-react';
-import { createPageAction, updatePageAction } from '@/lib/pages/actions';
+import { updatePageAction } from '@/lib/pages/actions';
 import { generateClientSlug } from '@/lib/utils/clientSlug';
 import type { Visibility } from '@/types/page';
 import SeoFields from '@/components/common/SeoFields';
@@ -18,9 +17,10 @@ interface PageFormProps {
   pageId?: string;
   locale: string;
   isEditing?: boolean;
+  initialId?: string; // 新增：用于新建时指定 ID
 }
 
-export default function PageForm({ initialData, pageId, locale, isEditing = false }: PageFormProps) {
+export default function PageForm({ initialData, pageId, locale, isEditing = false, initialId = '' }: PageFormProps) {
   const router = useRouter();
   const [title, setTitle] = useState(initialData?.title || '');
   const [content, setContent] = useState(initialData?.content || '');
@@ -73,21 +73,44 @@ export default function PageForm({ initialData, pageId, locale, isEditing = fals
       seo_description: seoDescription,
     };
 
-    let result;
-    if (isEditing && pageId) {
-      result = await updatePageAction(locale, pageId, formData);
-    } else {
-      result = await createPageAction(locale, formData);
-    }
+    try {
+      let result;
+      if (isEditing && pageId) {
+        // 编辑：调用 updatePageAction（保持原有逻辑）
+        result = await updatePageAction(locale, pageId, formData);
+      } else {
+        // 新建：优先使用 initialId（如果提供），否则调用 createPageAction（但 actions 不支持 id，我们直接 fetch）
+        if (initialId) {
+          // 使用 fetch API 传递 id
+          const res = await fetch('/api/admin/pages', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ locale, id: initialId, ...formData }),
+          });
+          const data = await res.json();
+          if (res.ok) {
+            result = { success: true };
+          } else {
+            result = { success: false, error: data.error || '创建失败' };
+          }
+        } else {
+          // 无指定 id，使用原有的 createPageAction
+          const { createPageAction } = await import('@/lib/pages/actions');
+          result = await createPageAction(locale, formData);
+        }
+      }
 
-    if (result.success) {
-      // 保存成功，将提示信息存入 sessionStorage，然后跳转
-      sessionStorage.setItem('pageSaveToast', JSON.stringify({ message: '保存成功', type: 'success' }));
-      router.push(`/admin/pages?locale=${locale}`);
-    } else {
-      alert(result.error || '保存失败，请重试');
+      if (result.success) {
+        sessionStorage.setItem('pageSaveToast', JSON.stringify({ message: '保存成功', type: 'success' }));
+        router.push(`/admin/pages?locale=${locale}`);
+      } else {
+        alert(result.error || '保存失败，请重试');
+      }
+    } catch (error) {
+      alert('保存失败，请重试');
+    } finally {
+      setIsSubmitting(false);
     }
-    setIsSubmitting(false);
   };
 
   return (

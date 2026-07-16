@@ -158,7 +158,7 @@ export default function ClassicNavbar({ headerConfig, menuTree, siteSettings }: 
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         <div className="flex items-center justify-between py-2">
           <div className="flex-shrink-0">
-            <Logo logoConfig={logoConfig} siteName={siteSettings?.siteName || 'FEISMAN POWER'} />
+            <Logo logoConfig={logoConfig} siteName={siteSettings?.siteName || 'My Web'} />
           </div>
           <div className="flex-1 flex justify-center px-4">
             {searchConfig.enabled && (

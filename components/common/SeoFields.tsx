@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { toPinyin } from '@/lib/utils/pinyin';
-import {getFieldHint,getFieldPlaceholder,HINT_PATHS,InfoTooltip} from '@/config/fieldHints';
+import { getFieldHint, getFieldPlaceholder, HINT_PATHS, InfoTooltip } from '@/config/fieldHints';
 
 export interface SeoData {
   slug: string;
@@ -47,45 +47,49 @@ export interface SeoFieldsProps {
 
 /**
  * 智能生成 Slug：
- * - 英文单词保留原样（不拆分字母）
+ * - 连续的数字/字母视为一个整体（不拆分）
  * - 中文转换为拼音（每个字的拼音用连字符连接）
- * - 英文单词与中文拼音之间用连字符连接
- * - 多个英文单词之间用连字符连接
- * - 数字保留
+ * - 英文单词与数字字母组合保留原样（小写）
+ * - 不同整体之间用连字符分隔
  */
 function generateSlugFromText(text: string): string {
   if (!text) return '';
 
   const parts: string[] = [];
-  let currentWord = '';
-  
+  let currentToken = ''; // 累积连续的字母/数字
+
   for (let i = 0; i < text.length; i++) {
     const ch = text[i];
-    if (/[a-zA-Z]/.test(ch)) {
-      currentWord += ch;
-    } else {
-      if (currentWord) {
-        parts.push(currentWord.toLowerCase());
-        currentWord = '';
-      }
-      if (/[\u4e00-\u9fa5]/.test(ch)) {
-        const pinyin = toPinyin(ch);
-        parts.push(pinyin);
-      } 
-      else if (/[0-9]/.test(ch)) {
-        parts.push(ch);
-      }
-      else if (ch === ' ' || ch === '_' || ch === '-') {
-        continue;
-      }
+
+    // 字母或数字：累积到当前token
+    if (/[a-zA-Z0-9]/.test(ch)) {
+      currentToken += ch;
+      continue;
     }
-  }
-  if (currentWord) {
-    parts.push(currentWord.toLowerCase());
+
+    // 遇到非字母数字，先结束当前token
+    if (currentToken) {
+      parts.push(currentToken.toLowerCase());
+      currentToken = '';
+    }
+
+    // 处理中文：转换为拼音（整体）
+    if (/[\u4e00-\u9fa5]/.test(ch)) {
+      const pinyin = toPinyin(ch);
+      if (pinyin) parts.push(pinyin);
+    }
+    // 其他字符（空格、标点等）直接忽略
   }
 
+  // 处理末尾可能剩余的token
+  if (currentToken) {
+    parts.push(currentToken.toLowerCase());
+  }
+
+  // 用连字符连接并清理多余连字符
   let slug = parts.join('-').replace(/-+/g, '-').replace(/^-|-$/g, '');
-  
+
+  // 回退逻辑：如果没有任何有效字符，则按原始方式清理
   if (!slug) {
     slug = text
       .toLowerCase()
@@ -94,7 +98,7 @@ function generateSlugFromText(text: string): string {
       .replace(/-+/g, '-')
       .replace(/^-|-$/g, '');
   }
-  
+
   return slug;
 }
 
@@ -126,10 +130,10 @@ export default function SeoFields({
   const [seoKeywords, setSeoKeywords] = useState(externalKeywords);
   const [seoTitle, setSeoTitle] = useState(externalTitle);
   const [seoDescription, setSeoDescription] = useState(externalDescription);
-  
+
   // 标记 slug 是否被用户手动编辑过
   const [isSlugManual, setIsSlugManual] = useState(!!externalSlug); // 如果有初始值，认为是手动编辑过的
-  
+
   // 用于避免因外部 props 变化覆盖内部手动标记的标志
   const isSlugManualRef = useRef(isSlugManual);
   useEffect(() => {

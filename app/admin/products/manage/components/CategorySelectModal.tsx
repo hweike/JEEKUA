@@ -31,7 +31,7 @@ interface Category {
   series: Series[];
 }
 
-export function CategorySelectModal({ locale, onSelect, onClose, confirmText = '下一步' }: CategorySelectModalProps) {
+export default function CategorySelectModal({ locale, onSelect, onClose, confirmText = '下一步' }: CategorySelectModalProps) {
   const [productLines, setProductLines] = useState<ProductLine[]>([]);
   const [categories, setCategories] = useState<Category[]>([]);
   const [selectedProductLineId, setSelectedProductLineId] = useState('');

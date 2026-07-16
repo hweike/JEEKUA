@@ -1,32 +1,61 @@
 // lib/menus/storage.ts
 import { getPrivateStorage } from '@/lib/storage/factory';
 
-// 私有桶中的基础路径（对应原 data/menus）
-const STORAGE_PREFIX = 'data/menus';
+const STORAGE_PREFIX = 'menus';
+
+// ---------- 缓存 ----------
+const cache = new Map<string, { data: any; timestamp: number }>();
+const CACHE_TTL = 60 * 1000; // 60 秒
+
+function getCacheKey(locale: string): string {
+  return `menus_${locale}`;
+}
 
 /**
- * 获取菜单文件的存储 Key
+ * 获取缓存的菜单数据
  */
+export function getMenuCache(locale: string): any | null {
+  const key = getCacheKey(locale);
+  const cached = cache.get(key);
+  if (cached && Date.now() - cached.timestamp < CACHE_TTL) {
+    return cached.data;
+  }
+  return null;
+}
+
+/**
+ * 设置菜单缓存
+ */
+export function setMenuCache(locale: string, data: any): void {
+  const key = getCacheKey(locale);
+  cache.set(key, { data, timestamp: Date.now() });
+}
+
+/**
+ * 清除菜单缓存（可指定 locale）
+ */
+export function clearMenuCache(locale?: string): void {
+  if (locale) {
+    cache.delete(getCacheKey(locale));
+  } else {
+    cache.clear();
+  }
+}
+
+// ---------- 存储操作 ----------
 function getMenuKey(locale: string, menuType: string): string {
   return `${STORAGE_PREFIX}/${locale}/${menuType}.json`;
 }
 
-/**
- * 读取某个菜单 JSON 文件
- * @param locale 语言 zh/en
- * @param menuType navigation | footer | custom_menus
- */
 export async function readMenuFile(locale: string, menuType: string): Promise<any> {
   const storage = getPrivateStorage();
   const key = getMenuKey(locale, menuType);
   try {
     const content = await storage.read(key, 'utf8');
     const parsed = JSON.parse(content as string);
-    // 对于 custom_menus，确保返回数组
     if (menuType === 'custom_menus') {
       return Array.isArray(parsed) ? parsed : [];
     }
-    // 对于 navigation / footer，确保有 items 字段
     if (menuType === 'navigation' || menuType === 'footer') {
       if (!parsed.items) parsed.items = [];
       if (typeof parsed.isEditable !== 'boolean') parsed.isEditable = false;
@@ -34,10 +63,12 @@ export async function readMenuFile(locale: string, menuType: string): Promise<an
     }
     return parsed;
   } catch (error: any) {
-    // 文件不存在或读取失败，返回默认结构（与原逻辑一致）
-    console.error(`[readMenuFile] 错误 Key: ${key}`);
-    console.error(`[readMenuFile] 错误消息: ${error.message}`);
-    if (error?.message?.includes('File not found') || error?.code === 'NoSuchKey') {
+    const isNotFound =
+      error?.code === 'NoSuchKey' ||
+      error?.Code === 'NoSuchKey' ||
+      error?.message?.includes('NoSuchKey') ||
+      error?.message?.includes('not found');
+    if (isNotFound) {
       if (menuType === 'custom_menus') return [];
       return {
         id: menuType,
@@ -46,7 +77,7 @@ export async function readMenuFile(locale: string, menuType: string): Promise<an
         items: [],
       };
     }
-    // JSON 解析错误等，返回安全的默认值
+    console.error(`[readMenuFile] 读取失败 Key: ${key}`, error);
     if (menuType === 'custom_menus') return [];
     return {
       id: menuType,
@@ -57,37 +88,28 @@ export async function readMenuFile(locale: string, menuType: string): Promise<an
   }
 }
 
-/**
- * 写入菜单 JSON 文件
- */
 export async function writeMenuFile(locale: string, menuType: string, data: any): Promise<void> {
   const storage = getPrivateStorage();
   const key = getMenuKey(locale, menuType);
   await storage.write(key, JSON.stringify(data, null, 2), {
     contentType: 'application/json',
   });
+  // 写入后清除该 locale 的缓存（包括组合缓存）
+  clearMenuCache(locale);
 }
 
-/**
- * 获取所有语言列表（基于 data/menus 下的子目录）
- * 原逻辑扫描本地 data/menus 下的目录名，升级后从私有桶列出所有前缀为 data/menus/ 的 key，提取二级目录名
- */
 export async function getAvailableLocales(): Promise<string[]> {
   const storage = getPrivateStorage();
   try {
-    // 列出 data/menus/ 下的所有文件/目录（前缀查找）
     const keys = await storage.list(STORAGE_PREFIX);
-    // 提取 locale 名：例如 data/menus/zh/navigation.json → zh
     const locales = new Set<string>();
     for (const key of keys) {
-      // key 格式: data/menus/{locale}/{menuType}.json
       const parts = key.split('/');
       if (parts.length >= 3) {
-        locales.add(parts[2]); // 第三部分是 locale
+        locales.add(parts[2]);
       }
     }
     if (locales.size === 0) {
-      // 如果没有找到任何文件，返回默认语言列表（与原逻辑一致）
       return ['zh', 'en'];
     }
     return Array.from(locales).sort();

@@ -1,123 +1,151 @@
 'use client';
 
-import { useState, useEffect } from 'react';
-import { useLocale } from 'next-intl';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { ChevronDown, ChevronRight } from 'lucide-react';
+import { getImageUrl } from '@/lib/files/url';
+import { DEFAULT_ACCORDION } from '@/lib/webbuilder/defaults/Accordion';
+import { getAltSuffix } from '@/lib/webbuilder/alt-suffix-config';
+
+function getDisplayImageUrl(url: string, isEditMode: boolean): string {
+  if (!url) return '';
+  const fullUrl = getImageUrl(url);
+  if (isEditMode) {
+    return `/api/proxy-image?url=${encodeURIComponent(fullUrl)}`;
+  }
+  return fullUrl;
+}
 
 export function Accordion(props: any) {
-  console.log('Accordion props in edit mode:', props);
   const isEditMode = !!props.puck?.isEditing;
-  const pageLocale = useLocale();
 
-  // ========== 1. 首先解构所有分组数据 ==========
-  const bannerGroup = props.bannerGroup || {};
-  const rowGroup = props.rowGroup || {};
-  const contentGroup = props.contentGroup || {};
-  const paddingGroup = props.paddingGroup || {};
-  const items = props.items || [];
+  // 合并默认值
+  const mergedBannerType = props.bannerType ?? DEFAULT_ACCORDION.bannerType;
+  const mergedBackgroundColor = props.backgroundColor ?? DEFAULT_ACCORDION.backgroundColor;
+  const mergedRowGroup = { ...DEFAULT_ACCORDION.rowGroup, ...props.rowGroup };
+  const mergedContentGroup = { ...DEFAULT_ACCORDION.contentGroup, ...props.contentGroup };
+  const mergedPaddingGroup = { ...DEFAULT_ACCORDION.paddingGroup, ...props.paddingGroup };
+  const mergedSpacingGroup = { ...DEFAULT_ACCORDION.spacingGroup, ...props.spacingGroup };
+  const mergedItems = props.items ?? DEFAULT_ACCORDION.items;
 
-  const bannerType = bannerGroup.bannerType || 'standard';
-  const backgroundColor = bannerGroup.backgroundColor || '#ffffff';
+  const mobileScaleFactor = DEFAULT_ACCORDION.spacingGroup.mobileScaleFactor;
 
-  const rowTitleColor = rowGroup.rowTitleColor || '#000000';
-  const rowTitleFontSize = rowGroup.rowTitleFontSize || 20;
-  const rowTitleAlign = rowGroup.rowTitleAlign || 'left';
-  const rowHeaderBgColor = rowGroup.rowHeaderBgColor || '#f3f4f6';
-  const itemsPerRow = rowGroup.itemsPerRow || 3;
-  const itemsGap = rowGroup.itemsGap || 20;
+  const {
+    rowTitleColor,
+    rowTitleFontSize,
+    rowTitleAlign,
+    rowHeaderBgColor,
+    itemsPerRow,
+    itemsGap,
+  } = mergedRowGroup;
 
-  const contentTitleFontSize = contentGroup.contentTitleFontSize || 18;
-  const contentTitleAlign = contentGroup.contentTitleAlign || 'center';
-  const contentTextFontSize = contentGroup.contentTextFontSize || 14;
-  const contentTextAlign = contentGroup.contentTextAlign || 'center';
+  const {
+    contentTitleFontSize,
+    contentTitleAlign,
+    contentTextFontSize,
+    contentTextAlign,
+  } = mergedContentGroup;
 
-  const paddingTop = paddingGroup.paddingTop ?? 32;
-  const paddingBottom = paddingGroup.paddingBottom ?? 32;
-
-  // ========== 2. 定义所有状态（必须在任何 useEffect 之前） ==========
-  // 多语言状态
-  const [editLocale, setEditLocale] = useState<string>(() => {
-    if (typeof window !== 'undefined' && isEditMode) {
-      const stored = localStorage.getItem('webbuilder_edit_locale');
-      if (stored && (stored === 'zh' || stored === 'en')) return stored;
-    }
-    return pageLocale;
-  });
+  const {
+    paddingTop,
+    paddingBottom,
+  } = mergedPaddingGroup;
 
   // 手风琴展开状态（编辑模式下默认展开第一个项目）
   const [expandedIndex, setExpandedIndex] = useState<number | null>(() => {
-    if (isEditMode && items.length > 0) {
+    if (isEditMode && mergedItems.length > 0) {
       return 0;
     }
     return null;
   });
 
-  // ========== 3. 副作用（监听事件、同步语言等） ==========
-  useEffect(() => {
-    if (!isEditMode) return;
-    const stored = localStorage.getItem('webbuilder_edit_locale');
-    if (!stored) setEditLocale(pageLocale);
-  }, [isEditMode, pageLocale]);
+  // 用于检测 items 变化的 ref（编辑联动）
+  const prevItemsRef = useRef<any[]>(mergedItems);
 
-  // 监听属性面板的事件，当用户在属性面板点击某个手风琴项目时，预览区自动展开对应项目
+  // Alt 自动生成
+  const __runtime = props.__runtime || {};
+  const seoTitle = __runtime.seoTitle || '';
+  const locale = __runtime.locale || 'zh';
+  const suffix = getAltSuffix('Accordion', locale);
+
+  // 编辑联动：检测 items 变化，自动展开被编辑的项目
   useEffect(() => {
-    if (!isEditMode) return;
-    const handleEditItem = (e: CustomEvent) => {
-      const { index } = e.detail;
-      if (index !== undefined && index >= 0 && index < items.length) {
-        setExpandedIndex(index);
+    if (!isEditMode || mergedItems.length === 0) return;
+
+    const prev = prevItemsRef.current;
+    let changedIndex = -1;
+    for (let i = 0; i < Math.min(prev.length, mergedItems.length); i++) {
+      if (JSON.stringify(prev[i]) !== JSON.stringify(mergedItems[i])) {
+        changedIndex = i;
+        break;
       }
-    };
-    window.addEventListener('accordion-edit-item', handleEditItem as EventListener);
-    return () => {
-      window.removeEventListener('accordion-edit-item', handleEditItem as EventListener);
-    };
-  }, [isEditMode, items.length]); // 添加 items.length 依赖，确保索引有效
+    }
+    if (changedIndex === -1 && prev.length !== mergedItems.length) {
+      changedIndex = 0;
+    }
 
-  // 监听全局语言切换
+    if (changedIndex !== -1) {
+      setExpandedIndex(changedIndex);
+    }
+
+    prevItemsRef.current = mergedItems;
+  }, [isEditMode, mergedItems]);
+
+  // 当 items 长度变化但展开索引超出范围时，重置为 0
   useEffect(() => {
-    if (!isEditMode) return;
-    const handler = (e: StorageEvent) => {
-      if (e.key === 'webbuilder_edit_locale' && e.newValue && (e.newValue === 'zh' || e.newValue === 'en')) {
-        setEditLocale(e.newValue);
+    if (isEditMode && mergedItems.length > 0) {
+      if (expandedIndex === null || expandedIndex >= mergedItems.length) {
+        setExpandedIndex(0);
       }
-    };
-    window.addEventListener('storage', handler);
-    return () => window.removeEventListener('storage', handler);
-  }, [isEditMode]);
-
-  const displayLocale = isEditMode ? editLocale : pageLocale;
-
-  const getText = (field: any) => {
-    if (typeof field === 'string') return field;
-    if (!field || typeof field !== 'object') return '';
-    if (props.__runtime?.texts && field.textId && props.__runtime.texts[field.textId])
-      return props.__runtime.texts[field.textId];
-    return field[displayLocale] || field.en || field.zh || '';
-  };
+    }
+  }, [isEditMode, mergedItems.length, expandedIndex]);
 
   const toggleItem = (index: number) => {
     setExpandedIndex(prev => (prev === index ? null : index));
   };
 
-  // 通栏样式
-  const outerClasses = `relative overflow-hidden ${
-    bannerType === 'fullwidth'
-      ? 'w-screen left-1/2 right-1/2 -ml-[50vw] mr-[50vw]'
-      : 'max-w-7xl mx-auto'
-  }`;
-  const outerMargin = bannerType === 'standard' ? { marginTop: '10px', marginBottom: '10px' } : {};
-  const outerStyle: React.CSSProperties = { backgroundColor, ...outerMargin };
-  const contentStyle: React.CSSProperties = { paddingTop: `${paddingTop}px`, paddingBottom: `${paddingBottom}px` };
+  // 通栏统一实现
+  const isFullwidth = mergedBannerType === 'fullwidth';
+  const outerStyle: React.CSSProperties = {
+    backgroundColor: mergedBackgroundColor,
+    ...(isFullwidth
+      ? {
+          position: 'relative',
+          left: '50%',
+          transform: 'translateX(-50%)',
+          width: '100vw',
+          maxWidth: '100vw',
+        }
+      : {
+          maxWidth: '80rem',
+          marginLeft: 'auto',
+          marginRight: 'auto',
+        }),
+    ...(mergedBannerType === 'standard' ? { marginTop: '10px', marginBottom: '10px' } : {}),
+  };
+  const outerClasses = 'relative overflow-hidden';
 
-  // 网格内联样式
+  const contentStyle: React.CSSProperties = {
+    paddingTop: `${paddingTop}px`,
+    paddingBottom: `${paddingBottom}px`,
+    maxWidth: '80rem',
+    margin: '0 auto',
+    width: '100%',
+    paddingLeft: 'clamp(1rem, 2vw, 2rem)',
+    paddingRight: 'clamp(1rem, 2vw, 2rem)',
+  };
+
   const gridStyle: React.CSSProperties = {
     display: 'grid',
     gridTemplateColumns: `repeat(${itemsPerRow}, minmax(0, 1fr))`,
     gap: `${itemsGap}px`,
   };
 
-  if (isEditMode && items.length === 0) {
+  // 响应式字体
+  const rowTitleClamp = `clamp(${rowTitleFontSize * mobileScaleFactor}px, 2vw, ${rowTitleFontSize}px)`;
+  const contentTitleClamp = `clamp(${contentTitleFontSize * mobileScaleFactor}px, 1.5vw, ${contentTitleFontSize}px)`;
+  const contentTextClamp = `clamp(${contentTextFontSize * mobileScaleFactor}px, 1.2vw, ${contentTextFontSize}px)`;
+
+  if (isEditMode && mergedItems.length === 0) {
     return (
       <div ref={props.puck?.dragRef} className={outerClasses} style={outerStyle}>
         <div className="border-2 border-dashed border-gray-300 p-8 text-center text-gray-400">
@@ -131,97 +159,113 @@ export function Accordion(props: any) {
     <div ref={props.puck?.dragRef} className={outerClasses} style={outerStyle}>
       <div className="relative w-full">
         <div style={contentStyle}>
-          <div className="max-w-7xl mx-auto w-full px-4 sm:px-6 lg:px-8">
-            <div className="space-y-4">
-              {items.map((item: any, idx: number) => {
-                const titleText = getText(item.title);
-                const contents = item.contents || [];
-                const isExpanded = expandedIndex === idx;
+          <div className="space-y-4">
+            {mergedItems.map((item: any, idx: number) => {
+              const titleText = item.title || `Accordion Title ${idx + 1}`;
+              const contents = item.contents || [];
+              const isExpanded = expandedIndex === idx;
 
-                return (
-                  <div key={item.id} className="border rounded-lg overflow-hidden">
+              return (
+                // ✅ 使用 id + 索引作为唯一 key
+                <div key={item.id ? `${item.id}-${idx}` : idx} className="border rounded-lg overflow-hidden">
+                  <div
+                    className="flex items-center justify-between p-4 cursor-pointer transition hover:opacity-80"
+                    style={{ backgroundColor: rowHeaderBgColor }}
+                    onClick={() => toggleItem(idx)}
+                  >
                     <div
-                      className="flex items-center justify-between p-4 cursor-pointer transition hover:opacity-80"
-                      style={{ backgroundColor: rowHeaderBgColor }}
-                      onClick={() => toggleItem(idx)}
+                      className="font-medium"
+                      style={{
+                        fontSize: rowTitleClamp,
+                        color: rowTitleColor,
+                        textAlign: rowTitleAlign,
+                        display: 'block',
+                        width: '100%',
+                      }}
                     >
-                      <div
-                        className="font-medium"
-                        style={{
-                          fontSize: `${rowTitleFontSize}px`,
-                          color: rowTitleColor,
-                          textAlign: rowTitleAlign,
-                        }}
-                      >
-                        {titleText || `手风琴项目 ${idx + 1}`}
-                      </div>
-                      {isExpanded ? <ChevronDown size={20} /> : <ChevronRight size={20} />}
+                      {titleText}
                     </div>
-
-                    {isExpanded && (
-                      <div className="p-6">
-                        {contents.length === 0 ? (
-                          <div className="text-center text-gray-400 py-8">
-                            暂无内容项，请在右侧属性面板中添加内容项
-                          </div>
-                        ) : (
-                          <div style={gridStyle}>
-                            {contents.map((content: any, cidx: number) => {
-                              const contentTitle = getText(content.title);
-                              const paragraph = getText(content.paragraph);
-                              const imageUrl = content.imageUrl;
-                              const link = content.link;
-                              const WrapperTag = link ? 'a' : 'div';
-                              const wrapperProps = link
-                                ? { href: link, target: '_blank', rel: 'noopener noreferrer', className: 'block group' }
-                                : { className: 'block' };
-
-                              return (
-                                <WrapperTag key={content.id} {...wrapperProps}>
-                                  <div className="flex flex-col items-center text-center">
-                                    {imageUrl && (
-                                      <div className="mb-4 overflow-hidden rounded-lg">
-                                        <img
-                                          src={imageUrl}
-                                          alt={contentTitle || 'image'}
-                                          className="w-full h-auto object-cover transition-transform group-hover:scale-105"
-                                        />
-                                      </div>
-                                    )}
-                                    {contentTitle && (
-                                      <h3
-                                        className="font-semibold mb-2"
-                                        style={{
-                                          fontSize: `${contentTitleFontSize}px`,
-                                          textAlign: contentTitleAlign,
-                                        }}
-                                      >
-                                        {contentTitle}
-                                      </h3>
-                                    )}
-                                    {paragraph && (
-                                      <p
-                                        style={{
-                                          fontSize: `${contentTextFontSize}px`,
-                                          textAlign: contentTextAlign,
-                                          color: '#666',
-                                        }}
-                                      >
-                                        {paragraph}
-                                      </p>
-                                    )}
-                                  </div>
-                                </WrapperTag>
-                              );
-                            })}
-                          </div>
-                        )}
-                      </div>
-                    )}
+                    {isExpanded ? <ChevronDown size={20} /> : <ChevronRight size={20} />}
                   </div>
-                );
-              })}
-            </div>
+
+                  {isExpanded && (
+                    <div className="p-6">
+                      {contents.length === 0 ? (
+                        <div className="text-center text-gray-400 py-8">
+                          暂无内容项，请在右侧属性面板中添加内容项
+                        </div>
+                      ) : (
+                        <div style={gridStyle}>
+                          {contents.map((content: any, cidx: number) => {
+                            const contentTitle = content.title || '';
+                            const paragraph = content.paragraph || '';
+                            const imageUrl = content.imageUrl || '';
+                            const link = content.link || '';
+                            const displayImageUrl = getDisplayImageUrl(imageUrl, isEditMode);
+                            const alt = seoTitle ? `${seoTitle} - ${suffix} ${idx + 1}-${cidx + 1}` : `${suffix} ${idx + 1}-${cidx + 1}`;
+
+                            const WrapperTag = link ? 'a' : 'div';
+                            const wrapperProps = link
+                              ? { href: link, target: '_blank', rel: 'noopener noreferrer', className: 'block group' }
+                              : { className: 'block' };
+
+                            return (
+                              // ✅ 使用 id + 索引作为唯一 key
+                              <WrapperTag key={content.id ? `${content.id}-${cidx}` : cidx} {...wrapperProps}>
+                                <div className="flex flex-col items-center text-center">
+                                  {imageUrl && (
+                                    <div className="mb-4 overflow-hidden rounded-lg w-full">
+                                      <div className="relative w-full" style={{ aspectRatio: '16 / 9' }}>
+                                        {displayImageUrl ? (
+                                          <img
+                                            src={displayImageUrl}
+                                            alt={alt}
+                                            className="absolute inset-0 w-full h-full object-cover transition-transform group-hover:scale-105"
+                                            loading="lazy"
+                                          />
+                                        ) : (
+                                          <div className="absolute inset-0 flex items-center justify-center bg-gray-100 text-gray-400">
+                                            图片加载失败
+                                          </div>
+                                        )}
+                                      </div>
+                                    </div>
+                                  )}
+                                  {contentTitle && (
+                                    <h3
+                                      className="font-semibold mb-2"
+                                      style={{
+                                        fontSize: contentTitleClamp,
+                                        textAlign: contentTitleAlign,
+                                        display: 'block',
+                                        width: '100%',
+                                      }}
+                                    >
+                                      {contentTitle}
+                                    </h3>
+                                  )}
+                                  {paragraph && (
+                                    <p
+                                      style={{
+                                        fontSize: contentTextClamp,
+                                        textAlign: contentTextAlign,
+                                        color: '#666',
+                                      }}
+                                    >
+                                      {paragraph}
+                                    </p>
+                                  )}
+                                </div>
+                              </WrapperTag>
+                            );
+                          })}
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
           </div>
         </div>
       </div>

@@ -1,7 +1,15 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
-import { useLocale } from 'next-intl';
+import React from 'react';
+import { DEFAULT_BUTTON } from '@/lib/webbuilder/defaults/Button';
+
+function getDisplayText(field: any): string {
+  if (typeof field === 'string') return field;
+  if (field && typeof field === 'object') {
+    return field.zh || field.en || field.textId || Object.values(field).find(v => v) || '';
+  }
+  return '按钮';
+}
 
 export function Button({
   text,
@@ -15,80 +23,51 @@ export function Button({
   buttonAlign,
   link,
   borderRadius,
+  paddingX,
+  paddingY,
   puck,
-  __runtime,
+  spacingGroup,
 }: any) {
   const isEditMode = !!puck?.isEditing;
-  const pageLocale = useLocale();
 
-  const [editLocale, setEditLocale] = useState<string>(() => {
-    if (typeof window !== 'undefined' && isEditMode) {
-      const stored = localStorage.getItem('webbuilder_edit_locale');
-      if (stored && (stored === 'zh' || stored === 'en')) return stored;
-    }
-    return pageLocale;
-  });
-
-  useEffect(() => {
-    if (!isEditMode) return;
-    const handleStorage = (e: StorageEvent) => {
-      if (e.key === 'webbuilder_edit_locale') {
-        const newLocale = e.newValue;
-        if (newLocale && (newLocale === 'zh' || newLocale === 'en')) setEditLocale(newLocale);
-      }
-    };
-    window.addEventListener('storage', handleStorage);
-    return () => window.removeEventListener('storage', handleStorage);
-  }, [isEditMode]);
-
-  useEffect(() => {
-    if (!isEditMode) return;
-    const stored = localStorage.getItem('webbuilder_edit_locale');
-    if (!stored) setEditLocale(pageLocale);
-  }, [isEditMode, pageLocale]);
-
-  const displayLocale = isEditMode ? editLocale : pageLocale;
-
-  const getDisplayText = () => {
-    if (typeof text === 'string') return text;
-    if (!text || typeof text !== 'object') return '';
-    if (__runtime?.texts && text.textId && __runtime.texts[text.textId]) {
-      return __runtime.texts[text.textId];
-    }
-    if (text[displayLocale]) return text[displayLocale];
-    if (text.en) return text.en;
-    if (text.zh) return text.zh;
-    return '按钮';
+  const mergedSpacingGroup = {
+    ...DEFAULT_BUTTON.spacingGroup,
+    ...spacingGroup,
   };
+  const mobileScaleFactor = mergedSpacingGroup.mobileScaleFactor ?? 0.7;
 
-  const displayText = getDisplayText();
+  const displayText = getDisplayText(text) || '按钮';
 
-  // 计算圆角值（支持 Tailwind 常用值）
-  const borderRadiusMap: Record<string, string> = {
-    '0': '0',
-    '0.125rem': '0.125rem',   // 小
-    '0.5rem': '0.5rem',       // 中
-    '0.75rem': '0.75rem',     // 大
-    '9999px': '9999px',       // 圆形
+  const fontSizeClamp = `clamp(${fontSize * mobileScaleFactor}px, 2.5vw, ${fontSize}px)`;
+
+  // ✅ 文字对齐映射到 flex justify-content
+  const justifyContentMap: Record<string, string> = {
+    left: 'flex-start',
+    center: 'center',
+    right: 'flex-end',
   };
-  const finalBorderRadius = borderRadiusMap[borderRadius] || borderRadius || '0.5rem';
+  const justifyContent = justifyContentMap[textAlign] || 'center';
 
   const buttonStyle: React.CSSProperties = {
     backgroundColor: buttonColor || '#000000',
     color: textColor || '#ffffff',
-    fontSize: `${fontSize || 16}px`,
+    fontSize: fontSizeClamp,
     fontWeight: bold ? 'bold' : 'normal',
     fontStyle: italic ? 'italic' : 'normal',
     textDecoration: underline ? 'underline' : 'none',
-    textAlign: textAlign || 'center',
-    padding: '1.2rem 3rem',      // 上下 0.75rem，左右 3rem，更明显的边距
-    borderRadius: finalBorderRadius,
+    padding: `${paddingY || 19}px ${paddingX || 48}px`,
+    borderRadius: borderRadius || '0.5rem',
     border: 'none',
     cursor: 'pointer',
     transition: 'all 0.2s ease',
-    display: 'inline-block',
     lineHeight: '1.2',
     whiteSpace: 'nowrap',
+    // ✅ 使用 flex 布局，由 justifyContent 控制文字位置
+    display: 'inline-flex',
+    alignItems: 'center',
+    justifyContent: justifyContent,
+    // 保留 textAlign 作为回退，但 flex 优先级更高
+    textAlign: textAlign || 'center',
   };
 
   const wrapperAlign = {
@@ -96,20 +75,23 @@ export function Button({
   };
 
   const linkHref = link?.trim();
-
-  // 编辑模式下不包裹 <a>，避免跳转
   const isInteractive = !isEditMode && linkHref;
 
-  const Element = isInteractive ? 'a' : 'button';
-  const extraProps = isInteractive
-    ? { href: linkHref, target: '_blank', rel: 'noopener noreferrer' }
-    : { type: 'button' };
+  if (isInteractive) {
+    return (
+      <div ref={puck?.dragRef} className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 my-4" style={wrapperAlign}>
+        <a href={linkHref} target="_blank" rel="noopener noreferrer" style={buttonStyle}>
+          {displayText}
+        </a>
+      </div>
+    );
+  }
 
   return (
     <div ref={puck?.dragRef} className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 my-4" style={wrapperAlign}>
-      <Element {...extraProps} style={buttonStyle}>
+      <button type="button" style={buttonStyle}>
         {displayText}
-      </Element>
+      </button>
     </div>
   );
 }

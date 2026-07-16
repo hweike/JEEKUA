@@ -1,4 +1,4 @@
-// SearchBar.tsx
+// components/admin/products/SearchBar.tsx
 'use client';
 
 import { useState, useEffect, useRef } from 'react';
@@ -63,9 +63,16 @@ interface SearchBarProps {
   initialKeyword: string;
   initialCategoryId: string;
   initialSeriesId?: string;
+  locale: string; // 新增：当前语言
 }
 
-export function SearchBar({ onSearch, initialKeyword, initialCategoryId, initialSeriesId = '' }: SearchBarProps) {
+export function SearchBar({ 
+  onSearch, 
+  initialKeyword, 
+  initialCategoryId, 
+  initialSeriesId = '', 
+  locale // 接收当前语言
+}: SearchBarProps) {
   const [keyword, setKeyword] = useState(initialKeyword);
   const [categoryId, setCategoryId] = useState(initialCategoryId);
   const [seriesId, setSeriesId] = useState(initialSeriesId);
@@ -76,10 +83,11 @@ export function SearchBar({ onSearch, initialKeyword, initialCategoryId, initial
   const dropdownRef = useRef<HTMLDivElement>(null);
   const buttonRef = useRef<HTMLButtonElement>(null);
 
+  // 🔥 关键修改：依赖 locale，并使用 locale 请求分类树
   useEffect(() => {
     const fetchTree = async () => {
       try {
-        const res = await fetch('/api/admin/products/categories?locale=zh');
+        const res = await fetch(`/api/admin/products/categories?locale=${locale}`);
         const data: ApiResponse = await res.json();
         const lines = data.productLines || [];
         const categories = data.categories || [];
@@ -122,7 +130,7 @@ export function SearchBar({ onSearch, initialKeyword, initialCategoryId, initial
       }
     };
     fetchTree();
-  }, []);
+  }, [locale]); // 🔥 依赖 locale，切换语言时重新请求
 
   // 根据当前选中的分类ID查找显示名称和实际存储的ID
   useEffect(() => {

@@ -1,26 +1,35 @@
+import type { ComponentConfig } from '@measured/puck';
 import { Heading } from '@/components/webbuilder/blocks/basic/Heading';
-import { HeadingTextField } from '@/components/webbuilder/fields/HeadingTextField';
-import type { ComponentConfig } from '@puckeditor/core';
-import type { Components } from '../types';
-import { nanoid } from 'nanoid';
+import { DEFAULT_HEADING } from '@/lib/webbuilder/defaults/Heading';
+import type { HeadingProps } from '@/lib/webbuilder/types';
 
-export const config: ComponentConfig<Components['Heading']> = {
+export const config: ComponentConfig<HeadingProps> = {
   label: '标题',
   category: 'Basic',
   defaultProps: {
-    level: 1,
-    title: { zh: '', en: '', textId: nanoid() },   // 生成初始 textId
-    textAlign: 'left',
-    bold: false,
-    italic: false,
-    underline: false,
-    fontSize: '2xl',
+    level: DEFAULT_HEADING.level,
+    title: DEFAULT_HEADING.title,
+    textAlign: DEFAULT_HEADING.textAlign,
+    bold: DEFAULT_HEADING.bold,
+    italic: DEFAULT_HEADING.italic,
+    underline: DEFAULT_HEADING.underline,
+    fontSize: DEFAULT_HEADING.fontSize,
+    link: DEFAULT_HEADING.link,
+    spacingGroup: { ...DEFAULT_HEADING.spacingGroup },
   },
   fields: {
-   
     title: {
       label: '标题文本',
-      type: 'heading-text',  // 自定义字段类型
+      type: 'text',
+    },
+    level: {
+      label: '标题级别',
+      type: 'select',
+      options: [
+        { label: 'H1', value: 1 },
+        { label: 'H2', value: 2 },
+        { label: 'H3', value: 3 },
+      ],
     },
     textAlign: {
       label: '文本对齐',
@@ -74,6 +83,5 @@ export const config: ComponentConfig<Components['Heading']> = {
       type: 'text',
     },
   },
-
   render: ({ puck, ...props }) => <Heading puck={puck} {...props} />,
 };

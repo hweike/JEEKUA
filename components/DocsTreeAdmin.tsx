@@ -22,7 +22,7 @@ import {
 } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
 import { restrictToVerticalAxis } from '@dnd-kit/modifiers';
-import { ChevronRight, ChevronDown, GripVertical, Plus, Trash2, ArrowUp, ArrowDown } from 'lucide-react';
+import { ChevronRight, ChevronDown, GripVertical, Edit, Plus } from 'lucide-react';
 
 export interface DocNode {
   id: string;
@@ -37,10 +37,13 @@ interface DocsTreeAdminProps {
   tree: DocNode[];
   selectedId: string | null;
   onSelect: (id: string) => void;
+  onEdit?: (id: string) => void;
   onNewChild: (parentId: string) => void;
   onDelete: (id: string) => void;
   onReorder: (id: string, direction: 'up' | 'down') => void;
   onTreeChange: (newTree: DocNode[]) => void;
+  docsLibId?: string;
+  locale?: string;
 }
 
 interface FlattenedItem extends DocNode {
@@ -98,29 +101,26 @@ const buildTree = (items: FlattenedItem[]): DocNode[] => {
   return roots;
 };
 
-// 根据鼠标坐标和元素矩形计算放置位置
 const getDropPosition = (clientY: number, rect: DOMRect): 'before' | 'after' | 'child' => {
   const relativeY = clientY - rect.top;
   const height = rect.height;
-  if (height <= 28) return 'child';
-  if (relativeY < height * 0.3) return 'before';
-  if (relativeY > height * 0.7) return 'after';
+  if (height <= 30) return 'child';
+  if (relativeY < height * 0.15) return 'before';
+  if (relativeY > height * 0.85) return 'after';
   return 'child';
 };
 
-// 可排序的树节点组件
 interface SortableTreeItemProps {
   item: FlattenedItem;
   selectedId: string | null;
   activeId: UniqueIdentifier | null;
   onSelect: (id: string) => void;
+  onEdit?: (id: string) => void;
   onNewChild: (parentId: string) => void;
-  onDelete: (id: string) => void;
-  onReorder: (id: string, direction: 'up' | 'down') => void;
-  expandedIds: Set<string>;
-  onToggleExpand: (id: string) => void;
   isDropTarget: boolean;
   dropPosition: 'before' | 'after' | 'child' | null;
+  expandedIds: Set<string>;
+  onToggleExpand: (id: string) => void;
 }
 
 const SortableTreeItem = ({
@@ -128,13 +128,12 @@ const SortableTreeItem = ({
   selectedId,
   activeId,
   onSelect,
+  onEdit,
   onNewChild,
-  onDelete,
-  onReorder,
-  expandedIds,
-  onToggleExpand,
   isDropTarget,
   dropPosition,
+  expandedIds,
+  onToggleExpand,
 }: SortableTreeItemProps) => {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
     id: item.id,
@@ -153,14 +152,15 @@ const SortableTreeItem = ({
 
   const getDropIndicator = () => {
     if (!showDropIndicator) return null;
+    const paddingLeft = item.depth * 20 + 8;
     if (dropPosition === 'before') {
-      return <div className="absolute -top-0.5 left-0 right-0 h-0.5 bg-blue-500 rounded-full z-10" />;
+      return <div className="absolute -top-0.5 h-0.5 bg-blue-500 rounded-full z-10" style={{ left: `${paddingLeft}px`, right: 0 }} />;
     }
     if (dropPosition === 'after') {
-      return <div className="absolute -bottom-0.5 left-0 right-0 h-0.5 bg-blue-500 rounded-full z-10" />;
+      return <div className="absolute -bottom-0.5 h-0.5 bg-blue-500 rounded-full z-10" style={{ left: `${paddingLeft}px`, right: 0 }} />;
     }
     if (dropPosition === 'child') {
-      return <div className="absolute inset-0 border-2 border-blue-400 border-dashed rounded-md bg-blue-50 bg-opacity-30 z-10" />;
+      return <div className="absolute inset-0 border-2 border-green-500 border-dashed rounded-md bg-green-50 bg-opacity-40 z-10" style={{ left: `${paddingLeft}px` }} />;
     }
     return null;
   };
@@ -169,7 +169,7 @@ const SortableTreeItem = ({
     <div ref={setNodeRef} style={style} className="group relative" data-doc-id={item.id}>
       {getDropIndicator()}
       <div
-        className={`flex items-center justify-between py-1.5 rounded-md hover:bg-gray-50 ${
+        className={`flex items-center justify-between py-1.5 rounded-md hover:bg-blue-50 ${
           selectedId === item.id ? 'bg-blue-50' : ''
         }`}
         style={{ paddingLeft: item.depth * 20 + 8 }}
@@ -206,42 +206,36 @@ const SortableTreeItem = ({
           </button>
         </div>
 
-        <div className="flex items-center gap-1 pr-2 opacity-0 group-hover:opacity-100 transition">
+        {/* 操作按钮组：新增子文档 + 编辑（悬浮显示） */}
+        <div className="flex items-center gap-1 pr-2 opacity-0 group-hover:opacity-100 transition-opacity">
           <button
-            onClick={() => onNewChild(item.id)}
-            className="p-1 text-green-600 hover:text-green-800 rounded"
-            title="添加子文档"
+            onClick={(e) => {
+              e.stopPropagation();
+              onNewChild(item.id);
+            }}
+            className="p-1.5 text-green-600 hover:text-green-800 rounded-full hover:bg-green-50"
+            title="新增子文档"
           >
             <Plus size={14} />
           </button>
-          <button
-            onClick={() => onReorder(item.id, 'up')}
-            className="p-1 text-gray-500 hover:text-gray-700 rounded"
-            title="向上移动"
-          >
-            <ArrowUp size={14} />
-          </button>
-          <button
-            onClick={() => onReorder(item.id, 'down')}
-            className="p-1 text-gray-500 hover:text-gray-700 rounded"
-            title="向下移动"
-          >
-            <ArrowDown size={14} />
-          </button>
-          <button
-            onClick={() => onDelete(item.id)}
-            className="p-1 text-red-500 hover:text-red-700 rounded"
-            title="删除"
-          >
-            <Trash2 size={14} />
-          </button>
+          {onEdit && (
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                onEdit(item.id);
+              }}
+              className="p-1.5 text-blue-600 hover:text-blue-800 rounded-full hover:bg-blue-100"
+              title="编辑文档"
+            >
+              <Edit size={14} />
+            </button>
+          )}
         </div>
       </div>
     </div>
   );
 };
 
-// 根放置区组件，使用 useDroppable 并添加标识
 function RootDropZone({ isActive }: { isActive: boolean }) {
   const { setNodeRef, isOver } = useDroppable({ id: '__ROOT__' });
   const active = isActive || isOver;
@@ -251,7 +245,7 @@ function RootDropZone({ isActive }: { isActive: boolean }) {
       data-doc-id="__ROOT__"
       className={`mb-3 p-2 border-2 border-dashed rounded-md text-center text-sm transition-colors ${
         active
-          ? 'border-blue-500 bg-blue-50 text-blue-600'
+          ? 'border-green-500 bg-green-50 text-green-600'
           : 'border-gray-300 text-gray-400 hover:border-gray-400'
       }`}
     >
@@ -264,6 +258,7 @@ export default function DocsTreeAdmin({
   tree,
   selectedId,
   onSelect,
+  onEdit,
   onNewChild,
   onDelete,
   onReorder,
@@ -284,8 +279,10 @@ export default function DocsTreeAdmin({
   const [dropTargetId, setDropTargetId] = useState<string | null>(null);
   const [dropPosition, setDropPosition] = useState<'before' | 'after' | 'child' | null>(null);
   const elementRefs = useRef<Map<string, HTMLElement>>(new Map());
+  const dropTargetRef = useRef<string | null>(null);
+  const dropPositionRef = useRef<'before' | 'after' | 'child' | null>(null);
+  const startClientYRef = useRef<number | null>(null);
 
-  // 树变化时展开新节点
   useEffect(() => {
     const newIds = new Set<string>();
     const collect = (nodes: DocNode[]) => {
@@ -341,19 +338,45 @@ export default function DocsTreeAdmin({
     return false;
   };
 
-  const handleDragStart = (event: DragStartEvent) => setActiveId(event.active.id);
+  const getDepth = (id: string, items: FlattenedItem[]): number => {
+    const item = items.find(i => i.id === id);
+    if (!item || item.parentId === null) return 0;
+    return 1 + getDepth(item.parentId, items);
+  };
+
+  const handleDragStart = (event: DragStartEvent) => {
+    setActiveId(event.active.id);
+    dropTargetRef.current = null;
+    dropPositionRef.current = null;
+    setDropTargetId(null);
+    setDropPosition(null);
+    // 记录鼠标起始 Y
+    const activator = event.activatorEvent;
+    if (activator instanceof MouseEvent || activator instanceof PointerEvent) {
+      startClientYRef.current = activator.clientY;
+    } else if (activator instanceof TouchEvent && activator.touches.length > 0) {
+      startClientYRef.current = activator.touches[0].clientY;
+    } else {
+      startClientYRef.current = null;
+    }
+  };
+
   const handleDragCancel = () => {
     setActiveId(null);
     setDropTargetId(null);
     setDropPosition(null);
+    dropTargetRef.current = null;
+    dropPositionRef.current = null;
+    startClientYRef.current = null;
   };
 
-  // 拖拽移动过程中实时计算目标及放置位置
   const handleDragMove = (event: DragMoveEvent) => {
-    const { over } = event;
+    const { over, delta } = event;
     if (!over || !activeId) {
       setDropTargetId(null);
       setDropPosition(null);
+      dropTargetRef.current = null;
+      dropPositionRef.current = null;
       return;
     }
 
@@ -361,136 +384,190 @@ export default function DocsTreeAdmin({
     if (targetId === activeId) {
       setDropTargetId(null);
       setDropPosition(null);
+      dropTargetRef.current = null;
+      dropPositionRef.current = null;
       return;
     }
 
-    // 根放置区由 useDroppable 自动识别，over.id 为 '__ROOT__'
     if (targetId === '__ROOT__') {
       setDropTargetId('__ROOT__');
       setDropPosition('child');
+      dropTargetRef.current = '__ROOT__';
+      dropPositionRef.current = 'child';
       return;
     }
 
-    // 对于普通文档节点，需要获取其 DOM 以计算 before/after/child
     const targetElement = elementRefs.current.get(targetId);
     if (!targetElement) {
       setDropTargetId(null);
       setDropPosition(null);
+      dropTargetRef.current = null;
+      dropPositionRef.current = null;
       return;
     }
 
+    // 计算当前鼠标 Y 坐标：起始 Y + delta.y
     let clientY: number;
-    if (event.activatorEvent instanceof MouseEvent) {
-      clientY = event.activatorEvent.clientY;
-    } else if (event.activatorEvent instanceof TouchEvent && event.activatorEvent.touches[0]) {
-      clientY = event.activatorEvent.touches[0].clientY;
+    if (startClientYRef.current !== null) {
+      clientY = startClientYRef.current + delta.y;
     } else {
-      setDropTargetId(null);
-      setDropPosition(null);
-      return;
+      // 降级：使用 over.rect 估算（不准确但避免崩溃）
+      const overRect = event.over?.rect;
+      if (overRect) {
+        clientY = overRect.top + overRect.height / 2;
+      } else {
+        setDropTargetId(null);
+        setDropPosition(null);
+        dropTargetRef.current = null;
+        dropPositionRef.current = null;
+        return;
+      }
     }
 
     const rect = targetElement.getBoundingClientRect();
     const position = getDropPosition(clientY, rect);
 
-    // 防止将节点拖拽到自己的后代中（仅 child 放置需检查）
+    // 深度限制
     if (position === 'child') {
       const flatAll = flattenTree(tree);
+      const targetDepth = getDepth(targetId, flatAll);
+      if (targetDepth >= 2) {
+        setDropTargetId(null);
+        setDropPosition(null);
+        dropTargetRef.current = null;
+        dropPositionRef.current = null;
+        return;
+      }
       if (isDescendant(activeId as string, targetId, flatAll)) {
         setDropTargetId(null);
         setDropPosition(null);
+        dropTargetRef.current = null;
+        dropPositionRef.current = null;
         return;
       }
     }
 
     setDropTargetId(targetId);
     setDropPosition(position);
+    dropTargetRef.current = targetId;
+    dropPositionRef.current = position;
   };
 
   const handleDragEnd = (event: DragEndEvent) => {
-    const { active, over } = event;
-    // 最终目标优先取 over.id（因为 useDroppable 已保证识别根放置区）
-    let finalTarget = over?.id as string | undefined;
-    let finalPos = dropPosition;
-    // 如果 over.id 是 __ROOT__，则使用根放置区逻辑
-    if (finalTarget === '__ROOT__') {
-      finalPos = 'child';
-    } else if (finalTarget && finalTarget !== active.id) {
-      finalPos = dropPosition;
-    } else {
-      finalTarget = undefined;
+  const { active } = event;
+
+  // 优先使用 ref 中记录的最后有效目标和位置
+  let finalTarget = dropTargetRef.current;
+  let finalPos = dropPositionRef.current;
+
+  // 如果 ref 为空，尝试从 over 获取（但可能不准确）
+  if (!finalTarget) {
+    const overId = event.over?.id as string | undefined;
+    if (overId && overId !== active.id) {
+      finalTarget = overId;
     }
+  }
 
-    setActiveId(null);
-    setDropTargetId(null);
-    setDropPosition(null);
+  // 如果是根放置区，强制 child
+  if (finalTarget === '__ROOT__') {
+    finalPos = 'child';
+  }
 
-    if (!finalTarget || !finalPos) return;
+  // 清空 refs 和状态（在获取 final 之后）
+  setActiveId(null);
+  setDropTargetId(null);
+  setDropPosition(null);
+  dropTargetRef.current = null;
+  dropPositionRef.current = null;
+  startClientYRef.current = null;
 
-    const activeIdStr = active.id as string;
-    const flatItems = flattenTree(tree);
-    const activeItem = flatItems.find(i => i.id === activeIdStr);
-    if (!activeItem) return;
+  // 如果目标无效或位置无效，跳过
+  if (!finalTarget || !finalPos) {
+    console.log('[DragEnd] 无效放置，跳过');
+    return;
+  }
 
-    let newParentId: string | null = null;
-    let newOrder = 0;
-    const getSiblings = (parentId: string | null) =>
-      flatItems.filter(i => i.parentId === parentId).sort((a, b) => a.order - b.order);
+  // 防止将节点拖到自己（已过滤）
+  if (finalTarget === active.id) return;
 
-    if (finalTarget === '__ROOT__') {
-      newParentId = null;
-      const roots = getSiblings(null);
-      newOrder = roots.length;
+  const activeIdStr = active.id as string;
+  const flatItems = flattenTree(tree);
+  const activeItem = flatItems.find(i => i.id === activeIdStr);
+  if (!activeItem) {
+    console.warn('[DragEnd] 未找到活动项');
+    return;
+  }
+
+  // 计算新父级和顺序
+  let newParentId: string | null = null;
+  let newOrder = 0;
+  const getSiblings = (parentId: string | null) =>
+    flatItems.filter(i => i.parentId === parentId).sort((a, b) => a.order - b.order);
+
+  if (finalTarget === '__ROOT__') {
+    newParentId = null;
+    const roots = getSiblings(null);
+    newOrder = roots.length;
+  } else {
+    const overItem = flatItems.find(i => i.id === finalTarget);
+    if (!overItem) {
+      console.warn('[DragEnd] 未找到目标项');
+      return;
+    }
+    if (finalPos === 'child') {
+      newParentId = overItem.id;
+      const siblings = getSiblings(newParentId);
+      newOrder = siblings.length;
     } else {
-      const overItem = flatItems.find(i => i.id === finalTarget);
-      if (!overItem) return;
-      if (finalPos === 'child') {
-        newParentId = overItem.id;
-        const siblings = getSiblings(newParentId);
-        newOrder = siblings.length;
+      newParentId = overItem.parentId;
+      const siblings = getSiblings(newParentId);
+      const overIdx = siblings.findIndex(s => s.id === finalTarget);
+      if (overIdx !== -1) {
+        newOrder = finalPos === 'before' ? overIdx : overIdx + 1;
       } else {
-        newParentId = overItem.parentId;
-        const siblings = getSiblings(newParentId);
-        const overIdx = siblings.findIndex(s => s.id === finalTarget);
-        if (overIdx !== -1) {
-          newOrder = finalPos === 'before' ? overIdx : overIdx + 1;
-        } else {
-          newOrder = siblings.length;
-        }
+        newOrder = siblings.length;
       }
     }
+  }
 
-    if (newParentId === activeItem.parentId && newOrder === activeItem.order) return;
-    if (newParentId === activeItem.id) return;
+  if (newParentId === activeItem.parentId && newOrder === activeItem.order) {
+    console.log('[DragEnd] 位置未变，跳过更新');
+    return;
+  }
+  if (newParentId === activeItem.id) {
+    console.warn('[DragEnd] 不能将节点设为自己的子级');
+    return;
+  }
 
-    let updated = flatItems.filter(i => i.id !== activeIdStr);
-    updated = updated.map(i => {
-      if (i.parentId === newParentId && i.order >= newOrder)
-        return { ...i, order: i.order + 1 };
-      return i;
-    });
-    updated = updated.map(i => {
-      if (i.parentId === activeItem.parentId && i.order > activeItem.order)
-        return { ...i, order: i.order - 1 };
-      return i;
-    });
-    const moved = { ...activeItem, parentId: newParentId, order: newOrder };
-    updated.push(moved);
+  // 更新数据
+  let updated = flatItems.filter(i => i.id !== activeIdStr);
+  updated = updated.map(i => {
+    if (i.parentId === newParentId && i.order >= newOrder)
+      return { ...i, order: i.order + 1 };
+    return i;
+  });
+  updated = updated.map(i => {
+    if (i.parentId === activeItem.parentId && i.order > activeItem.order)
+      return { ...i, order: i.order - 1 };
+    return i;
+  });
+  const moved = { ...activeItem, parentId: newParentId, order: newOrder };
+  updated.push(moved);
 
-    // 重新压缩每个父级下的 order
-    const grouped = new Map<string | null, FlattenedItem[]>();
-    updated.forEach(i => {
-      const key = i.parentId;
-      if (!grouped.has(key)) grouped.set(key, []);
-      grouped.get(key)!.push(i);
-    });
-    grouped.forEach(items => {
-      items.sort((a, b) => a.order - b.order);
-      items.forEach((i, idx) => { i.order = idx; });
-    });
-    const newTree = buildTree(updated);
-    onTreeChange(newTree);
-  };
+  const grouped = new Map<string | null, FlattenedItem[]>();
+  updated.forEach(i => {
+    const key = i.parentId;
+    if (!grouped.has(key)) grouped.set(key, []);
+    grouped.get(key)!.push(i);
+  });
+  grouped.forEach(items => {
+    items.sort((a, b) => a.order - b.order);
+    items.forEach((i, idx) => { i.order = idx; });
+  });
+  const newTree = buildTree(updated);
+  console.log('[DragEnd] 应用新树');
+  onTreeChange(newTree);
+};
 
   const dragItem = activeId ? visibleItems.find(i => i.id === activeId) : null;
 
@@ -521,13 +598,12 @@ export default function DocsTreeAdmin({
                   selectedId={selectedId}
                   activeId={activeId}
                   onSelect={onSelect}
+                  onEdit={onEdit}
                   onNewChild={onNewChild}
-                  onDelete={onDelete}
-                  onReorder={onReorder}
-                  expandedIds={expandedIds}
-                  onToggleExpand={toggleExpand}
                   isDropTarget={dropTargetId === item.id}
                   dropPosition={dropPosition}
+                  expandedIds={expandedIds}
+                  onToggleExpand={toggleExpand}
                 />
               </div>
             ))}

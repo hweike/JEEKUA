@@ -367,7 +367,7 @@ export default function LuxuryNavbar({ headerConfig = {}, footerConfig = {}, men
       >
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-full flex items-center justify-between">
           <div className="flex-shrink-0">
-            <Logo logoConfig={config.logo} siteName={siteSettings?.siteName || 'FEISMAN POWER'} />
+            <Logo logoConfig={config.logo} siteName={siteSettings?.siteName || 'My Web'} />
           </div>
 
           <div className="flex-1 flex justify-center">

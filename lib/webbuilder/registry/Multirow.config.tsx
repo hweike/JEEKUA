@@ -1,43 +1,26 @@
 import type { ComponentConfig } from '@measured/puck';
 import { Multirow } from '@/components/webbuilder/blocks/Advanced/Multirow';
 import { ColorPickerField } from '@/components/webbuilder/fields/ColorPickerField';
-import { MultirowListField } from '@/components/webbuilder/fields/MultirowListField';
-import { LanguageSwitcherField } from '@/components/webbuilder/fields/LanguageSwitcherField';
+import ImageUpload from '@/components/ImageUpload';
+import { DEFAULT_MULTIROW } from '@/lib/webbuilder/defaults/Multirow';
 import type { MultirowProps } from '@/lib/webbuilder/types';
 
 export const config: ComponentConfig<MultirowProps> = {
   label: '多行',
   category: 'Media/Banner',
   defaultProps: {
-    bannerType: 'standard',
-    backgroundColor: '#ffffff',
-    imageHeight: 'auto',
-    imageWidth: 'medium',
-    imagePlacement: 'alternate-left',
-    columnBgColor: '#f9fafb',
-    columnTitleColor: '#000000',
-    columnTitleFontSize: 32,
-    columnDescColor: '#666666',
-    columnDescFontSize: 16,
-    contentVertical: 'middle',
-    textAlign: 'left',
-    mobileTextAlign: 'center',
-    paddingTop: 32,
-    paddingBottom: 32,
-    items: [],
+    bannerGroup: { ...DEFAULT_MULTIROW.bannerGroup },
+    imageGroup: { ...DEFAULT_MULTIROW.imageGroup },
+    contentGroup: { ...DEFAULT_MULTIROW.contentGroup },
+    paddingGroup: { ...DEFAULT_MULTIROW.paddingGroup },
+    spacingGroup: { ...DEFAULT_MULTIROW.spacingGroup },
+    items: DEFAULT_MULTIROW.items,
   },
   fields: {
-    // 语言切换器（置顶） - 改为 custom 类型以避免类型错误
-    languageSwitcher: {
-      label: '',
-      type: 'custom',
-      render: () => <LanguageSwitcherField />,
-    },
-
-    // 通栏设置
+    // ===== 大分组：通栏设置 =====
     bannerGroup: {
-      label: '通栏设置',
       type: 'object',
+      label: '通栏设置',
       objectFields: {
         bannerType: {
           label: '通栏类型',
@@ -50,17 +33,17 @@ export const config: ComponentConfig<MultirowProps> = {
         backgroundColor: {
           label: '通栏背景色',
           type: 'custom',
-          render: ({ value, onChange }: { value: any; onChange: any }) => (
+          render: ({ value, onChange }) => (
             <ColorPickerField field={{}} value={value || '#ffffff'} onChange={onChange} />
           ),
         },
       },
     },
 
-    // 图片设置
+    // ===== 大分组：图片设置 =====
     imageGroup: {
-      label: '图片设置',
       type: 'object',
+      label: '图片设置',
       objectFields: {
         imageHeight: {
           label: '图片高度',
@@ -82,7 +65,7 @@ export const config: ComponentConfig<MultirowProps> = {
           ],
         },
         imagePlacement: {
-          label: '放置',
+          label: '图片放置方式',
           type: 'select',
           options: [
             { label: '从左侧交替', value: 'alternate-left' },
@@ -94,36 +77,51 @@ export const config: ComponentConfig<MultirowProps> = {
       },
     },
 
-    // 内容列设置
+    // ===== 大分组：内容列设置 =====
     contentGroup: {
-      label: '内容列设置',
       type: 'object',
+      label: '内容列设置',
       objectFields: {
         columnBgColor: {
           label: '列背景色',
           type: 'custom',
-          render: ({ value, onChange }: { value: any; onChange: any }) => (
+          render: ({ value, onChange }) => (
             <ColorPickerField field={{}} value={value || '#f9fafb'} onChange={onChange} />
           ),
+        },
+        _sep1: {
+          label: '',
+          type: 'custom',
+          render: () => <div className="h-2 border-b border-gray-200 my-2" />,
         },
         columnTitleColor: {
           label: '标题颜色',
           type: 'custom',
-          render: ({ value, onChange }: { value: any; onChange: any }) => (
+          render: ({ value, onChange }) => (
             <ColorPickerField field={{}} value={value || '#000000'} onChange={onChange} />
           ),
         },
-        columnTitleFontSize: { label: '标题大小 (px)', type: 'number', min: 20, max: 120, step: 1 },
+        columnTitleFontSize: { label: '标题大小 (px)', type: 'number', min: 12, max: 120, step: 1 },
+        _sep2: {
+          label: '',
+          type: 'custom',
+          render: () => <div className="h-2 border-b border-gray-200 my-2" />,
+        },
         columnDescColor: {
           label: '描述颜色',
           type: 'custom',
-          render: ({ value, onChange }: { value: any; onChange: any }) => (
+          render: ({ value, onChange }) => (
             <ColorPickerField field={{}} value={value || '#666666'} onChange={onChange} />
           ),
         },
-        columnDescFontSize: { label: '描述文本大小 (px)', type: 'number', min: 20, max: 120, step: 1 },
+        columnDescFontSize: { label: '描述大小 (px)', type: 'number', min: 12, max: 120, step: 1 },
+        _sep3: {
+          label: '',
+          type: 'custom',
+          render: () => <div className="h-2 border-b border-gray-200 my-2" />,
+        },
         contentVertical: {
-          label: '位置',
+          label: '内容垂直位置',
           type: 'select',
           options: [
             { label: '顶部', value: 'top' },
@@ -132,7 +130,7 @@ export const config: ComponentConfig<MultirowProps> = {
           ],
         },
         textAlign: {
-          label: '对齐方式',
+          label: '文本对齐（桌面）',
           type: 'select',
           options: [
             { label: '左', value: 'left' },
@@ -141,7 +139,7 @@ export const config: ComponentConfig<MultirowProps> = {
           ],
         },
         mobileTextAlign: {
-          label: '移动设备对齐方式',
+          label: '文本对齐（移动）',
           type: 'select',
           options: [
             { label: '左', value: 'left' },
@@ -152,23 +150,59 @@ export const config: ComponentConfig<MultirowProps> = {
       },
     },
 
-    // 填充设置
+    // ===== 内容行管理（标准 array） =====
+    items: {
+      label: '内容行列表',
+      type: 'array',
+      itemLabel: '行 #{index}',
+      arrayFields: {
+        imageUrl: {
+          label: '图片',
+          type: 'custom',
+          render: ({ value, onChange }) => (
+            <ImageUpload
+              value={value || ''}
+              onChange={(url) => onChange(typeof url === 'string' ? url : url[0])}
+              maxCount={1}
+              label=""
+              hint="支持上传本地图片或输入网络图片地址"
+              previewAspectRatio="16:9"
+            />
+          ),
+        },
+        _sep4: {
+          label: '',
+          type: 'custom',
+          render: () => <div className="h-2 border-b border-gray-200 my-2" />,
+        },
+        title: { label: '标题', type: 'text' },
+        description: { label: '描述', type: 'textarea' },
+        _sep5: {
+          label: '',
+          type: 'custom',
+          render: () => <div className="h-2 border-b border-gray-200 my-2" />,
+        },
+        linkLabel: { label: '链接文字', type: 'text' },
+        linkUrl: { label: '链接地址', type: 'text' },
+      },
+      defaultItem: () => ({
+        id: `row-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+        imageUrl: '',
+        title: '新行标题',
+        description: '在此输入描述文字...',
+        linkLabel: '了解更多',
+        linkUrl: '#',
+      }),
+    },
+
+    // ===== 大分组：填充设置（置于最底） =====
     paddingGroup: {
-      label: '填充设置',
       type: 'object',
+      label: '填充设置',
       objectFields: {
         paddingTop: { label: '顶部填充 (px)', type: 'number', min: 0, max: 100, step: 1 },
         paddingBottom: { label: '底部填充 (px)', type: 'number', min: 0, max: 100, step: 1 },
       },
-    },
-
-    // 内容行管理
-    items: {
-      label: '内容行管理',
-      type: 'custom',
-      render: ({ value, onChange }: { value: any; onChange: any }) => (
-        <MultirowListField value={value} onChange={onChange} />
-      ),
     },
   },
   render: ({ puck, ...props }) => <Multirow puck={puck} {...props} />,

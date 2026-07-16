@@ -2,21 +2,22 @@
 export {
   getDocsLibs,
   getDocsLib,
-  getDocsLibBySlug,      // 新增，需已在 docs-lib.ts 中实现
+  getDocsLibBySlug,
   createDocsLib,
   updateDocsLib,
   deleteDocsLib,
 } from './docs-lib';
 
-// ========== 文档相关函数 ==========
+// ========== 文档相关函数（更新后） ==========
 export {
-  getDocIndex,
+  getDocsByLib,
   getDocument,
-  getDocBySlug,           // 新增，需已在 document.ts 中实现
   saveDocument,
   deleteDocument,
-  reorderDocuments,
-  moveDocument,
+  copyDocument,
+  updateDocOrders,
+  syncDocOrdersAllLocales,
+  getDocTree,
 } from './document';
 
 // ========== 树构建函数 ==========

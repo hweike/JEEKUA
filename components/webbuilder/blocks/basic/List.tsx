@@ -1,110 +1,147 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
-import { useLocale } from 'next-intl';
+import React from 'react';
+import {
+  Check,
+  Star,
+  Heart,
+  Tag,
+  Lock,
+  Truck,
+  Flame,
+  Leaf,
+  Zap,
+  Plane,
+  MapPin,
+  HelpCircle,
+  Clipboard,
+  Eye,
+  User,
+  Shirt,
+  Box,
+  Recycle,
+  Undo,
+  Ruler,
+  Utensils,
+  Snowflake,
+  Timer,
+  ShoppingCart,
+} from 'lucide-react';
+import { DEFAULT_LIST } from '@/lib/webbuilder/defaults/List';
 
-const getIcon = (type: string, index: number, style: React.CSSProperties) => {
-  const iconStyle = { ...style, marginRight: '0.5rem', display: 'inline' };
-  switch (type) {
-    case 'dot':
-      return <span style={iconStyle}>•</span>;
-    case 'number':
-      return <span style={iconStyle}>{index + 1}.</span>;
-    case 'star':
-      return <span style={iconStyle}>★</span>;
-    default:
-      return null;
-  }
+// Lucide 图标映射（与 Collapsible 保持一致）
+const ICON_COMPONENTS: Record<string, React.ElementType> = {
+  shopping_cart: ShoppingCart,
+  tag: Tag,
+  lock: Lock,
+  heart: Heart,
+  star: Star,
+  truck: Truck,
+  flame: Flame,
+  leaf: Leaf,
+  zap: Zap,
+  plane: Plane,
+  map_pin: MapPin,
+  help_circle: HelpCircle,
+  check: Check,
+  clipboard: Clipboard,
+  eye: Eye,
+  user: User,
+  shirt: Shirt,
+  box: Box,
+  price_tag: Tag,
+  recycle: Recycle,
+  undo: Undo,
+  ruler: Ruler,
+  utensils: Utensils,
+  snowflake: Snowflake,
+  timer: Timer,
 };
 
-export function List({ items, iconType = 'none', puck, __runtime }: any) {
+// 辅助函数：提取文本（兼容旧数据）
+function getDisplayText(field: any): string {
+  if (typeof field === 'string') return field;
+  if (field && typeof field === 'object') {
+    return field.zh || field.en || field.textId || Object.values(field).find(v => v) || '';
+  }
+  return '';
+}
+
+export function List({ items, puck, spacingGroup }: any) {
   const isEditMode = !!puck?.isEditing;
-  const pageLocale = useLocale();
 
-  const [editLocale, setEditLocale] = useState<string>(() => {
-    if (typeof window !== 'undefined' && isEditMode) {
-      const stored = localStorage.getItem('webbuilder_edit_locale');
-      if (stored && (stored === 'zh' || stored === 'en')) return stored;
-    }
-    return pageLocale;
-  });
-
-  useEffect(() => {
-    if (!isEditMode) return;
-    const handleStorage = (e: StorageEvent) => {
-      if (e.key === 'webbuilder_edit_locale') {
-        const newLocale = e.newValue;
-        if (newLocale && (newLocale === 'zh' || newLocale === 'en')) setEditLocale(newLocale);
-      }
-    };
-    window.addEventListener('storage', handleStorage);
-    return () => window.removeEventListener('storage', handleStorage);
-  }, [isEditMode]);
-
-  useEffect(() => {
-    if (!isEditMode) return;
-    const stored = localStorage.getItem('webbuilder_edit_locale');
-    if (!stored) setEditLocale(pageLocale);
-  }, [isEditMode, pageLocale]);
-
-  const displayLocale = isEditMode ? editLocale : pageLocale;
-
-  const getDisplayText = (itemText: any) => {
-    if (typeof itemText === 'string') return itemText;
-    if (!itemText || typeof itemText !== 'object') return '';
-    if (__runtime?.texts && itemText.textId && __runtime.texts[itemText.textId]) {
-      return __runtime.texts[itemText.textId];
-    }
-    if (itemText[displayLocale]) return itemText[displayLocale];
-    if (itemText.en) return itemText.en;
-    if (itemText.zh) return itemText.zh;
-    return '';
+  const mergedSpacingGroup = {
+    ...DEFAULT_LIST.spacingGroup,
+    ...spacingGroup,
   };
+  const mobileScaleFactor = mergedSpacingGroup.mobileScaleFactor ?? 0.7;
 
-  if (!items || items.length === 0) {
+  const mergedItems = items ?? DEFAULT_LIST.items;
+
+  if (!mergedItems || mergedItems.length === 0) {
     return (
-      <div ref={puck?.dragRef} className="max-w-7xl mx-auto my-2 text-gray-400 text-center">
-        暂无列表项，请在属性面板添加
+      <div ref={puck?.dragRef} className="relative overflow-hidden">
+        <div className="w-full text-center text-gray-400 py-4">
+          暂无列表项，请在属性面板添加
+        </div>
       </div>
     );
   }
 
+  // 左右缩进与 Collapsible 完全一致
+  const containerStyle: React.CSSProperties = {
+    maxWidth: '80rem',
+    margin: '0 auto',
+    width: '100%',
+    paddingLeft: 'clamp(1rem, 2vw, 2rem)',
+    paddingRight: 'clamp(1rem, 2vw, 2rem)',
+  };
+
   return (
-    <div ref={puck?.dragRef} className="max-w-7xl mx-auto my-2">
-      <ul style={{ listStyle: 'none', padding: 0, margin: 0 }}>
-        {items.map((item: any, idx: number) => {
-          const text = getDisplayText(item.text);
-          const baseStyle: React.CSSProperties = {
-            color: item.textColor || '#000000',
-            fontSize: `${item.fontSize || 16}px`,
-            fontWeight: item.bold ? 'bold' : 'normal',
-            fontStyle: item.italic ? 'italic' : 'normal',
-            textDecoration: item.underline ? 'underline' : 'none',
-            lineHeight: 1.5,
-          };
-          const linkHref = item.link?.trim();
-          const isInteractive = !isEditMode && linkHref;
-          const Element = isInteractive ? 'a' : 'span';
-          const extraProps = isInteractive
-            ? { href: linkHref, target: '_blank', rel: 'noopener noreferrer' }
-            : {};
+    <div ref={puck?.dragRef} className="relative overflow-hidden">
+      <div style={containerStyle}>
+        <ul style={{ listStyle: 'none', padding: 0, margin: 0 }}>
+          {mergedItems.map((item: any, idx: number) => {
+            const text = getDisplayText(item.text) || `列表项 ${idx + 1}`;
+            const IconComponent = ICON_COMPONENTS[item.icon];
+            const isInteractive = !isEditMode && item.link?.trim();
+            const Element = isInteractive ? 'a' : 'span';
+            const extraProps = isInteractive
+              ? { href: item.link.trim(), target: '_blank', rel: 'noopener noreferrer' }
+              : {};
 
-          // 文本对齐应用在 li 上，使整个列表项内容按指定方式对齐
-          const liStyle: React.CSSProperties = {
-            marginBottom: '0.5rem',
-            textAlign: item.textAlign || 'left',
-          };
+            const fontSizeClamp = `clamp(${item.fontSize * mobileScaleFactor}px, 1.2vw, ${item.fontSize}px)`;
 
-          return (
-            <li key={item.id} style={liStyle}>
-              {getIcon(iconType, idx, baseStyle)}
-              <Element {...extraProps} style={baseStyle}>
-                {text || `列表项 ${idx + 1}`}
-              </Element>
-            </li>
-          );
-        })}
-      </ul>
+
+            const liStyle: React.CSSProperties = {
+              display: 'flex',
+              alignItems: 'flex-start',
+              marginBottom: '0.75rem',
+              gap: '0.5rem',
+              justifyContent: item.textAlign === 'center' ? 'center' : item.textAlign === 'right' ? 'flex-end' : 'flex-start',
+            };
+            // ✅ 文本对齐直接应用到文本元素上
+            const baseStyle: React.CSSProperties = {
+              color: item.textColor || '#000000',
+              fontSize: fontSizeClamp,
+              fontWeight: item.bold ? 'bold' : 'normal',
+              fontStyle: item.italic ? 'italic' : 'normal',
+              textDecoration: item.underline ? 'underline' : 'none',
+              lineHeight: 1.5,
+            };            
+          
+
+            return (
+               <li key={item.id || idx} style={liStyle}>
+                {IconComponent && <IconComponent size={20} className="flex-shrink-0 mt-0.5" />}
+                <Element {...extraProps} style={baseStyle}>
+                  {text}
+                </Element>
+              </li>
+            );
+          })}
+        </ul>
+      </div>
     </div>
   );
 }

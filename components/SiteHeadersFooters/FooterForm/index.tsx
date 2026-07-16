@@ -3,9 +3,9 @@
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { FooterConfig, SocialLink } from '@/lib/SiteHeadersFooters/types';
-import ImageUploader from '../common/ImageUploader';
+import ImageUpload from '@/components/ImageUpload';
 import SliderInput from '../common/SliderInput';
 import ToggleSwitch from '../common/ToggleSwitch';
 import MenuSelector from '../common/MenuSelector';
@@ -23,7 +23,6 @@ import {
   FaVimeo,
 } from 'react-icons/fa';
 
-// 平台图标映射
 const platformIcons: Record<string, React.ComponentType<{ className?: string }>> = {
   facebook: FaFacebook,
   instagram: FaInstagram,
@@ -36,9 +35,8 @@ const platformIcons: Record<string, React.ComponentType<{ className?: string }>>
   vimeo: FaVimeo,
 };
 
-// 扩展 schema，增加 style 字段
 const footerSchema = z.object({
-  style: z.enum(['simple', 'classic', 'luxury']), // 新增页脚风格
+  style: z.enum(['simple', 'classic', 'luxury']),
   emailSubscription: z.object({
     enabled: z.boolean(),
     title: z.string(),
@@ -89,45 +87,114 @@ const footerSchema = z.object({
 interface FooterFormProps {
   initialConfig: FooterConfig;
   locale: string;
+  onSave?: (success: boolean, message?: string) => void;
 }
 
-// 默认配置（用于补充缺失字段）
-const DEFAULTS = {
-  style: 'simple' as const,
-};
+// 构建完整默认值的函数（确保所有字段存在）
+function buildDefaultValues(config: FooterConfig): FooterConfig {
+  console.log('[FooterForm] 原始 config:', config);
+  const result = {
+    style: config.style || 'simple',
+    emailSubscription: {
+      enabled: config.emailSubscription?.enabled ?? false,
+      title: config.emailSubscription?.title || '',
+      subtitle: config.emailSubscription?.subtitle || '',
+    },
+    brandMenu: {
+      brandItem: {
+        visible: config.brandMenu?.brandItem?.visible ?? false,
+        imageUrl: config.brandMenu?.brandItem?.imageUrl || '',
+        imageWidth: config.brandMenu?.brandItem?.imageWidth ?? 120,
+        imageAlign: config.brandMenu?.brandItem?.imageAlign || 'left',
+      },
+      column1: {
+        visible: config.brandMenu?.column1?.visible ?? false,
+        title: config.brandMenu?.column1?.title || '',
+        menuId: config.brandMenu?.column1?.menuId || '',
+      },
+      column2: {
+        visible: config.brandMenu?.column2?.visible ?? false,
+        title: config.brandMenu?.column2?.title || '',
+        menuId: config.brandMenu?.column2?.menuId || '',
+      },
+      column3: {
+        visible: config.brandMenu?.column3?.visible ?? false,
+        title: config.brandMenu?.column3?.title || '',
+        menuId: config.brandMenu?.column3?.menuId || '',
+      },
+    },
+    social: {
+      visible: config.social?.visible ?? false,
+      links: config.social?.links || [],
+    },
+    utilities: {
+      showPolicyLinks: config.utilities?.showPolicyLinks ?? false,
+      topSpacing: config.utilities?.topSpacing ?? 0,
+      bottomSpacing: config.utilities?.bottomSpacing ?? 0,
+    },
+    textInfo: {
+      enabled: config.textInfo?.enabled ?? false,
+      title: config.textInfo?.title || '',
+      content: config.textInfo?.content || '',
+    },
+  };
+  console.log('[FooterForm] 构建的默认值:', result);
+  return result;
+}
 
-export default function FooterForm({ initialConfig, locale }: FooterFormProps) {
+export default function FooterForm({ initialConfig, locale, onSave }: FooterFormProps) {
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
 
-  // 确保 initialConfig 中包含 style 字段
-  const mergedConfig = {
-    ...initialConfig,
-    style: initialConfig.style || DEFAULTS.style,
-  };
+  // 生成默认值（仅在 initialConfig 变化时重新生成）
+  const [defaultValues] = useState(() => buildDefaultValues(initialConfig));
 
   const { register, control, handleSubmit, watch, setValue } = useForm({
     resolver: zodResolver(footerSchema),
-    defaultValues: mergedConfig,
+    defaultValues,
+    shouldUnregister: false, // 保持字段注册，避免丢失
   });
 
+  // 调试：打印当前表单值变化（可选）
+  useEffect(() => {
+    const subscription = watch((value) => {
+      console.log('[FooterForm] 表单值变化:', value);
+    });
+    return () => subscription.unsubscribe();
+  }, [watch]);
+
   const onSubmit = async (data: FooterConfig) => {
+    console.log('[FooterForm] 提交数据:', data);
     try {
-      const res = await fetch('/api/SiteHeadersFooters/save', {
+      const res = await fetch('/api/SiteHeadersFooters/config', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ type: 'footer', locale, config: data }),
       });
+      console.log('[FooterForm] 响应状态:', res.status);
       if (res.ok) {
-        setToast({ message: '保存成功', type: 'success' });
+        const msg = '保存成功';
+        setToast({ message: msg, type: 'success' });
+        if (onSave) onSave(true, msg);
       } else {
         const err = await res.json();
-        setToast({ message: err.error || '保存失败', type: 'error' });
+        const msg = err.error || '保存失败';
+        setToast({ message: msg, type: 'error' });
+        if (onSave) onSave(false, msg);
       }
     } catch (error) {
-      setToast({ message: '保存失败，请重试', type: 'error' });
+      console.error('[FooterForm] 保存异常:', error);
+      const msg = '保存失败，请重试';
+      setToast({ message: msg, type: 'error' });
+      if (onSave) onSave(false, msg);
     }
   };
 
+  const onError = (errors: any) => {
+    console.error('[FooterForm] 表单验证错误:', errors);
+    setToast({ message: '表单数据有误，请检查红色字段', type: 'error' });
+  };
+
+  // 社交链接更新（保持不变）
   const updateSocialLink = (platform: SocialLink['platform'], url: string) => {
     const currentLinks = watch('social.links') || [];
     const existingIndex = currentLinks.findIndex(link => link.platform === platform);
@@ -156,7 +223,7 @@ export default function FooterForm({ initialConfig, locale }: FooterFormProps) {
 
   return (
     <>
-      <form onSubmit={handleSubmit(onSubmit)} className="space-y-8">
+      <form onSubmit={handleSubmit(onSubmit, onError)} className="space-y-8">
         {/* ========== 页脚风格卡片 ========== */}
         <div className="border rounded-lg p-6 space-y-4">
           <h2 className="text-lg font-semibold">页脚风格</h2>
@@ -201,7 +268,6 @@ export default function FooterForm({ initialConfig, locale }: FooterFormProps) {
         <div className="border rounded-lg p-6 space-y-6">
           <h2 className="text-lg font-semibold">标识与菜单</h2>
           
-          {/* 网站标识 */}
           <div className="border-b pb-4">
             <div className="flex justify-between items-center">
               <span className="text-md font-medium">网站标识</span>
@@ -213,14 +279,12 @@ export default function FooterForm({ initialConfig, locale }: FooterFormProps) {
             </div>
             {watch('brandMenu.brandItem.visible') && (
               <div className="mt-4 space-y-4">
-                <ImageUploader
+                <ImageUpload
                   value={watch('brandMenu.brandItem.imageUrl') || ''}
-                  onChange={(url) => setValue('brandMenu.brandItem.imageUrl', url)}
+                  onChange={(url) => setValue('brandMenu.brandItem.imageUrl', Array.isArray(url) ? url[0] : url)}
+                  maxCount={1}
                   label="标识图片"
                   hint="建议尺寸 250×100px (2.5:1)，优先使用 PNG 格式"
-                  width={250}
-                  aspectRatio={2.5}
-                  buttonText="上传图片"
                 />
                 <SliderInput
                   value={watch('brandMenu.brandItem.imageWidth') || 120}
@@ -242,7 +306,6 @@ export default function FooterForm({ initialConfig, locale }: FooterFormProps) {
             )}
           </div>
 
-          {/* 菜单-1 */}
           <div className="border-b pb-4">
             <div className="flex justify-between items-center">
               <span className="text-md font-medium">菜单-1</span>
@@ -269,7 +332,6 @@ export default function FooterForm({ initialConfig, locale }: FooterFormProps) {
             )}
           </div>
 
-          {/* 菜单-2 */}
           <div className="border-b pb-4">
             <div className="flex justify-between items-center">
               <span className="text-md font-medium">菜单-2</span>
@@ -296,7 +358,6 @@ export default function FooterForm({ initialConfig, locale }: FooterFormProps) {
             )}
           </div>
 
-          {/* 菜单-3 */}
           <div className="border-b pb-4">
             <div className="flex justify-between items-center">
               <span className="text-md font-medium">菜单-3</span>
@@ -323,7 +384,6 @@ export default function FooterForm({ initialConfig, locale }: FooterFormProps) {
             )}
           </div>
 
-          {/* 文本信息 */}
           <div className="border-b pb-4">
             <div className="flex justify-between items-center">
               <span className="text-md font-medium">文本信息</span>

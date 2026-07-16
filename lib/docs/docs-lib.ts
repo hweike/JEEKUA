@@ -1,12 +1,16 @@
-// /lib/docs/docs-lib.ts
+// lib/docs/docs-lib.ts
 import { getPrivateStorage } from '@/lib/storage/factory';
 import type { DocsLib } from './types';
+// ═══ 新增导入 ═══
+import { registerEntity } from '@/lib/discovery/services/business-register-pages.service';
+import { deletePage } from '@/lib/discovery/register';
+import type { PageData } from '@/lib/discovery/register';
 
-// 私有桶中的基础路径（去掉 data/ 前缀，与其他模块统一）
 const STORAGE_BASE = 'docs';
+const GLOBAL_LOCALE = 'global'; // 文档库全局共享，使用固定 locale
 
-function getLibsKey(locale: string): string {
-  return `${STORAGE_BASE}/${locale}/libs.json`;
+function getLibsKey(): string {
+  return `${STORAGE_BASE}/libs.json`;
 }
 
 function getLibDirKey(locale: string, libId: string): string {
@@ -19,7 +23,6 @@ async function readJsonFile<T>(key: string): Promise<T | null> {
     const content = await storage.read(key, 'utf8');
     return JSON.parse(content as string);
   } catch (error: any) {
-    // 兼容多种错误形式
     if (error?.code === 'NoSuchKey' || error?.Code === 'NoSuchKey' || error?.message?.includes('File not found')) {
       return null;
     }
@@ -34,9 +37,6 @@ async function writeJsonFile(key: string, data: any): Promise<void> {
   });
 }
 
-// 云存储无需创建目录，保留空实现
-async function ensureDir(_keyPrefix: string): Promise<void> {}
-
 async function deleteDir(keyPrefix: string): Promise<void> {
   const storage = getPrivateStorage();
   const keys = await storage.list(keyPrefix);
@@ -45,23 +45,44 @@ async function deleteDir(keyPrefix: string): Promise<void> {
   }
 }
 
-export async function getDocsLibs(locale: string): Promise<DocsLib[]> {
-  const libs = await readJsonFile<DocsLib[]>(getLibsKey(locale));
+// 获取所有语言目录（通过读取 STORAGE_BASE 下的一级目录）
+async function getLocaleDirs(): Promise<string[]> {
+  const storage = getPrivateStorage();
+  try {
+    const allKeys = await storage.list(STORAGE_BASE + '/');
+    const locales = new Set<string>();
+    for (const key of allKeys) {
+      const parts = key.split('/');
+      if (parts.length >= 2 && parts[1]) {
+        locales.add(parts[1]);
+      }
+    }
+    return Array.from(locales);
+  } catch {
+    return [];
+  }
+}
+
+export async function getDocsLibs(): Promise<DocsLib[]> {
+  const libs = await readJsonFile<DocsLib[]>(getLibsKey());
   return libs ?? [];
 }
 
-export async function getDocsLib(locale: string, id: string): Promise<DocsLib | null> {
-  const libs = await getDocsLibs(locale);
+export async function getDocsLib(id: string): Promise<DocsLib | null> {
+  const libs = await getDocsLibs();
   return libs.find(lib => lib.id === id) || null;
 }
 
-export async function getDocsLibBySlug(locale: string, slug: string): Promise<DocsLib | null> {
-  const libs = await getDocsLibs(locale);
+export async function getDocsLibBySlug(slug: string): Promise<DocsLib | null> {
+  const libs = await getDocsLibs();
   return libs.find(lib => lib.slug?.toLowerCase() === slug.toLowerCase()) || null;
 }
 
+/**
+ * 创建文档库
+ * 新增：注册到 pages 表（locale = 'global'）
+ */
 export async function createDocsLib(
-  locale: string,
   name: string,
   description?: string,
   templateId?: string | null,
@@ -70,7 +91,7 @@ export async function createDocsLib(
   seo_title?: string,
   seo_description?: string
 ): Promise<DocsLib> {
-  const libs = await getDocsLibs(locale);
+  const libs = await getDocsLibs();
   const newLib: DocsLib = {
     id: generateLibId(),
     name,
@@ -84,34 +105,69 @@ export async function createDocsLib(
     createdAt: new Date().toISOString(),
   };
   libs.push(newLib);
-  await writeJsonFile(getLibsKey(locale), libs);
+  await writeJsonFile(getLibsKey(), libs);
 
-  const libDirKey = getLibDirKey(locale, newLib.id);
-  await ensureDir(libDirKey);
-  await writeJsonFile(`${libDirKey}/index.json`, { docs: [] });
+  // 异步注册到 pages 表（全局 locale）
+  registerEntity({
+    type: 'docLibrary',
+    id: newLib.id,
+    locale: GLOBAL_LOCALE,
+    data: newLib,
+    updatedAt: newLib.createdAt,
+  }).catch(err => console.error(`注册文档库失败 (${newLib.id}):`, err));
+
   return newLib;
 }
 
+/**
+ * 更新文档库
+ * 新增：更新后重新注册到 pages 表（locale = 'global'）
+ */
 export async function updateDocsLib(
-  locale: string,
   id: string,
   updates: Partial<Pick<DocsLib, 'name' | 'description' | 'templateId' | 'slug' | 'seo_keywords' | 'seo_title' | 'seo_description'>>
 ): Promise<void> {
-  const libs = await getDocsLibs(locale);
+  const libs = await getDocsLibs();
   const index = libs.findIndex(lib => lib.id === id);
   if (index === -1) throw new Error('文档库不存在');
-  libs[index] = { ...libs[index], ...updates };
-  await writeJsonFile(getLibsKey(locale), libs);
+  const updatedLib = { ...libs[index], ...updates };
+  libs[index] = updatedLib;
+  await writeJsonFile(getLibsKey(), libs);
+
+  // 异步重新注册到 pages 表
+  registerEntity({
+    type: 'docLibrary',
+    id: id,
+    locale: GLOBAL_LOCALE,
+    data: updatedLib,
+    updatedAt: new Date().toISOString(),
+  }).catch(err => console.error(`更新文档库注册失败 (${id}):`, err));
 }
 
-export async function deleteDocsLib(locale: string, id: string): Promise<void> {
-  const libs = await getDocsLibs(locale);
+/**
+ * 删除文档库
+ * 新增：删除对应的 pages 记录（locale = 'global'）
+ */
+export async function deleteDocsLib(id: string): Promise<void> {
+  const libs = await getDocsLibs();
   const filtered = libs.filter(lib => lib.id !== id);
   if (filtered.length === libs.length) throw new Error('文档库不存在');
-  await writeJsonFile(getLibsKey(locale), filtered);
+  await writeJsonFile(getLibsKey(), filtered);
 
-  const libDirKey = getLibDirKey(locale, id);
-  await deleteDir(libDirKey);
+  // 删除所有已存在的语言目录下该库的数据
+  const locales = await getLocaleDirs();
+  for (const locale of locales) {
+    const libDirKey = getLibDirKey(locale, id);
+    await deleteDir(libDirKey);
+  }
+
+  // 删除对应的 pages 记录
+  const pageId = `docLibrary:${id}`;
+  try {
+    await deletePage(pageId, GLOBAL_LOCALE);
+  } catch (err) {
+    console.error(`删除文档库 pages 失败 (${pageId}):`, err);
+  }
 }
 
 function generateLibId(): string {

@@ -2,10 +2,13 @@
 
 import { useState, useEffect, useRef } from 'react';
 import { provinces } from '@/lib/Basicsettings/provinces';
+import { validatePhone } from '@/lib/Basicsettings/validation';
 
 interface Settings {
   siteName: string;
   websiteUrl: string;
+  defaultLocale: string;        // 新增
+  targetAudience: string;        // 新增
   contactEmail: string;
   contactPhone: string;
   companyName: string;
@@ -14,10 +17,10 @@ interface Settings {
   city: string;
   province: string;
   postalCode: string;
-  brand: string[];   // 新增
+  brand: string[];
 }
 
-// TagsInput 组件
+// TagsInput 组件（不变）
 function TagsInput({ value, onChange, placeholder }: { value: string[]; onChange: (tags: string[]) => void; placeholder?: string }) {
   const [inputValue, setInputValue] = useState('');
   const inputRef = useRef<HTMLInputElement>(null);
@@ -30,7 +33,6 @@ function TagsInput({ value, onChange, placeholder }: { value: string[]; onChange
       }
       setInputValue('');
     } else if (e.key === 'Backspace' && inputValue === '' && value.length > 0) {
-      // 可选：按退格键删除最后一个标签
       onChange(value.slice(0, -1));
     }
   };
@@ -95,10 +97,11 @@ export default function BasicSettingsPage() {
         return res.json();
       })
       .then(data => {
-        // 确保 brand 为数组
         setSettings({
           ...data,
           websiteUrl: data.websiteUrl || '',
+          defaultLocale: data.defaultLocale || 'en',
+          targetAudience: data.targetAudience || '',
           brand: Array.isArray(data.brand) ? data.brand : [],
         });
         setLoading(false);
@@ -114,28 +117,15 @@ export default function BasicSettingsPage() {
   };
 
   const validateForm = (): string | null => {
-    if (!settings?.siteName?.trim()) {
-      return '网站名称不能为空';
-    }
+    if (!settings?.siteName?.trim()) return '网站名称不能为空';
     const url = settings.websiteUrl?.trim();
-    if (!url) {
-      return '网址不能为空';
+    if (!url) return '网址不能为空';
+    if (!/^https?:\/\/.+/.test(url)) return '网址必须以 http:// 或 https:// 开头';
+    if (settings.contactEmail?.trim() && !/^[^\s@]+@([^\s@]+\.)+[^\s@]+$/.test(settings.contactEmail)) {
+      return '邮箱格式不正确';
     }
-    const urlRegex = /^https?:\/\/.+/;
-    if (!urlRegex.test(url)) {
-      return '网址必须以 http:// 或 https:// 开头';
-    }
-    if (settings.contactEmail && settings.contactEmail.trim() !== '') {
-      const emailRegex = /^[^\s@]+@([^\s@]+\.)+[^\s@]+$/;
-      if (!emailRegex.test(settings.contactEmail)) {
-        return '邮箱格式不正确';
-      }
-    }
-    if (settings.contactPhone && settings.contactPhone.trim() !== '') {
-      const phoneRegex = /^1[3-9]\d{9}$|^0\d{2,3}-?\d{7,8}$/;
-      if (!phoneRegex.test(settings.contactPhone)) {
-        return '电话格式不正确（手机或固定电话）';
-      }
+    if (settings.contactPhone?.trim() && !validatePhone(settings.contactPhone)) {
+     return '电话格式不正确（请填写国内手机/固话或国际号码）';
     }
     return null;
   };
@@ -205,6 +195,27 @@ export default function BasicSettingsPage() {
               <p className="text-xs text-gray-500 mt-1">必须以 http:// 或 https:// 开头</p>
             </div>
             <div>
+              <label className="block text-sm font-medium text-gray-700">默认语言</label>
+              <input
+                type="text"
+                value={settings.defaultLocale || 'en'}
+                onChange={e => handleChange('defaultLocale', e.target.value)}
+                className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm p-2"
+                placeholder="例如: en, zh"
+              />
+              <p className="text-xs text-gray-500 mt-1">建议使用 ISO 639-1 语言代码（如 en, zh）</p>
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700">目标受众</label>
+              <textarea
+                value={settings.targetAudience || ''}
+                onChange={e => handleChange('targetAudience', e.target.value)}
+                rows={3}
+                className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm p-2"
+                placeholder="描述网站的目标受众群体，例如：B2B 电源制造商、工程师..."
+              />
+            </div>
+            <div>
               <label className="block text-sm font-medium text-gray-700">销售品牌</label>
               <TagsInput
                 value={settings.brand}
@@ -216,7 +227,7 @@ export default function BasicSettingsPage() {
           </div>
         </div>
 
-        {/* 卡片2：商务联系方式（保持不变） */}
+        {/* 卡片2：商务联系方式（不变） */}
         <div className="bg-white rounded-lg shadow p-6">
           <h2 className="text-lg font-semibold mb-4">商务联系方式</h2>
           <div className="space-y-4">
@@ -230,20 +241,20 @@ export default function BasicSettingsPage() {
                 placeholder="example@domain.com"
               />
             </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-700">联系电话（可选）</label>
-              <input
-                type="tel"
-                value={settings.contactPhone}
-                onChange={e => handleChange('contactPhone', e.target.value)}
-                className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm p-2"
-                placeholder="手机或固定电话"
-              />
-            </div>
+          <div>
+          <label className="block text-sm font-medium text-gray-700">联系电话（可选）</label>
+          <input
+            type="tel"
+            value={settings.contactPhone}
+            onChange={e => handleChange('contactPhone', e.target.value)}
+            className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm p-2"
+            placeholder="手机、固话或国际电话（含区号）"
+          />
+          </div>  
           </div>
         </div>
 
-        {/* 卡片3：公司信息（保持不变） */}
+        {/* 卡片3：公司信息（修正省份下拉框） */}
         <div className="bg-white rounded-lg shadow p-6">
           <h2 className="text-lg font-semibold mb-4">公司信息</h2>
           <div className="space-y-4">
@@ -260,7 +271,7 @@ export default function BasicSettingsPage() {
               <label className="block text-sm font-medium text-gray-700">国家/地区</label>
               <input
                 type="text"
-                value="中国"
+                value="China"
                 disabled
                 className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm p-2 bg-gray-100"
               />
@@ -284,7 +295,7 @@ export default function BasicSettingsPage() {
                 >
                   <option value="">请选择省份</option>
                   {provinces.map(p => (
-                    <option key={p} value={p}>{p}</option>
+                    <option key={p.value} value={p.value}>{p.label}</option>
                   ))}
                 </select>
               </div>

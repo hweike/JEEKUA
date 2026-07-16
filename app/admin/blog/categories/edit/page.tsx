@@ -1,9 +1,12 @@
+// app/admin/blog/categories/edit/page.tsx
 'use client';
 
 import { useEffect, useState } from 'react';
 import { useSearchParams, useRouter } from 'next/navigation';
 import SeoFields from '@/components/common/SeoFields';
 import { TemplateSelector } from '@/components/webbuilder/TemplateSelector';
+import { useToast } from '@/contexts/ToastContext';
+import { getLanguageDisplayName } from '@/lib/languages/config';
 
 interface CategoryForm {
   id?: string;
@@ -19,29 +22,33 @@ interface CategoryForm {
 export default function CategoryEdit() {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const locale = searchParams.get('locale') || 'zh';
-  const id = searchParams.get('id');
+  const { showToast } = useToast();
+
+  const localeFromUrl = searchParams.get('locale') || 'zh';
+  const idFromUrl = searchParams.get('id');
 
   const [formData, setFormData] = useState<CategoryForm>({
     title: '',
     comment_status: 'allowed',
-    template: '',   // 默认值，若模板列表存在则可能被覆盖
+    template: '',
     slug: '',
     seo_keywords: '',
     seo_title: '',
     seo_description: '',
   });
   const [loading, setLoading] = useState(false);
-  const [fetchLoading, setFetchLoading] = useState(!!id);
+  const [fetchLoading, setFetchLoading] = useState(!!idFromUrl);
+  const [isExisting, setIsExisting] = useState(false);
 
-  // 编辑模式加载数据
+  // 编辑模式加载数据（如果 id 存在且该语言有数据）
   useEffect(() => {
-    if (id) {
-      fetch(`/api/admin/blog/categories?locale=${locale}`)
+    if (idFromUrl) {
+      fetch(`/api/admin/blog/categories?locale=${localeFromUrl}`)
         .then(res => res.json())
         .then(data => {
-          const category = data.find((c: any) => c.id === id);
+          const category = data.find((c: any) => c.id === idFromUrl);
           if (category) {
+            setIsExisting(true);
             setFormData({
               id: category.id,
               title: category.title,
@@ -53,54 +60,57 @@ export default function CategoryEdit() {
               seo_description: category.seo_description || '',
             });
           } else {
-            alert('分类不存在');
-            router.push('/admin/blog/categories');
+            // 该语言下不存在此 id，视为新建（但保留 id）
+            setIsExisting(false);
+            setFormData(prev => ({ ...prev, id: idFromUrl }));
           }
         })
-        .catch(() => alert('加载失败'))
+        .catch(() => showToast('加载失败', 'error'))
         .finally(() => setFetchLoading(false));
+    } else {
+      setIsExisting(false);
     }
-  }, [id, locale, router]);
+  }, [idFromUrl, localeFromUrl, showToast]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!formData.title.trim()) {
-      alert('请填写标题');
+      showToast('请填写标题', 'error');
       return;
     }
     if (!formData.slug.trim()) {
-      alert('请填写 URL 名称 (slug)');
+      showToast('请填写 URL 名称 (slug)', 'error');
       return;
     }
     if (!/^[a-z0-9-]+$/.test(formData.slug)) {
-      alert('URL 名称只能包含小写字母、数字和连字符');
+      showToast('URL 名称只能包含小写字母、数字和连字符', 'error');
       return;
     }
 
     setLoading(true);
     try {
-      const url = '/api/admin/blog/categories';
-      const method = id ? 'PUT' : 'POST';
+      // 根据是否已存在决定方法
+      const method = isExisting ? 'PUT' : 'POST';
       const payload = {
-        locale,
+        locale: localeFromUrl,
         ...formData,
-        ...(id && { id }),
+        ...(idFromUrl && { id: formData.id || idFromUrl }),
       };
 
-      const res = await fetch(url, {
+      const res = await fetch('/api/admin/blog/categories', {
         method,
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
       });
       const data = await res.json();
       if (res.ok) {
-        alert(id ? '更新成功' : '创建成功');
+        showToast(isExisting ? '更新成功' : '创建成功', 'success');
         router.push('/admin/blog/categories');
       } else {
-        alert(data.error || '操作失败');
+        showToast(data.error || '操作失败', 'error');
       }
-    } catch (err) {
-      alert('网络错误');
+    } catch {
+      showToast('网络错误', 'error');
     } finally {
       setLoading(false);
     }
@@ -108,11 +118,12 @@ export default function CategoryEdit() {
 
   if (fetchLoading) return <div className="p-6">加载中...</div>;
 
+  const localeDisplayName = getLanguageDisplayName(localeFromUrl, 'zh');
+  const pageTitle = isExisting ? '编辑分类' : '新建分类';
+
   return (
     <div className="p-6 max-w-7xl mx-auto">
-      <h1 className="text-2xl font-bold mb-6">
-        {id ? '编辑分类' : '新建分类'}
-      </h1>
+      <h1 className="text-2xl font-bold mb-6">{pageTitle}</h1>
 
       <form onSubmit={handleSubmit}>
         <div className="grid grid-cols-1 lg:grid-cols-[65%_30%] gap-6">
@@ -120,6 +131,12 @@ export default function CategoryEdit() {
           <div className="space-y-6">
             <div className="bg-white rounded-lg shadow p-6">
               <h2 className="text-lg font-semibold mb-4">标题</h2>
+
+              {/* 适用站点（只读，从 URL 获取） */}
+              <div className="mb-4 text-sm text-gray-600">
+                适用站点：{localeDisplayName} ({localeFromUrl})
+              </div>
+
               <input
                 type="text"
                 value={formData.title}
@@ -171,12 +188,11 @@ export default function CategoryEdit() {
             <div className="bg-white rounded-lg shadow p-6">
               <h2 className="text-lg font-semibold mb-4">模板样式</h2>
               <TemplateSelector
-                category="blog"   // ✅ 微调：改为 "blog"
+                category="blog"
                 value={formData.template}
                 onChange={(val) => setFormData({ ...formData, template: val })}
                 placeholder="选择模板"
               />
-             
             </div>
           </div>
         </div>

@@ -1,5 +1,6 @@
-// lib/webbuilder/template-repo.ts
+// lib/webbuilder/template-manager.ts
 import { getPrivateStorage } from '@/lib/storage/factory';
+import { createHash } from 'crypto';
 
 // 私有桶中的基础前缀（已去掉 data/ 前缀，与其他模块统一）
 const STORAGE_PREFIX = 'webbuilder/templates';
@@ -23,6 +24,7 @@ export interface Template {
   category: TemplateCategory;
   isSystem?: boolean;        // 标记为系统模板
   data: any;
+  hash?: string;             // 模板数据的 SHA256 哈希（用于版本检测）
   createdAt: string;
   updatedAt: string;
 }
@@ -32,6 +34,13 @@ const ALL_CATEGORIES: TemplateCategory[] = [
   'page', 'product', 'product_category', 'document', 'document_library',
   'blog', 'blog_post', 'video_category', 'video', 'product_line'
 ];
+
+/**
+ * 计算模板数据的哈希值（SHA256）
+ */
+export function computeTemplateHash(data: any): string {
+  return createHash('sha256').update(JSON.stringify(data)).digest('hex');
+}
 
 /**
  * 获取某个分类下所有模板的存储 Key 前缀
@@ -88,6 +97,7 @@ export async function getAllTemplates(category?: TemplateCategory | null): Promi
 
 /**
  * 根据 ID 获取模板（自动遍历所有分类查找）
+ * 返回的模板对象包含 hash 字段（如果模板文件中有）
  */
 export async function getTemplateById(id: string): Promise<Template | null> {
   const storage = getPrivateStorage();
@@ -107,12 +117,13 @@ export async function getTemplateById(id: string): Promise<Template | null> {
 }
 
 /**
- * 创建新模板
+ * 创建新模板（注意：此函数不会自动计算 hash，调用方需自行计算）
  */
 export async function createTemplate(input: {
   name: string;
   category: TemplateCategory;
   data: any;
+  hash?: string;  // 可选，建议传入
 }): Promise<Template> {
   const storage = getPrivateStorage();
   const id = `template_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`;
@@ -123,6 +134,7 @@ export async function createTemplate(input: {
     name: input.name,
     category: input.category,
     data: input.data || { root: { props: {} }, content: [], zones: {} },
+    hash: input.hash || computeTemplateHash(input.data),
     createdAt: now,
     updatedAt: now,
   };
@@ -136,17 +148,27 @@ export async function createTemplate(input: {
 
 /**
  * 更新模板（支持修改分类、名称、数据）
+ * 如果更新了数据，建议调用方更新 hash 字段
  */
 export async function updateTemplate(
   id: string,
-  updates: Partial<Pick<Template, 'name' | 'category' | 'data'>>
+  updates: Partial<Pick<Template, 'name' | 'category' | 'data' | 'hash'>>
 ): Promise<Template | null> {
   const existing = await getTemplateById(id);
   if (!existing) return null;
 
+  // 如果更新了 data 但没有更新 hash，则自动计算
+  let hash = existing.hash;
+  if (updates.data && !updates.hash) {
+    hash = computeTemplateHash(updates.data);
+  } else if (updates.hash) {
+    hash = updates.hash;
+  }
+
   const updated: Template = {
     ...existing,
     ...updates,
+    hash,
     updatedAt: new Date().toISOString(),
   };
 

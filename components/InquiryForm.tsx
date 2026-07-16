@@ -62,87 +62,126 @@ export default function InquiryForm({ locale, defaultProductUrl, defaultProductN
 
   if (submitted) {
     return (
-      <div className="bg-green-50 border border-green-200 rounded p-6 text-center">
+      <div className="bg-green-50 border border-green-200 rounded-lg p-6 text-center">
         <h2 className="text-xl font-semibold text-green-800">{t('success')}</h2>
         <p className="text-green-700 mt-2">{t('thanks')}</p>
       </div>
     );
   }
 
+  // 字段配置（英文标签，用于浮动label）
+  const fields = {
+    name: { label: 'Enter your name', name: 'name', type: 'text', required: true },
+    email: { label: 'Enter your email', name: 'email', type: 'email', required: true },
+    phone: { label: 'Enter your whatsapp, wechat...', name: 'phone', type: 'tel', required: false },
+    message: { label: 'Enter model number or product details such as input,output(voltage,current,watts) etc.', name: 'message', type: 'textarea', required: true },
+  };
+
   return (
     <form onSubmit={handleSubmit} className="space-y-6">
-      <div>
-        <label className="block font-medium mb-1">{t('name')} *</label>
-        <input
-          type="text"
-          name="name"
-          required
-          value={formData.name}
-          onChange={handleChange}
-          className="w-full border rounded p-2"
-        />
+      {/* 姓名 + 邮箱 两列布局 */}
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <div className="field relative">
+          <input
+            type="text"
+            name="name"
+            id="ContactForm-name"
+            required
+            value={formData.name}
+            onChange={handleChange}
+            className="field__input w-full border border-gray-300 rounded-lg px-4 py-3 pt-5 focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none transition peer"
+            placeholder=" "
+          />
+          <label
+            htmlFor="ContactForm-name"
+            className="field__label absolute left-4 top-2 text-sm text-gray-500 transition-all peer-placeholder-shown:top-3.5 peer-placeholder-shown:text-base peer-focus:top-2 peer-focus:text-sm pointer-events-none"
+          >
+            {fields.name.label}
+          </label>
+        </div>
+        <div className="field relative">
+          <input
+            type="email"
+            name="email"
+            id="ContactForm-email"
+            required
+            value={formData.email}
+            onChange={handleChange}
+            className="field__input w-full border border-gray-300 rounded-lg px-4 py-3 pt-5 focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none transition peer"
+            placeholder=" "
+          />
+          <label
+            htmlFor="ContactForm-email"
+            className="field__label absolute left-4 top-2 text-sm text-gray-500 transition-all peer-placeholder-shown:top-3.5 peer-placeholder-shown:text-base peer-focus:top-2 peer-focus:text-sm pointer-events-none"
+          >
+            {fields.email.label} <span aria-hidden="true">*</span>
+          </label>
+        </div>
       </div>
-      <div>
-        <label className="block font-medium mb-1">{t('email')} *</label>
-        <input
-          type="email"
-          name="email"
-          required
-          value={formData.email}
-          onChange={handleChange}
-          className="w-full border rounded p-2"
-        />
-      </div>
-      <div>
-        <label className="block font-medium mb-1">{t('company')}</label>
-        <input
-          type="text"
-          name="company"
-          value={formData.company}
-          onChange={handleChange}
-          className="w-full border rounded p-2"
-        />
-      </div>
-      <div>
-        <label className="block font-medium mb-1">{t('phone')}</label>
+
+      {/* 电话 */}
+      <div className="field relative">
         <input
           type="tel"
           name="phone"
+          id="ContactForm-phone"
           value={formData.phone}
           onChange={handleChange}
-          className="w-full border rounded p-2"
+          className="field__input w-full border border-gray-300 rounded-lg px-4 py-3 pt-5 focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none transition peer"
+          placeholder=" "
         />
+        <label
+          htmlFor="ContactForm-phone"
+          className="field__label absolute left-4 top-2 text-sm text-gray-500 transition-all peer-placeholder-shown:top-3.5 peer-placeholder-shown:text-base peer-focus:top-2 peer-focus:text-sm pointer-events-none"
+        >
+          {fields.phone.label}
+        </label>
       </div>
-      <div>
-        <label className="block font-medium mb-1">{t('message')} *</label>
+
+      {/* 消息 */}
+      <div className="field relative">
         <textarea
           name="message"
+          id="ContactForm-body"
+          rows={6}
           required
-          rows={5}
           value={formData.message}
           onChange={handleChange}
-          className="w-full border rounded p-2"
+          className="field__input w-full border border-gray-300 rounded-lg px-4 py-3 pt-5 focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none transition peer resize-none"
+          placeholder=" "
         />
+        <label
+          htmlFor="ContactForm-body"
+          className="field__label absolute left-4 top-2 text-sm text-gray-500 transition-all peer-placeholder-shown:top-3.5 peer-placeholder-shown:text-base peer-focus:top-2 peer-focus:text-sm pointer-events-none"
+        >
+          {fields.message.label}
+        </label>
       </div>
+
+      {/* 可选：关联产品显示 */}
       {(defaultProductUrl || defaultProductName) && (
-        <div className="bg-gray-50 p-4 rounded border">
-          <p className="text-sm text-gray-600">{t('relatedProduct')}:</p>
-          {defaultProductName && <p className="font-medium">{defaultProductName}</p>}
+        <div className="bg-gray-50 p-4 rounded-lg border border-gray-200 text-sm">
+          <p className="text-gray-600">{t('relatedProduct')}:</p>
+          {defaultProductName && <p className="font-medium text-gray-800">{defaultProductName}</p>}
           {defaultProductUrl && (
-            <a href={defaultProductUrl} target="_blank" className="text-blue-600 text-sm break-all">
+            <a href={defaultProductUrl} target="_blank" rel="noopener noreferrer" className="text-blue-600 break-all hover:underline">
               {defaultProductUrl}
             </a>
           )}
         </div>
       )}
-      {error && <div className="text-red-600 text-sm">{error}</div>}
-      <button
-        type="submit"
-        disabled={submitting}
-        className="w-full bg-primary-600 text-white py-3 rounded hover:bg-primary-700 disabled:opacity-50"
-      >
-        {submitting ? t('submitting') : t('submit')}
-      </button>
+
+      {error && <div className="text-red-600 text-sm bg-red-50 p-3 rounded-lg">{error}</div>}
+
+      <div className="contact__button">
+        <button
+          type="submit"
+          disabled={submitting}
+          className="button bg-blue-600 hover:bg-blue-700 text-white font-medium py-3 px-8 rounded-lg shadow-sm transition disabled:opacity-50 disabled:cursor-not-allowed"
+        >
+          {submitting ? 'Sending...' : 'Send'}
+        </button>
+      </div>
     </form>
   );
 }

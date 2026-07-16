@@ -22,7 +22,16 @@ export async function crawlMornsunProducts(
     const storage = getPrivateStorage();
     try {
       const content = await storage.read(src.filePath, 'utf8');
-      categories = JSON.parse(content as string);
+      const parsed = JSON.parse(content as string);
+      // 兼容两种格式：直接是分类数组，或是包含 categories 字段的对象
+      if (Array.isArray(parsed)) {
+        categories = parsed;
+      } else if (parsed && typeof parsed === 'object' && Array.isArray(parsed.categories)) {
+        categories = parsed.categories;
+      } else {
+        console.error('分类文件内容格式无效:', parsed);
+        throw new Error('分类文件内容格式无效');
+      }
       console.log(`从文件读取到 ${categories.length} 个分类`);
     } catch (error) {
       console.error(`读取分类文件失败: ${src.filePath}`, error);

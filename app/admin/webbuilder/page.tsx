@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import Link from 'next/link';
-import { Edit, Trash2, Plus, Eye, X } from 'lucide-react';
+import { Edit, Trash2, Plus, Eye, X, RefreshCw } from 'lucide-react';
 import WebBuilderClient from '@/components/webbuilder/WebBuilderClient';
 import { toast } from 'sonner';
 
@@ -32,6 +32,7 @@ interface Template {
   updatedAt: string;
   isSystem?: boolean;
   data?: any;
+  syncStatus?: 'idle' | 'processing' | 'done' | 'error';
 }
 
 // 缓存配置
@@ -43,7 +44,6 @@ interface CacheData {
   timestamp: number;
 }
 
-// 读取缓存
 function getCachedTemplates(): Template[] | null {
   if (typeof window === 'undefined') return null;
   const cached = sessionStorage.getItem(CACHE_KEY);
@@ -59,14 +59,12 @@ function getCachedTemplates(): Template[] | null {
   return null;
 }
 
-// 写入缓存
 function setCachedTemplates(data: Template[]) {
   if (typeof window === 'undefined') return;
   const cacheData: CacheData = { data, timestamp: Date.now() };
   sessionStorage.setItem(CACHE_KEY, JSON.stringify(cacheData));
 }
 
-// 清除缓存
 function clearTemplatesCache() {
   if (typeof window === 'undefined') return;
   sessionStorage.removeItem(CACHE_KEY);
@@ -80,13 +78,17 @@ export default function AdminWebBuilderPage() {
   const [newTemplateCategory, setNewTemplateCategory] = useState<Category>('page');
   const [activeCategory, setActiveCategory] = useState<Category>('page');
   const [editingTemplate, setEditingTemplate] = useState<Template | null>(null);
-  
-  // 用于取消请求的 AbortController
+
+  // 发布同步状态（仅用于UI展示）
+  const [publishStatus, setPublishStatus] = useState<{
+    status?: 'idle' | 'processing' | 'done' | 'error';
+  }>({ status: 'idle' });
+
+  // 用于取消请求的 AbortController（保留用于加载模板）
   const abortControllerRef = useRef<AbortController | null>(null);
   const requestIdRef = useRef(0);
 
   const loadTemplates = useCallback(async (skipCache = false) => {
-    // 先检查缓存（除非强制跳过）
     if (!skipCache) {
       const cached = getCachedTemplates();
       if (cached) {
@@ -96,7 +98,6 @@ export default function AdminWebBuilderPage() {
       }
     }
 
-    // 取消之前的请求
     if (abortControllerRef.current) {
       abortControllerRef.current.abort();
     }
@@ -107,7 +108,6 @@ export default function AdminWebBuilderPage() {
     try {
       const res = await fetch('/api/webbuilder', { signal: controller.signal });
       const data = await res.json();
-      // 只处理最新请求的结果
       if (currentRequestId === requestIdRef.current) {
         setTemplates(data);
         setCachedTemplates(data);
@@ -124,7 +124,6 @@ export default function AdminWebBuilderPage() {
     }
   }, []);
 
-  // 初始加载
   useEffect(() => {
     loadTemplates();
     return () => {
@@ -136,8 +135,7 @@ export default function AdminWebBuilderPage() {
 
   const refreshTemplates = useCallback(async () => {
     clearTemplatesCache();
-    setLoading(true);
-    await loadTemplates(true); // 强制跳过缓存
+    await loadTemplates(true);
   }, [loadTemplates]);
 
   const handleDelete = useCallback(async (id: string) => {
@@ -154,8 +152,23 @@ export default function AdminWebBuilderPage() {
   // 关闭编辑器并刷新模板列表
   const handleCloseEditor = useCallback(async () => {
     setEditingTemplate(null);
+    setPublishStatus({ status: 'idle' });
     await refreshTemplates();
   }, [refreshTemplates]);
+
+  // ★★★ 手动刷新同步状态（提供给刷新按钮使用） ★★★
+  const refreshSyncStatus = useCallback(async () => {
+    if (!editingTemplate) return;
+    try {
+      const res = await fetch(`/api/webbuilder/sync-status?id=${editingTemplate.id}`);
+      const data = await res.json();
+      if (data.syncStatus) {
+        setPublishStatus({ status: data.syncStatus });
+      }
+    } catch (error) {
+      console.error('获取同步状态失败:', error);
+    }
+  }, [editingTemplate]);
 
   const handleSaveOnly = useCallback(async () => {
     if (!newTemplateName.trim()) {
@@ -221,7 +234,6 @@ export default function AdminWebBuilderPage() {
     setNewTemplateCategory('page');
   };
 
-  // 使用 useMemo 缓存过滤后的模板，避免每次渲染重新计算
   const filteredTemplates = useMemo(() => {
     return templates.filter((t) => t.category === activeCategory);
   }, [templates, activeCategory]);
@@ -229,6 +241,42 @@ export default function AdminWebBuilderPage() {
   const getCategoryLabel = (cat: Category) => {
     return CATEGORIES.find((c) => c.value === cat)?.label || cat;
   };
+
+  // ★★★ 发布模板的处理函数（无轮询） ★★★
+  const handlePublish = useCallback(async (puckData: any) => {
+    if (!editingTemplate) return;
+
+    const pageTitle = puckData?.root?.props?.title || editingTemplate.name;
+    setPublishStatus({ status: 'processing' });
+
+    try {
+      const res = await fetch('/api/webbuilder', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          id: editingTemplate.id,
+          title: pageTitle,
+          category: editingTemplate.category,
+          data: puckData,
+          action: 'publish',
+        }),
+      });
+
+      const result = await res.json();
+      if (!result.success) {
+        setPublishStatus({ status: 'error' });
+        toast.error(result.error || '发布失败');
+        return;
+      }
+
+      // 显示一次提示：发布成功，后台同步
+      toast.success('发布成功，即将同步更新到页面，在同步期间，可以关闭当前窗口');
+    } catch (error) {
+      console.error('发布失败:', error);
+      setPublishStatus({ status: 'error' });
+      toast.error('发布失败');
+    }
+  }, [editingTemplate]);
 
   // 加载状态优化
   if (loading) {
@@ -309,6 +357,15 @@ export default function AdminWebBuilderPage() {
                     {template.name}
                     {template.isSystem && (
                       <span className="ml-2 text-xs bg-gray-100 text-gray-500 px-2 py-0.5 rounded">系统</span>
+                    )}
+                    {template.syncStatus === 'processing' && (
+                      <span className="ml-2 text-xs bg-blue-100 text-blue-600 px-2 py-0.5 rounded">同步中</span>
+                    )}
+                    {template.syncStatus === 'done' && (
+                      <span className="ml-2 text-xs bg-green-100 text-green-600 px-2 py-0.5 rounded">已同步</span>
+                    )}
+                    {template.syncStatus === 'error' && (
+                      <span className="ml-2 text-xs bg-red-100 text-red-600 px-2 py-0.5 rounded">同步失败</span>
                     )}
                   </h3>
                   <p className="text-sm text-gray-500 mt-1">
@@ -408,8 +465,24 @@ export default function AdminWebBuilderPage() {
       {editingTemplate && (
         <div className="fixed inset-0 z-50 flex flex-col bg-white">
           <div className="flex items-center justify-between px-4 py-2 bg-gray-100 border-b border-gray-200">
-            <span className="text-sm text-gray-700">
-              正在编辑：<span className="font-medium">{editingTemplate.name}</span>
+            <span className="text-sm text-gray-700 flex items-center gap-2">
+              <span>正在编辑：<span className="font-medium">{editingTemplate.name}</span></span>
+              {publishStatus.status === 'processing' && (
+                <span className="text-blue-600">（同步中）</span>
+              )}
+              {publishStatus.status === 'done' && (
+                <span className="text-green-600">（同步完成）</span>
+              )}
+              {publishStatus.status === 'error' && (
+                <span className="text-red-600">（同步失败）</span>
+              )}
+              <button
+                onClick={refreshSyncStatus}
+                className="ml-2 p-1 rounded hover:bg-gray-200 transition"
+                title="刷新同步状态"
+              >
+                <RefreshCw className="w-4 h-4 text-gray-500" />
+              </button>
             </span>
             <button
               onClick={handleCloseEditor}
@@ -437,25 +510,9 @@ export default function AdminWebBuilderPage() {
                     action: 'save',
                   }),
                 });
-                // 不再立即刷新模板列表
-               
+                toast.success('草稿已保存');
               }}
-              onPublish={async (puckData: any) => {
-                const pageTitle = puckData?.root?.props?.title || editingTemplate.name;
-                await fetch('/api/webbuilder', {
-                  method: 'POST',
-                  headers: { 'Content-Type': 'application/json' },
-                  body: JSON.stringify({
-                    id: editingTemplate.id,
-                    title: pageTitle,
-                    category: editingTemplate.category,
-                    data: puckData,
-                    action: 'publish',
-                  }),
-                });
-                // 不再立即刷新模板列表
-               
-              }}
+              onPublish={handlePublish}
             />
           </div>
         </div>

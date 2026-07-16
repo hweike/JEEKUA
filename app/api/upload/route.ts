@@ -1,12 +1,15 @@
 // app/api/upload/route.ts
 import { NextRequest, NextResponse } from 'next/server';
-import { getPublicStorage } from '@/lib/storage/factory';
+import { downloadAndSaveImage } from '@/lib/files/download';
 
 export async function POST(request: NextRequest) {
   try {
     const formData = await request.formData();
     const file = formData.get('file') as File | null;
-    
+    const referenceType = formData.get('referenceType') as string | null;
+    const referenceIdRaw = formData.get('referenceId') as string | null;
+    const referenceId = referenceIdRaw ? String(referenceIdRaw) : undefined;
+
     if (!file) {
       return NextResponse.json({ error: '没有上传文件' }, { status: 400 });
     }
@@ -15,25 +18,25 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: '只能上传图片文件' }, { status: 400 });
     }
 
-    const bytes = await file.arrayBuffer();
-    const buffer = Buffer.from(bytes);
+    const buffer = Buffer.from(await file.arrayBuffer());
 
-    // 生成唯一文件名（保留原扩展名）
-    const timestamp = Date.now();
-    const ext = file.name.split('.').pop() || 'jpg';
-    const filename = `upload_${timestamp}.${ext}`;
-    const key = `uploads/${filename}`; // 公开桶中的路径
+    // 调用公共函数：本地上传自动启用哈希去重（Buffer 输入默认 dedupByHash = true）
+    // 若提供了引用信息，则自动创建 file_references 记录
+    const storageKey = await downloadAndSaveImage(buffer, {
+      referenceType: referenceType || undefined,
+      referenceId,
+    });
 
-    // 上传到公开桶
-    const storage = getPublicStorage();
-    await storage.write(key, buffer, { contentType: file.type });
-
-    // 获取公开访问 URL（优先使用自定义域名，否则使用 R2.dev 子域）
-    const url = storage.getPublicUrl(key);
-
-    return NextResponse.json({ success: true, url });
+    // 返回相对路径（storage_key），前端使用 getImageUrl 拼接完整 URL
+    return NextResponse.json({
+      success: true,
+      url: storageKey,
+    });
   } catch (error) {
     console.error('上传失败:', error);
-    return NextResponse.json({ error: '上传失败' }, { status: 500 });
+    return NextResponse.json(
+      { error: error instanceof Error ? error.message : '上传失败' },
+      { status: 500 }
+    );
   }
 }

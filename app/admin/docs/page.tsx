@@ -1,37 +1,28 @@
 'use client';
 
-import { useEffect, useState } from 'react';
-import { useSearchParams, useRouter } from 'next/navigation';
-import dynamic from 'next/dynamic';
-import { FilePlus, Save, RotateCcw, FolderOpen } from 'lucide-react';
-import pinyin from 'pinyin';
-import DocsTreeAdmin from '@/components/DocsTreeAdmin';
+import React, { useEffect, useState, useCallback, useMemo, useRef } from 'react';
+import Link from 'next/link';
+import { useRouter, useSearchParams } from 'next/navigation';
+import { ChevronDown, ChevronRight, Plus, Pencil, Trash2, Search, FolderOpen } from 'lucide-react';
 import LanguageSelector from '@/components/common/LanguageSelector';
-import SeoFields from '@/components/common/SeoFields';
-import { generateSeoTitle, generateSeoDescription } from '@/lib/products/seoGenerator';
 import { useToast } from '@/contexts/ToastContext';
-import ResourceAssociation from '@/components/admin/products/ResourceAssociation';
+import { getLanguageDisplayName } from '@/lib/languages/config';
+import AiHelperDocModal from './components/AiHelperDocModal';
 
-const RichTextEditor = dynamic(() => import('@/components/RichTextEditor'), { ssr: false });
+interface Doc {
+  id: string;
+  title: string;
+  slug: string;
+  locale: string;
+  updatedAt?: string;
+  createdAt?: string;
+  parentId?: string | null;
+  order?: number;
+}
 
-// 生成 URL slug
-function generateSlug(text: string): string {
-  if (!text) return '';
-  const pinyinArray = pinyin(text, { style: pinyin.STYLE_NORMAL, heteronym: false });
-  const pinyinStr = pinyinArray.map(item => item[0]).join(' ');
-  let slug = pinyinStr.toLowerCase()
-    .replace(/[^a-z0-9\s-]/g, '')
-    .replace(/\s+/g, '-')
-    .replace(/-+/g, '-')
-    .replace(/^-|-$/g, '');
-  if (!slug) {
-    slug = text.toLowerCase()
-      .replace(/[^a-z0-9\s-]/g, '')
-      .replace(/\s+/g, '-')
-      .replace(/-+/g, '-')
-      .replace(/^-|-$/g, '');
-  }
-  return slug;
+interface DocGroup {
+  id: string;
+  versions: Record<string, Doc | null>;
 }
 
 interface DocsLib {
@@ -39,394 +30,472 @@ interface DocsLib {
   name: string;
 }
 
-export default function DocsAdmin() {
+export default function DocsListPage() {
+  const router = useRouter();
   const searchParams = useSearchParams();
-  const [locale, setLocale] = useState(searchParams.get('locale') || 'zh');
-  const [docsLibs, setDocsLibs] = useState<DocsLib[]>([]);
-  const [currentLibId, setCurrentLibId] = useState('');
-  const [tree, setTree] = useState<any[]>([]);
-  const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [docData, setDocData] = useState<any>(null);
-  const [loading, setLoading] = useState(true);
-  const [saving, setSaving] = useState(false);
-  const [loadingDoc, setLoadingDoc] = useState(false);
-  const [isSlugAuto, setIsSlugAuto] = useState(true);
   const { showToast } = useToast();
 
-  const loadLibs = async () => {
-    const res = await fetch(`/api/admin/docs-libs?locale=${locale}`);
-    const data = await res.json();
-    setDocsLibs(data);
-    if (data.length > 0 && !currentLibId) setCurrentLibId(data[0].id);
-    else if (data.length === 0) setCurrentLibId('');
-  };
+  const [locale, setLocale] = useState(searchParams.get('locale') || 'zh');
+  const [availableLocales, setAvailableLocales] = useState<string[]>([]);
 
-  const loadTree = async () => {
-    if (!currentLibId) return;
+  const [docsLibs, setDocsLibs] = useState<DocsLib[]>([]);
+  const [currentLibId, setCurrentLibId] = useState(searchParams.get('docsLibId') || '');
+
+  const [allData, setAllData] = useState<Record<string, Doc[]>>({});
+  const [groups, setGroups] = useState<DocGroup[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [searchTerm, setSearchTerm] = useState('');
+  const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set());
+  const [copying, setCopying] = useState<{ id: string; target: string } | null>(null);
+
+  const [showAiHelper, setShowAiHelper] = useState(false);
+  const [selectedDoc, setSelectedDoc] = useState<{ id: string; title: string } | null>(null);
+
+  const initialLoadRef = useRef(false);
+  const isLoadingRef = useRef(false);
+
+  const fetchAvailableLocales = useCallback(async () => {
     try {
-      const res = await fetch(`/api/admin/docs/tree?locale=${locale}&docsLibId=${currentLibId}`);
+      const res = await fetch('/api/languages/enabled');
       const data = await res.json();
-      setTree(data);
-    } catch (err) {
-      showToast('加载文档树失败', 'error');
+      let locales: string[] = [];
+      if (Array.isArray(data)) {
+        if (data.length > 0 && typeof data[0] === 'string') {
+          locales = data;
+        } else {
+          locales = data.map((item: any) => item.code || item);
+        }
+      } else if (data && Array.isArray(data.locales)) {
+        locales = data.locales;
+      }
+      setAvailableLocales(locales.length > 0 ? locales : ['zh', 'en']);
+    } catch (error) {
+      console.error('获取语言列表失败:', error);
+      setAvailableLocales(['zh', 'en']);
+    }
+  }, []);
+
+  const fetchDocsLibs = useCallback(async () => {
+    try {
+      const res = await fetch(`/api/admin/docs-libs?locale=zh`);
+      if (!res.ok) throw new Error('加载文档库失败');
+      const data = await res.json();
+      setDocsLibs(data);
+      const libIdFromUrl = searchParams.get('docsLibId');
+      if (libIdFromUrl && data.some((lib: DocsLib) => lib.id === libIdFromUrl)) {
+        setCurrentLibId(libIdFromUrl);
+      } else if (data.length > 0) {
+        setCurrentLibId(data[0].id);
+      }
+    } catch (error) {
+      showToast('加载文档库失败', 'error');
+    }
+  }, [searchParams, showToast]);
+
+  const loadAllDocs = useCallback(async () => {
+    if (!currentLibId || availableLocales.length === 0) return;
+    try {
+      const res = await fetch(`/api/admin/docs?docsLibId=${currentLibId}&locales=${availableLocales.join(',')}`);
+      if (!res.ok) throw new Error('加载失败');
+      const data = await res.json();
+      setAllData(data);
+    } catch (error) {
+      console.warn('批量接口失败，使用并发请求降级', error);
+      try {
+        const results = await Promise.all(
+          availableLocales.map(async (loc) => {
+            const res = await fetch(`/api/admin/docs?locale=${loc}&docsLibId=${currentLibId}`);
+            if (!res.ok) throw new Error(`加载 ${loc} 失败`);
+            const data = await res.json();
+            return { locale: loc, docs: data };
+          })
+        );
+        const fallbackData: Record<string, Doc[]> = {};
+        results.forEach(({ locale, docs }) => {
+          fallbackData[locale] = docs;
+        });
+        setAllData(fallbackData);
+      } catch (fallbackError) {
+        showToast('加载文档失败', 'error');
+      }
     } finally {
       setLoading(false);
     }
-  };
+  }, [currentLibId, availableLocales, showToast]);
 
-  const loadDocument = async (docId: string) => {
-    if (!currentLibId) return;
-    setLoadingDoc(true);
-    setDocData(null);
-    try {
-      const res = await fetch(`/api/admin/docs?locale=${locale}&docsLibId=${currentLibId}&id=${docId}`);
-      const data = await res.json();
-      setDocData({
-        id: data.id,
-        title: data.title ?? '',
-        slug: data.slug ?? '',
-        parentId: data.parentId === null || data.parentId === '' ? null : data.parentId,
-        order: data.order ?? 0,
-        content: data.content ?? '',
-        seo_keywords: data.seo_keywords ?? '',
-        seo_title: data.seo_title ?? '',
-        seo_description: data.seo_description ?? '',
-        createdAt: data.createdAt,
-        updatedAt: data.updatedAt,
-      });
-      setIsSlugAuto(!data.slug);
-    } catch (err) {
-      showToast('加载文档失败', 'error');
-    } finally {
-      setLoadingDoc(false);
-    }
-  };
-
-  useEffect(() => { loadLibs(); }, [locale]);
   useEffect(() => {
-    if (currentLibId) {
-      loadTree();
-      setSelectedId(null);
-      setDocData(null);
+    if (!initialLoadRef.current) {
+      initialLoadRef.current = true;
+      fetchAvailableLocales();
+      fetchDocsLibs();
     }
-  }, [currentLibId, locale]);
+  }, [fetchAvailableLocales, fetchDocsLibs]);
+
   useEffect(() => {
-    if (selectedId) loadDocument(selectedId);
-    else setDocData(null);
-  }, [selectedId]);
-
-  const handleSeoChange = (seoData: any) => {
-    setDocData((prev: any) => ({
-      ...prev,
-      slug: seoData.slug ?? prev.slug,
-      seo_keywords: seoData.seoKeywords ?? prev.seo_keywords,
-      seo_title: seoData.seoTitle ?? prev.seo_title,
-      seo_description: seoData.seoDescription ?? prev.seo_description,
-    }));
-    if (seoData.slug !== undefined) setIsSlugAuto(false);
-  };
-
-  const handleTitleChange = (title: string) => {
-    if (!docData) return;
-    let newSlug = docData.slug;
-    if (isSlugAuto) {
-      newSlug = generateSlug(title);
-    }
-    setDocData({ ...docData, title, slug: newSlug });
-  };
-
-  const handleAutoGenerate = () => {
-    if (!docData) return;
-    const title = docData.title || '';
-    let newSlug = docData.slug;
-    if (!newSlug) {
-      newSlug = generateSlug(title);
-      handleSeoChange({ slug: newSlug });
-    }
-    let seoTitle = docData.seo_title;
-    if (!seoTitle) {
-      seoTitle = generateSeoTitle(title, '', 1, '', '');
-      handleSeoChange({ seoTitle });
-    }
-    let seoDescription = docData.seo_description;
-    if (!seoDescription) {
-      // 调用 generateSeoDescription，传入文档内容（字符串）、空价格阶梯、空规格、模板和货币
-      // 注意：generateSeoDescription 的第一个参数是 descriptionHtml: string | undefined
-      const generatedDesc = generateSeoDescription(docData.content, [], undefined, '', '');
-      if (generatedDesc) {
-        seoDescription = generatedDesc;
-        handleSeoChange({ seoDescription });
-      }
-    }
-    showToast('已自动生成 SEO 信息', 'info');
-  };
-
-  const handleSave = async () => {
-    if (!docData || !docData.title) {
-      showToast('请填写标题', 'error');
-      return;
-    }
-    setSaving(true);
-    try {
-      const res = await fetch('/api/admin/docs/save', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          locale,
-          docsLibId: currentLibId,
-          data: {
-            ...docData,
-            parentId: docData.parentId === null ? null : docData.parentId,
-          },
-          content: docData.content,
-        }),
+    if (availableLocales.length > 0 && currentLibId && !isLoadingRef.current) {
+      isLoadingRef.current = true;
+      loadAllDocs().finally(() => {
+        isLoadingRef.current = false;
       });
-      if (!res.ok) throw new Error();
-      const result = await res.json();
-      showToast('保存成功', 'success');
-      await loadTree();
-      setSelectedId(result.doc.id);
-    } catch (err) {
-      showToast('保存失败', 'error');
-    } finally {
-      setSaving(false);
     }
-  };
+  }, [availableLocales, currentLibId, loadAllDocs]);
 
-  const resetDocData = async () => {
-    if (selectedId) await loadDocument(selectedId);
-    showToast('已重置', 'info');
-  };
+  useEffect(() => {
+    const allLocaleCodes = Array.from(new Set([...availableLocales, ...Object.keys(allData)]));
+    const idMap: Record<string, DocGroup> = {};
 
-  const createNewDoc = async (parentId?: string) => {
-    if (!currentLibId) {
-      showToast('请先选择一个文档库', 'error');
-      return;
-    }
-    setSaving(true);
-    try {
-      const blankDoc = {
-        title: '未命名文档',
-        slug: '',
-        parentId: parentId || null,
-        order: 0,
-        content: '',
-        seo_keywords: '',
-        seo_title: '',
-        seo_description: '',
-      };
-      const res = await fetch('/api/admin/docs/save', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ locale, docsLibId: currentLibId, data: blankDoc, content: '' }),
+    allLocaleCodes.forEach((loc) => {
+      const list = allData[loc] || [];
+      list.forEach((doc) => {
+        if (!idMap[doc.id]) {
+          idMap[doc.id] = { id: doc.id, versions: {} };
+          allLocaleCodes.forEach((l) => { idMap[doc.id].versions[l] = null; });
+        }
+        idMap[doc.id].versions[loc] = doc;
       });
-      if (!res.ok) throw new Error();
-      const result = await res.json();
-      await loadTree();
-      setSelectedId(result.doc.id);
-      setIsSlugAuto(true);
-    } catch (err) {
-      showToast('创建失败', 'error');
-    } finally {
-      setSaving(false);
-    }
+    });
+
+    const groupsArray = Object.values(idMap);
+    groupsArray.sort((a, b) => {
+      const titleA = a.versions[locale]?.title || '';
+      const titleB = b.versions[locale]?.title || '';
+      if (!titleA && !titleB) return 0;
+      if (!titleA) return 1;
+      if (!titleB) return -1;
+      return titleA.localeCompare(titleB);
+    });
+    setGroups(groupsArray);
+  }, [allData, availableLocales, locale]);
+
+  const getCurrentDoc = (group: DocGroup): Doc | null => {
+    return group.versions[locale] || null;
   };
 
-  const handleDelete = async (id: string) => {
-    if (!confirm('确定删除该文档及其下级文档吗？')) return;
-    const res = await fetch(`/api/admin/docs?locale=${locale}&docsLibId=${currentLibId}&id=${id}`, { method: 'DELETE' });
-    if (res.ok) {
-      await loadTree();
-      if (selectedId === id) setSelectedId(null);
-    } else {
+  const hasEnglishVersion = (group: DocGroup): boolean => {
+    return group.versions['en'] !== null;
+  };
+
+  const filteredGroups = useMemo(() => {
+    if (!searchTerm.trim()) return groups;
+    const lower = searchTerm.toLowerCase();
+    return groups.filter(group => {
+      const current = group.versions[locale];
+      return current && (current.title.toLowerCase().includes(lower) || current.slug.toLowerCase().includes(lower));
+    });
+  }, [groups, searchTerm, locale]);
+
+  const filteredSimple = useMemo(() => {
+    const list = allData[locale] || [];
+    if (!searchTerm.trim()) return list;
+    const lower = searchTerm.toLowerCase();
+    return list.filter(doc =>
+      doc.title.toLowerCase().includes(lower) ||
+      doc.slug.toLowerCase().includes(lower)
+    );
+  }, [allData, locale, searchTerm]);
+
+  const handleDelete = async (id: string, locale: string, title: string) => {
+    if (!confirm(`确定删除文档“${title}” (${locale}) 吗？`)) return;
+    try {
+      const res = await fetch(`/api/admin/docs?locale=${locale}&docsLibId=${currentLibId}&id=${id}`, {
+        method: 'DELETE',
+      });
+      if (!res.ok) throw new Error('删除失败');
+      showToast('删除成功', 'success');
+      await loadAllDocs();
+    } catch (error) {
       showToast('删除失败', 'error');
     }
   };
 
-  const handleTreeChange = async (newTree: any[]) => {
-    const flatten = (nodes: any[], parentId: string | null = null): any[] => {
-      let result: any[] = [];
-      nodes.forEach((node, idx) => {
-        result.push({ id: node.id, parentId, order: idx });
-        if (node.children?.length) result = result.concat(flatten(node.children, node.id));
-      });
-      return result;
-    };
-    const updates = flatten(newTree);
-    const res = await fetch('/api/admin/docs/reorder', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ locale, docsLibId: currentLibId, items: updates }),
-    });
-    if (res.ok) {
-      await loadTree();
-    } else {
-      showToast('保存排序失败', 'error');
-    }
+  const toggleExpand = (id: string) => {
+    const newSet = new Set(expandedIds);
+    if (newSet.has(id)) newSet.delete(id);
+    else newSet.add(id);
+    setExpandedIds(newSet);
   };
 
-  const handleReorder = async (id: string, direction: 'up' | 'down') => {
-    const res = await fetch('/api/admin/docs/reorder', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ locale, docsLibId: currentLibId, id, direction }),
-    });
-    if (res.ok) await loadTree();
-    else showToast('排序失败', 'error');
+  const handleLocaleChange = (newLocale: string) => {
+    setLocale(newLocale);
+    const params = new URLSearchParams(searchParams.toString());
+    params.set('locale', newLocale);
+    params.set('docsLibId', currentLibId);
+    router.push(`/admin/docs?${params.toString()}`);
   };
 
-  if (loading && currentLibId) return <div className="p-6">加载中...</div>;
+  const handleLibChange = (libId: string) => {
+    setCurrentLibId(libId);
+    const params = new URLSearchParams(searchParams.toString());
+    params.set('docsLibId', libId);
+    params.set('locale', locale);
+    router.push(`/admin/docs?${params.toString()}`);
+  };
+
+  const isCollapsibleMode = locale === 'zh' || locale === 'en';
+
+  const handleNewDoc = () => {
+    router.push(`/admin/docs/edit?locale=${locale}&docsLibId=${currentLibId}`);
+  };
+
+  if (loading) return <div className="p-6 text-center">加载中...</div>;
 
   return (
-    <div className="flex h-full min-h-screen pb-20">
-      {/* 左侧文档树 */}
-      <div className="w-80 border-r border-gray-200 bg-white overflow-auto">
-        <div className="p-4">
-          <div className="flex justify-between items-center mb-4">
-            <h2 className="text-lg font-semibold">文档管理</h2>
-            <LanguageSelector currentLocale={locale} onLocaleChange={setLocale} displayMode="zh" />
-          </div>
-          <div className="flex items-center gap-2 mb-4">
-            <span className="text-sm text-gray-600">当前</span>
-            <select
-              value={currentLibId}
-              onChange={(e) => setCurrentLibId(e.target.value)}
-              className="bg-transparent border-0 p-0 text-sm font-medium text-gray-800 focus:outline-none focus:ring-0 cursor-pointer"
-              disabled={docsLibs.length === 0}
-            >
-              {docsLibs.map(lib => (
-                <option key={lib.id} value={lib.id}>{lib.name}</option>
-              ))}
-            </select>
-          </div>
-          {currentLibId && (
-            <>
-              <div className="flex justify-between items-center mt-4 mb-2">
-                <h3 className="text-md font-medium">文档目录</h3>
-                <button onClick={() => createNewDoc()} className="bg-green-600 text-white px-2 py-1 rounded text-sm flex items-center gap-1">
-                  <FilePlus size={14} /> 新建
-                </button>
-              </div>
-              <DocsTreeAdmin
-                tree={tree}
-                selectedId={selectedId}
-                onSelect={setSelectedId}
-                onNewChild={(parentId) => createNewDoc(parentId)}
-                onDelete={handleDelete}
-                onReorder={handleReorder}
-                onTreeChange={handleTreeChange}
-              />
-            </>
-          )}
-          {!currentLibId && docsLibs.length === 0 && (
-            <div className="text-center text-gray-400 py-8">
-              <FolderOpen className="mx-auto mb-2" size={32} />
-              <p>暂无文档库，请先前往</p>
-              <a href="/admin/docs/docs-libs" className="text-blue-600 hover:underline">文档库管理</a>
-              <p>创建文档库</p>
-            </div>
-          )}
+    <div className="p-6 max-w-7xl mx-auto">
+      {/* 头部 */}
+      <div className="flex flex-wrap justify-between items-center gap-4 mb-6">
+        <div className="flex items-center gap-4">
+          <h1 className="text-2xl font-bold">文档管理</h1>
+          <span className="text-sm text-gray-500">文档库：</span>
+          <select
+            value={currentLibId}
+            onChange={(e) => handleLibChange(e.target.value)}
+            className="border rounded px-3 py-1 bg-white"
+            disabled={docsLibs.length === 0}
+          >
+            {docsLibs.map(lib => (
+              <option key={lib.id} value={lib.id}>{lib.name}</option>
+            ))}
+          </select>
+        </div>
+        <div className="flex items-center gap-4">
+          <LanguageSelector
+            currentLocale={locale}
+            onLocaleChange={handleLocaleChange}
+            displayMode="zh"
+          />
+          <button
+            onClick={handleNewDoc}
+            className="bg-blue-600 text-white px-4 py-2 rounded-lg flex items-center gap-2"
+          >
+            <Plus size={18} /> 新建文档
+          </button>
         </div>
       </div>
 
-      {/* 右侧编辑区 */}
-      <div className="flex-1 p-6 overflow-auto">
-        <div className="max-w-4xl mx-auto">
-          {loadingDoc && <div className="text-center py-20">加载中...</div>}
-          {!loadingDoc && docData && (
-            <form onSubmit={e => { e.preventDefault(); handleSave(); }} className="space-y-6">
-              {/* 基本信息卡片 */}
-              <div className="border rounded-lg p-4 shadow-sm bg-white">
-                <h3 className="font-medium text-lg mb-3">基本信息</h3>
-                <div className="space-y-4">
-                  <div>
-                    <label className="block font-medium mb-1">标题 *</label>
-                    <input
-                      type="text"
-                      value={docData.title}
-                      onChange={e => handleTitleChange(e.target.value)}
-                      className="w-full border rounded p-2"
-                      required
-                    />
-                  </div>
-                  <div>
-                    <label className="block font-medium mb-1">内容</label>
-                    <RichTextEditor
-                      value={docData.content ?? ''}
-                      onChange={val => setDocData({ ...docData, content: val })}
-                    />
-                  </div>
-                </div>
-              </div>
+      {/* 搜索 */}
+      <div className="mb-6">
+        <div className="flex gap-3">
+          <input
+            type="text"
+            placeholder="搜索当前语言文档标题或 URL..."
+            value={searchTerm}
+            onChange={(e) => setSearchTerm(e.target.value)}
+            className="border rounded-lg px-3 py-2 w-64 focus:outline-none focus:ring-2 focus:ring-blue-500"
+          />
+          <button className="bg-gray-100 hover:bg-gray-200 px-4 py-2 rounded-lg flex items-center gap-1">
+            <Search size={16} /> 搜索
+          </button>
+        </div>
+      </div>
 
-              {/* 相关商品卡片 */}
-              <div className="bg-white rounded-lg shadow p-6">
-                <h2 className="text-lg font-semibold mb-4">相关商品</h2>
-                {docData.id ? (
-                  <ResourceAssociation
-                    resourceType="document"
-                    resourceId={docData.id}
-                    locale={locale}
-                  />
-                ) : (
-                  <div className="text-gray-400 text-sm text-center py-4 border border-dashed rounded">
-                    保存文档后即可关联商品
-                  </div>
+      {/* 表格 */}
+      <div className="bg-white shadow overflow-hidden sm:rounded-md">
+        <table className="w-full table-fixed divide-y divide-gray-200">
+          <thead className="bg-gray-50">
+            <tr>
+              <th className="w-[60%] px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider min-w-0">
+                标题
+              </th>
+              <th className="w-32 px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider whitespace-nowrap">
+                更新时间
+              </th>
+              <th className="w-44 px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider whitespace-nowrap">
+                操作
+              </th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-gray-200">
+            {isCollapsibleMode ? (
+              filteredGroups.map((group) => {
+                const current = getCurrentDoc(group);
+                const hasEnglish = hasEnglishVersion(group);
+                const isExpanded = expandedIds.has(group.id);
+                const hasChildren = Object.values(group.versions).some(v => v !== null);
+                const otherLocales = Array.from(new Set([...availableLocales, ...Object.keys(allData)])).filter(loc => loc !== locale);
+
+                return (
+                  <React.Fragment key={group.id}>
+                    {/* 父行 */}
+                    <tr
+                      className="hover:bg-gray-50 cursor-pointer"
+                      onClick={() => toggleExpand(group.id)}
+                    >
+                      <td className="px-6 py-4">
+                        <div className="flex items-center min-w-0">
+                          {hasChildren && (
+                            <button className="mr-2 flex-shrink-0 focus:outline-none">
+                              {isExpanded ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
+                            </button>
+                          )}
+                          <span
+                            className="font-medium text-gray-900 truncate"
+                            title={current?.title || ''}
+                          >
+                            {current?.title || `${getLanguageDisplayName(locale, 'zh')}（未设置）`}
+                          </span>
+                        </div>
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                        {current ? (current.updatedAt ? new Date(current.updatedAt).toLocaleDateString() : '-') : '-'}
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap text-sm">
+                        {current ? (
+                          <>
+                            <Link
+                              href={`/admin/docs/edit?locale=${locale}&docsLibId=${currentLibId}&id=${group.id}`}
+                              className="text-blue-600 hover:text-blue-800 mr-3"
+                              onClick={(e) => e.stopPropagation()}
+                            >
+                              <Pencil size={16} className="inline" /> 编辑
+                            </Link>
+                            {(locale === 'zh' || locale === 'en') && (
+                              <button
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setSelectedDoc({ id: group.id, title: current.title });
+                                  setShowAiHelper(true);
+                                }}
+                                className="text-blue-600 hover:text-blue-800 mr-3"
+                              >
+                                🤖 AI翻译
+                              </button>
+                            )}
+                            <button
+                              onClick={(e) => { e.stopPropagation(); handleDelete(group.id, locale, current.title); }}
+                              className="text-red-600 hover:text-red-800"
+                            >
+                              <Trash2 size={16} className="inline" /> 删除
+                            </button>
+                          </>
+                        ) : (
+                          <Link
+                            href={`/admin/docs/edit?locale=${locale}&docsLibId=${currentLibId}&id=${group.id}`}
+                            className="text-blue-600 hover:text-blue-800"
+                            onClick={(e) => e.stopPropagation()}
+                          >
+                            <Plus size={16} className="inline" /> 新增
+                          </Link>
+                        )}
+                      </td>
+                    </tr>
+
+                    {/* 子行 */}
+                    {isExpanded &&
+                      otherLocales.map((loc) => {
+                        const doc = group.versions[loc] || null;
+                        const exists = doc !== null;
+                        const isZhOrEn = loc === 'zh' || loc === 'en';
+
+                        return (
+                          <tr key={`${group.id}-${loc}`} className="bg-gray-50 hover:bg-gray-100">
+                            <td className="px-6 py-3 pl-12">
+                              <div className="flex items-center gap-2 min-w-0">
+                                <span className="text-sm font-medium text-gray-500 w-16 flex-shrink-0">
+                                  {getLanguageDisplayName(loc, 'zh')}
+                                </span>
+                                <span
+                                  className={`text-sm ${exists ? 'text-gray-900' : 'text-gray-400'} truncate`}
+                                  title={exists ? doc.title : ''}
+                                >
+                                  {exists ? doc.title : '（未设置）'}
+                                </span>
+                              </div>
+                            </td>
+                            <td className="px-6 py-3 whitespace-nowrap text-sm text-gray-500">
+                              {exists ? (doc.updatedAt ? new Date(doc.updatedAt).toLocaleDateString() : '-') : '-'}
+                            </td>
+                            <td className="px-6 py-3 whitespace-nowrap text-sm">
+                              {exists ? (
+                                <>
+                                  <Link
+                                    href={`/admin/docs/edit?locale=${loc}&docsLibId=${currentLibId}&id=${group.id}`}
+                                    className="text-blue-600 hover:text-blue-800 mr-3"
+                                  >
+                                    <Pencil size={14} className="inline" /> 编辑
+                                  </Link>
+                                  <button
+                                    onClick={() => handleDelete(group.id, loc, doc.title)}
+                                    className="text-red-600 hover:text-red-800"
+                                  >
+                                    <Trash2 size={14} className="inline" /> 删除
+                                  </button>
+                                </>
+                              ) : (
+                                isZhOrEn ? (
+                                  <Link
+                                    href={`/admin/docs/edit?locale=${loc}&docsLibId=${currentLibId}&id=${group.id}`}
+                                    className="text-blue-600 hover:text-blue-800 text-sm"
+                                  >
+                                    <Plus size={14} className="inline" /> 新增
+                                  </Link>
+                                ) : null
+                              )}
+                            </td>
+                          </tr>
+                        );
+                      })}
+                  </React.Fragment>
+                );
+              })
+            ) : (
+              filteredSimple.map((doc) => (
+                <tr key={doc.id} className="hover:bg-gray-50">
+                  <td className="px-6 py-4">
+                    <span className="font-medium text-gray-900 truncate block" title={doc.title}>
+                      {doc.title}
+                    </span>
+                  </td>
+                  <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                    {doc.updatedAt ? new Date(doc.updatedAt).toLocaleDateString() : '-'}
+                  </td>
+                  <td className="px-6 py-4 whitespace-nowrap text-sm">
+                    <Link
+                      href={`/admin/docs/edit?locale=${locale}&docsLibId=${currentLibId}&id=${doc.id}`}
+                      className="text-blue-600 hover:text-blue-800 mr-3"
+                    >
+                      <Pencil size={16} className="inline" /> 编辑
+                    </Link>
+                    <button
+                      onClick={() => handleDelete(doc.id, locale, doc.title)}
+                      className="text-red-600 hover:text-red-800"
+                    >
+                      <Trash2 size={16} className="inline" /> 删除
+                    </button>
+                  </td>
+                </tr>
+              ))
+            )}
+            {isCollapsibleMode
+              ? filteredGroups.length === 0 && (
+                  <tr>
+                    <td colSpan={3} className="px-6 py-12 text-center text-gray-400">
+                      暂无文档，点击“新建文档”创建
+                    </td>
+                  </tr>
+                )
+              : filteredSimple.length === 0 && (
+                  <tr>
+                    <td colSpan={3} className="px-6 py-12 text-center text-gray-400">
+                      该语言暂无文档
+                    </td>
+                  </tr>
                 )}
-              </div>
-
-              {/* SEO 设置卡片 */}
-              <div className="border rounded-lg p-4 shadow-sm bg-white">
-                <div className="flex justify-between items-center mb-3">
-                  <h2 className="text-lg font-semibold">搜索引擎优化</h2>
-                  <button type="button" onClick={handleAutoGenerate} className="text-blue-600 text-sm">
-                    自动生成 SEO
-                  </button>
-                </div>
-                <SeoFields
-                  slug={docData.slug}
-                  seoKeywords={docData.seo_keywords}
-                  seoTitle={docData.seo_title}
-                  seoDescription={docData.seo_description}
-                  onChange={handleSeoChange}
-                  autoGenerateFrom={docData.title}
-                  showSlug
-                  showKeywords
-                  showTitle
-                  showDescription
-                  disabled={false}
-                />
-              </div>
-            </form>
-          )}
-          {!loadingDoc && !docData && selectedId === null && currentLibId && (
-            <div className="text-center text-gray-400 py-20">
-              <FolderOpen size={48} className="mx-auto mb-4 opacity-50" />
-              <p>请从左侧文档树选择要编辑的文档</p>
-            </div>
-          )}
-        </div>
+          </tbody>
+        </table>
       </div>
 
-      {/* 悬浮按钮条 */}
-      {docData && (
-        <div className="fixed bottom-0 left-0 right-0 bg-white border-t shadow-lg p-4 flex justify-end gap-4 z-50">
-          <button
-            type="button"
-            onClick={resetDocData}
-            className="bg-gray-200 hover:bg-gray-300 px-4 py-2 rounded transition"
-          >
-            重置
-          </button>
-          <button
-            type="submit"
-            onClick={handleSave}
-            disabled={saving}
-            className="bg-blue-600 hover:bg-blue-700 text-white px-6 py-2 rounded disabled:opacity-50 transition"
-          >
-            {saving ? '保存中...' : '保存'}
-          </button>
-        </div>
+      {/* AI 翻译助手模态框 */}
+      {showAiHelper && selectedDoc && (
+        <AiHelperDocModal
+          sourceLocale={locale}
+          docId={selectedDoc.id}
+          docTitle={selectedDoc.title}
+          onClose={() => setShowAiHelper(false)}
+          onImportSuccess={() => {
+            loadAllDocs();
+            setShowAiHelper(false);
+          }}
+        />
       )}
     </div>
   );

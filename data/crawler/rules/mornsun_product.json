@@ -7,7 +7,7 @@
     "parentRowSelector": "tr.slide_p",
     "childRowSelector": "tr.show_list",
     "dynamicHeaders": true,
-    "productLimit": 10,
+    "productLimit": 0,
     "categoriesSource": {
       "type": "file",
       "filePath": "crawler/tasks/1b58ff8c-d828-4833-93cd-d2b2624dc222/meta.json"

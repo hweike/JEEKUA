@@ -36,7 +36,7 @@ export default function SimpleFooter({ footerConfig, menusMap, siteSettings }: S
   const pathname = usePathname();
   const locale = useLocale();
   const safeFooterConfig = footerConfig || DEFAULT_FOOTER_CONFIG;
-  const safeSiteName = siteSettings?.siteName || 'FEISMAN POWER';
+  const safeSiteName = siteSettings?.siteName || 'My Web';
   const activeItems = getActiveFooterItems(safeFooterConfig, menusMap, safeSiteName);
   const layoutMode = getLayoutMode(activeItems.length);
   const { emailSubscription, brandMenu, social, utilities, textInfo } = safeFooterConfig;

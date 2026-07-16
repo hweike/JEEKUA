@@ -1,89 +1,11 @@
 // app/api/admin/products/manage/route.ts
 import { NextRequest, NextResponse } from 'next/server';
-import { readProduct, writeProduct, deleteProduct } from '@/lib/products/mdParser';
 import {
-  upsertProductIndex,
-  deleteProductIndex,
-  getProductIndex,
-  getProductStatusCount,
-  searchProducts,
-  getChildrenProducts,
-  getProductLineIdFromCategory,
-  searchAllProducts,
-  getAllProductIds as getAllProductIdsFromIndex,
-} from '@/lib/products/indexDb';
-import { getProductSettings } from '@/lib/products/productSettings';
-import { generateSlug, generateSeoTitle, generateSeoDescription } from '@/lib/products/seoGenerator';
-import { generateUniqueProductId } from '@/lib/utils/idGenerator';
-import { supabase } from '@/lib/supabase/client';
-import { getPrivateStorage } from '@/lib/storage/factory';
-
-const DEFAULT_SITE_ID = '000001';
-
-// ==================== 辅助函数（改为云存储） ====================
-async function getSiteSettings() {
-  const storage = getPrivateStorage();
-  const key = 'settings.json'; // 无 data/ 前缀
-  try {
-    const content = await storage.read(key, 'utf8');
-    return JSON.parse(content as string);
-  } catch {
-    return { site_name: '我的网站' };
-  }
-}
-
-function getPriceRange(tiers: any[], currency: string): string {
-  if (!tiers || tiers.length === 0) return '-';
-  const validPrices = tiers.map(t => t.price).filter(p => typeof p === 'number' && !isNaN(p));
-  if (validPrices.length === 0) return '-';
-  const min = Math.min(...validPrices);
-  const max = Math.max(...validPrices);
-  if (min === max) return `${min} ${currency}`;
-  return `${min} - ${max} ${currency}`;
-}
-
-// 从私有桶读取分类数据
-async function getProductType(locale: string, categoryId: string, seriesId?: string): Promise<string> {
-  if (categoryId === '__UNCATEGORIZED__') return '';
-  const storage = getPrivateStorage();
-  const key = `products/${locale}/categories.json`;
-  try {
-    const content = await storage.read(key, 'utf8');
-    const data = JSON.parse(content as string);
-    const categories = data.categories || [];
-    const cat = categories.find((c: any) => c.id === categoryId);
-    if (!cat) return '';
-    let type = cat.name;
-    if (seriesId && cat.series) {
-      const series = cat.series.find((s: any) => s.id === seriesId);
-      if (series) type = `${cat.name} > ${series.name}`;
-    }
-    return type;
-  } catch {
-    return '';
-  }
-}
-
-function processMpn(defaultMpn: string, sku: string): string {
-  if (!defaultMpn) return '';
-  return defaultMpn.replace(/\{SKU\}/g, sku);
-}
-
-async function getAllProductIds(locale: string): Promise<string[]> {
-  return getAllProductIdsFromIndex(locale);
-}
-
-async function updateParentVariants(locale: string, parentId: string, variants: any[]) {
-  const parentMd = await readProduct(locale, parentId);
-  if (!parentMd) throw new Error('父产品不存在');
-  const updated = { ...parentMd, variants };
-  await writeProduct(locale, parentId, updated, parentMd.content || '');
-}
-
-function generateSkuFromRule(rule: string): string {
-  const randomNum = Math.floor(10000000 + Math.random() * 90000000);
-  return rule.replace(/\{timestamp\}/g, randomNum.toString());
-}
+  getProducts,
+  createProduct,
+  updateProduct,
+  deleteProductService,
+} from '@/lib/products/services/product.service';
 
 // ==================== GET ====================
 export async function GET(request: NextRequest) {
@@ -94,72 +16,28 @@ export async function GET(request: NextRequest) {
     const keyword = searchParams.get('keyword') || '';
     const categoryId = searchParams.get('categoryId') || '';
     const seriesId = searchParams.get('seriesId') || '';
-    const parentId = searchParams.get('parentId');
-    const productId = searchParams.get('productId');
+    const parentId = searchParams.get('parentId') || undefined;
+    const productId = searchParams.get('productId') || undefined;
     const page = parseInt(searchParams.get('page') || '1', 10);
     const size = Math.min(parseInt(searchParams.get('size') || '20', 10), 100);
     const uncategorized = searchParams.get('uncategorized') === 'true';
-
-    if (uncategorized) {
-      let query = supabase
-        .from('products')
-        .select('*', { count: 'exact' })
-        .eq('site_id', DEFAULT_SITE_ID)
-        .eq('locale', locale)
-        .eq('categoryId', '__UNCATEGORIZED__')
-        .or('parent_product_id.is.null,parent_product_id.eq.');
-      if (status !== 'all') {
-        query = query.eq('status', status);
-      }
-      if (keyword) {
-        query = query.or(`product_name.ilike.%${keyword}%,sku.ilike.%${keyword}%`);
-      }
-      const from = (page - 1) * size;
-      const to = from + size - 1;
-      const { data, error, count } = await query
-        .order('updatedAt', { ascending: false })
-        .range(from, to);
-      if (error) throw new Error(`uncategorized query failed: ${error.message}`);
-      const items = data || [];
-      const statusCount = await getProductStatusCount(locale);
-      return NextResponse.json({ items, total: count || 0, statusCount, page, size });
-    }
-
     const searchAll = searchParams.get('searchAll') === 'true';
-    if (searchAll) {
-      const { items, total } = await searchAllProducts(locale, keyword, categoryId, seriesId, page, size);
-      const statusCount = await getProductStatusCount(locale);
-      return NextResponse.json({ items, total, statusCount, page, size });
-    }
 
-    if (productId) {
-      const index = await getProductIndex(productId);
-      if (index?.parent_product_id) {
-        const parentMd = await readProduct(locale, index.parent_product_id);
-        const variant = parentMd?.variants?.find((v: any) => v.id === productId);
-        return NextResponse.json(variant || {});
-      } else {
-        const product = await readProduct(locale, productId);
-        return NextResponse.json(product || {});
-      }
-    }
-
-    if (parentId) {
-      const children = await getChildrenProducts(parentId);
-      return NextResponse.json(children);
-    }
-
-    const statusCount = await getProductStatusCount(locale);
-    const { items, total } = await searchProducts(
+    const result = await getProducts({
       locale,
-      status === 'all' ? undefined : status,
+      status,
       keyword,
-      categoryId || undefined,
-      seriesId || undefined,
+      categoryId,
+      seriesId,
+      parentId,
+      productId,
       page,
-      size
-    );
-    return NextResponse.json({ items, total, statusCount, page, size });
+      size,
+      uncategorized,
+      searchAll,
+    });
+
+    return NextResponse.json(result);
   } catch (error) {
     console.error('GET /products/manage error:', error);
     return NextResponse.json({ error: '服务器内部错误' }, { status: 500 });
@@ -171,184 +49,15 @@ export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
     const locale = body.locale || 'zh';
-    const isVariant = !!body.parent_product_id;
 
-    const productSettings = await getProductSettings(locale);
-    const defaultSettings = (productSettings as any).defaultSettings || {};
-    const skuRule = defaultSettings.sku_rule ?? 'P-{timestamp}';
-
-    if (isVariant) {
-      const parentId = body.parent_product_id;
-      const parentMd = await readProduct(locale, parentId);
-      if (!parentMd) return NextResponse.json({ error: '父产品不存在' }, { status: 404 });
-
-      const existingIds = await getAllProductIds(locale);
-      const variantId = await generateUniqueProductId(async () => existingIds);
-
-      let sku = body.sku?.trim();
-      if (!sku) {
-        sku = generateSkuFromRule(skuRule!);
-      }
-
-      const variant = {
-        id: variantId,
-        product_name: body.product_name,
-        sku: sku,
-        short_description: body.short_description || '',
-        main_image_url: body.main_image_url || '',
-        additional_images: body.additional_images || [],
-        attributes: body.attributes || {},
-        slug: body.slug || generateSlug(body.product_name),
-        seo_keywords: body.seo_keywords || '',
-        seo_title: body.seo_title || '',
-        seo_description: body.seo_description || '',
-      };
-
-      const variants = parentMd.variants || [];
-      variants.push(variant);
-      await updateParentVariants(locale, parentId, variants);
-
-      const now = new Date().toISOString();
-      await upsertProductIndex({
-        productId: variantId,
-        locale,
-        productLineId: parentMd.productLineId || '',
-        categoryId: parentMd.categoryId || '',
-        seriesId: parentMd.seriesId || '',
-        parent_product_id: parentId,
-        sku: sku,
-        product_name: body.product_name,
-        brand: parentMd.brand || '',
-        price_tiers: [],
-        currency: parentMd.currency || 'USD',
-        availability: parentMd.availability || 'in_stock',
-        min_order_quantity: 1,
-        main_image_url: body.main_image_url || '',
-        attributes: body.attributes || {},
-        slug: variant.slug,
-        status: 'published',
-        updatedAt: now,
-        createdAt: now,
-        templateId: body.templateId || '',
-      });
-
-      return NextResponse.json({ ...variant, productId: variantId }, { status: 201 });
-    }
-
-    // 普通产品创建
-    const categoryId = body.categoryId;
-    if (!categoryId) return NextResponse.json({ error: 'categoryId is required' }, { status: 400 });
-    const seriesId = body.seriesId;
-
-    let productLineId = body.productLineId || (await getProductLineIdFromCategory(locale, categoryId));
-    if (!productLineId) return NextResponse.json({ error: '无法确定产品线' }, { status: 400 });
-
-    const siteSettings = await getSiteSettings();
-
-    const existingIds = await getAllProductIds(locale);
-    const productId = await generateUniqueProductId(async () => existingIds);
-
-    let sku = body.sku?.trim();
-    if (!sku) {
-      sku = generateSkuFromRule(skuRule!);
-    }
-
-    let slug = body.slug;
-    if (!slug) slug = generateSlug(body.product_name);
-
-    const firstTier = (body.price_tiers && body.price_tiers[0]) || { min_qty: 1, price: 0 };
-    const minOrderQuantity = firstTier.min_qty;
-    const extractedPrice = firstTier.price;
-
-    const defaultBrand = defaultSettings.default_brand || '';
-    const brand = body.brand || defaultBrand;
-
-    const seoTitle = body.seo_title || generateSeoTitle(
-      body.product_name,
-      brand,
-      minOrderQuantity,
-      siteSettings.site_name || '我的网站',
-      defaultSettings.auto_seo_title_template || ''
-    );
-    const seoDescription = body.seo_description || generateSeoDescription(
-      body.description,
-      body.price_tiers,
-      body.spec_text,
-      defaultSettings.auto_seo_desc_template || '',
-      body.currency || defaultSettings.default_currency || 'USD'
-    );
-
-    let mpn = body.mpn || '';
-    if (!mpn && defaultSettings.default_mpn) {
-      mpn = processMpn(defaultSettings.default_mpn, sku);
-    }
-
-    const product_type = await getProductType(locale, categoryId, seriesId);
-
-    const frontMatter = {
-      id: productId,
-      product_name: body.product_name,
-      brand: brand || 'Neutral',
-      sku,
-      mpn,
-      gtin: '',
-      price_tiers: body.price_tiers,
-      currency: body.currency || defaultSettings.default_currency || 'USD',
-      identifier_exists: false,
-      price: extractedPrice,
-      spec_text: body.spec_text || '',
-      availability: body.availability || defaultSettings.default_availability || 'in_stock',
-      min_order_quantity: minOrderQuantity,
-      main_image_url: body.main_image_url,
-      additional_images: body.additional_images || [],
-      description: body.description || '',
-      short_description: body.short_description || '',
-      attributes: body.attributes || {},
-      product_type,
-      google_product_category: body.google_product_category || 0,
-      seo_title: seoTitle,
-      seo_description: seoDescription,
-      seo_keywords: body.seo_keywords || '',
-      slug,
-      shipping_cost: body.shipping_cost !== undefined ? body.shipping_cost : (defaultSettings.default_shipping_cost ?? 0),
-      return_policy_days: body.return_policy_days !== undefined ? body.return_policy_days : (defaultSettings.default_return_days ?? 30),
-      aggregate_rating: null,
-      categoryId,
-      seriesId: seriesId || '',
-      parent_product_id: body.parent_product_id || '',
-      variants: body.variants || [],
-      templateId: body.templateId || '',
-    };
-
-    await writeProduct(locale, productId, frontMatter, body.content || '');
-
-    const now = new Date().toISOString();
-    await upsertProductIndex({
-      productId,
-      locale,
-      productLineId: productLineId || '',
-      categoryId,
-      seriesId: seriesId || '',
-      parent_product_id: body.parent_product_id || null,
-      sku,
-      product_name: body.product_name,
-      brand,
-      price_tiers: body.price_tiers,
-      currency: body.currency || defaultSettings.default_currency || 'USD',
-      availability: body.availability || defaultSettings.default_availability || 'in_stock',
-      min_order_quantity: minOrderQuantity,
-      main_image_url: body.main_image_url || '',
-      attributes: body.attributes || {},
-      slug,
-      status: body.status || 'published',
-      updatedAt: now,
-      createdAt: now,
-    });
-
-    return NextResponse.json({ ...frontMatter, productId, content: body.content }, { status: 201 });
-  } catch (error) {
+    const result = await createProduct(locale, body);
+    return NextResponse.json(result, { status: 201 });
+  } catch (error: any) {
     console.error('POST /products/manage error:', error);
-    return NextResponse.json({ error: '保存失败' }, { status: 500 });
+    return NextResponse.json(
+      { error: error.message || '保存失败' },
+      { status: 500 }
+    );
   }
 }
 
@@ -357,201 +66,19 @@ export async function PUT(request: NextRequest) {
   try {
     const searchParams = request.nextUrl.searchParams;
     const productId = searchParams.get('productId');
-    if (!productId) return NextResponse.json({ error: 'productId required' }, { status: 400 });
+    if (!productId) {
+      return NextResponse.json({ error: 'productId required' }, { status: 400 });
+    }
 
     const body = await request.json();
     const locale = body.locale || 'zh';
 
-    const existingIndex = await getProductIndex(productId);
-    const isVariant = existingIndex?.parent_product_id && existingIndex.parent_product_id !== '';
-
-    const productSettings = await getProductSettings(locale);
-    const defaultSettings = (productSettings as any).defaultSettings || {};
-    const skuRule = defaultSettings.sku_rule ?? 'P-{timestamp}';
-
-    if (isVariant) {
-      const parentId = existingIndex!.parent_product_id;
-      const parentMd = await readProduct(locale, parentId);
-      if (!parentMd) return NextResponse.json({ error: '父产品不存在' }, { status: 404 });
-
-      const variants = parentMd.variants || [];
-      const variantIndex = variants.findIndex((v: any) => v.id === productId);
-      if (variantIndex === -1) return NextResponse.json({ error: '变体不存在' }, { status: 404 });
-
-      let sku = body.sku?.trim();
-      if (!sku) {
-        if (!variants[variantIndex].sku) {
-          sku = generateSkuFromRule(skuRule!);
-        } else {
-          sku = variants[variantIndex].sku;
-        }
-      }
-
-      const updatedVariant = {
-        ...variants[variantIndex],
-        product_name: body.product_name,
-        sku: sku,
-        short_description: body.short_description || '',
-        main_image_url: body.main_image_url || '',
-        additional_images: body.additional_images || [],
-        attributes: body.attributes || {},
-        slug: body.slug || generateSlug(body.product_name),
-        seo_keywords: body.seo_keywords || '',
-        seo_title: body.seo_title || '',
-        seo_description: body.seo_description || '',
-      };
-      variants[variantIndex] = updatedVariant;
-      await updateParentVariants(locale, parentId, variants);
-
-      const now = new Date().toISOString();
-      await upsertProductIndex({
-        ...existingIndex,
-        sku: sku,
-        product_name: body.product_name,
-        main_image_url: body.main_image_url || '',
-        attributes: body.attributes || {},
-        slug: updatedVariant.slug,
-        updatedAt: now,
-      });
-
-      return NextResponse.json({ ...updatedVariant, productId });
-    }
-
-    // 普通产品更新
-    const categoryId = body.categoryId;
-    const seriesId = body.seriesId;
-    if (!categoryId) return NextResponse.json({ error: 'categoryId required' }, { status: 400 });
-
-    let productLineId = body.productLineId || (await getProductLineIdFromCategory(locale, categoryId));
-    if (!productLineId) return NextResponse.json({ error: '无法确定产品线' }, { status: 400 });
-
-    const existingMd = await readProduct(locale, productId);
-    if (!existingMd) return NextResponse.json({ error: 'Product not found' }, { status: 404 });
-
-    const siteSettings = await getSiteSettings();
-
-    const final = {
-      ...existingMd,
-      ...body,
-      variants: body.variants !== undefined ? body.variants : (existingMd.variants || []),
-      updatedAt: new Date().toISOString(),
-    };
-
-    let sku = body.sku?.trim();
-    if (!sku) {
-      if (!final.sku) {
-        sku = generateSkuFromRule(skuRule!);
-      } else {
-        sku = final.sku;
-      }
-    }
-    final.sku = sku;
-
-    const product_type = await getProductType(locale, categoryId, seriesId);
-
-    const firstTier = (final.price_tiers && final.price_tiers[0]) || { min_qty: 1, price: 0 };
-    const extractedMinOrderQty = firstTier.min_qty;
-    const extractedPrice = firstTier.price;
-
-    let mpn = final.mpn || '';
-    if (!mpn && defaultSettings.default_mpn) {
-      mpn = processMpn(defaultSettings.default_mpn, sku);
-    }
-
-    const defaultBrand = defaultSettings.default_brand || '';
-    const brand = final.brand || defaultBrand;
-
-    if (!body.seo_title) {
-      final.seo_title = generateSeoTitle(
-        final.product_name,
-        brand,
-        extractedMinOrderQty,
-        siteSettings.site_name || '我的网站',
-        defaultSettings.auto_seo_title_template || ''
-      );
-    }
-    if (!body.seo_description) {
-      final.seo_description = generateSeoDescription(
-        final.description,
-        final.price_tiers,
-        final.spec_text,
-        defaultSettings.auto_seo_desc_template || '',
-        final.currency || defaultSettings.default_currency || 'USD'
-      );
-    }
-    if (!body.slug && !final.slug) final.slug = generateSlug(final.product_name);
-
-    final.mpn = mpn;
-    final.product_type = product_type;
-    final.min_order_quantity = extractedMinOrderQty;
-    final.price = extractedPrice;
-    final.identifier_exists = false;
-
-    const orderedFinal: any = {
-      id: productId,
-      product_name: final.product_name,
-      brand: final.brand,
-      sku: final.sku,
-      mpn: final.mpn,
-      gtin: final.gtin,
-      price_tiers: final.price_tiers,
-      currency: final.currency,
-      identifier_exists: final.identifier_exists,
-      price: final.price,
-      spec_text: final.spec_text,
-      availability: final.availability,
-      min_order_quantity: final.min_order_quantity,
-      main_image_url: final.main_image_url,
-      additional_images: final.additional_images,
-      description: final.description,
-      short_description: final.short_description,
-      attributes: final.attributes,
-      product_type: final.product_type,
-      google_product_category: final.google_product_category,
-      seo_title: final.seo_title,
-      seo_description: final.seo_description,
-      seo_keywords: final.seo_keywords,
-      slug: final.slug,
-      shipping_cost: final.shipping_cost,
-      return_policy_days: final.return_policy_days,
-      aggregate_rating: final.aggregate_rating,
-      categoryId: final.categoryId,
-      seriesId: final.seriesId,
-      parent_product_id: final.parent_product_id,
-      variants: final.variants,
-      templateId: body.templateId !== undefined ? body.templateId : existingMd.templateId || '',
-    };
-
-    await writeProduct(locale, productId, orderedFinal, body.content || existingMd.content || '');
-
-    const now = new Date().toISOString();
-    await upsertProductIndex({
-      productId,
-      locale,
-      productLineId: productLineId || '',
-      categoryId,
-      seriesId: seriesId || '',
-      parent_product_id: final.parent_product_id || null,
-      sku: final.sku,
-      product_name: final.product_name,
-      brand: final.brand,
-      price_tiers: final.price_tiers,
-      currency: final.currency,
-      availability: final.availability,
-      min_order_quantity: extractedMinOrderQty,
-      main_image_url: final.main_image_url || '',
-      attributes: final.attributes || {},
-      slug: final.slug,
-      status: body.status || existingIndex?.status || 'published',
-      updatedAt: now,
-      createdAt: existingIndex?.createdAt || now,
-    });
-
-    return NextResponse.json({ ...final, productId });
-  } catch (error) {
+    const result = await updateProduct(locale, productId, body);
+    return NextResponse.json(result);
+  } catch (error: any) {
     console.error('PUT /products/manage error:', error);
     return NextResponse.json(
-      { error: error instanceof Error ? error.message : '更新失败' },
+      { error: error.message || '更新失败' },
       { status: 500 }
     );
   }
@@ -563,54 +90,17 @@ export async function DELETE(request: NextRequest) {
     const searchParams = request.nextUrl.searchParams;
     const productId = searchParams.get('productId');
     const locale = searchParams.get('locale') || 'zh';
-    if (!productId) return NextResponse.json({ error: 'productId required' }, { status: 400 });
-
-    // 1. 查询并删除所有变体（子产品）
-    const { data: variants, error: variantsError } = await supabase
-      .from('products')
-      .select('productId')
-      .eq('site_id', DEFAULT_SITE_ID)
-      .eq('parent_product_id', productId);
-    if (variantsError) {
-      console.error('查询变体失败:', variantsError);
-    } else if (variants && variants.length > 0) {
-      for (const variant of variants) {
-        await deleteProductIndex(variant.productId);
-        console.log(`已删除变体索引: ${variant.productId}`);
-      }
+    if (!productId) {
+      return NextResponse.json({ error: 'productId required' }, { status: 400 });
     }
 
-    // 2. 删除父产品的物理 MD 文件（通过已升级的 deleteProduct 函数）
-    try {
-      await deleteProduct(locale, productId);
-    } catch (err: any) {
-      console.warn(`deleteProduct 调用失败: ${err.message}`);
-    }
-
-    // 3. 删除父产品索引
-    try {
-      await deleteProductIndex(productId);
-    } catch (err: any) {
-      console.error(`删除产品索引失败: ${productId}`, err);
-      return NextResponse.json({ error: `删除索引失败: ${err.message}` }, { status: 500 });
-    }
-
-    // 4. 删除产品与资源的关联记录
-    try {
-      const { error: resourceError } = await supabase
-        .from('resource_product')
-        .delete()
-        .eq('product_id', productId);
-      if (resourceError) {
-        console.error(`删除产品关联资源失败: ${productId}`, resourceError);
-      }
-    } catch (err: any) {
-      console.error(`删除产品关联资源失败: ${productId}`, err);
-    }
-
+    await deleteProductService(locale, productId);
     return NextResponse.json({ success: true });
-  } catch (error) {
+  } catch (error: any) {
     console.error('DELETE /products/manage error:', error);
-    return NextResponse.json({ error: error instanceof Error ? error.message : '删除失败' }, { status: 500 });
+    return NextResponse.json(
+      { error: error.message || '删除失败' },
+      { status: 500 }
+    );
   }
 }

@@ -2,15 +2,30 @@
 
 import { useState, useRef } from 'react';
 import { X, Upload, Link as LinkIcon, Loader2 } from 'lucide-react';
+import { getImageUrl } from '@/lib/files/url';
+
+// 辅助函数：智能处理图片 URL
+function getDisplayImageUrl(url: string): string {
+  if (!url) return '';
+  if (url.startsWith('http://') || url.startsWith('https://')) {
+    return url;
+  }
+  if (url.startsWith('/api/proxy-image')) {
+    return url;
+  }
+  return getImageUrl(url);
+}
 
 interface ImageUploaderProps {
-  value: string | string[];               // 兼容字符串和数组
+  value: string | string[];
   onChange: (url: string | string[]) => void;
   maxCount?: number;
   label?: string;
   hint?: string;
   className?: string;
   previewAspectRatio?: '1:1' | '16:9';
+  referenceType?: string;
+  referenceId?: number;
 }
 
 export default function ImageUploader({
@@ -21,6 +36,8 @@ export default function ImageUploader({
   hint,
   className = '',
   previewAspectRatio = '1:1',
+  referenceType,
+  referenceId,
 }: ImageUploaderProps) {
   const [uploading, setUploading] = useState(false);
   const [downloading, setDownloading] = useState(false);
@@ -31,16 +48,13 @@ export default function ImageUploader({
 
   const aspectClass = previewAspectRatio === '16:9' ? 'aspect-video' : 'aspect-square';
 
-  // 统一转为数组便于渲染
   const isArrayMode = Array.isArray(value);
   const imageList = isArrayMode ? value : (value ? [value] : []);
 
-  // 更新数据时，根据原始模式决定返回类型
   const updateImages = (newList: string[]) => {
     if (isArrayMode) {
       onChange(newList);
     } else {
-      // 单图模式：最多保留第一张
       onChange(newList[0] || '');
     }
   };
@@ -48,7 +62,10 @@ export default function ImageUploader({
   const uploadFile = async (file: File): Promise<string> => {
     const formData = new FormData();
     formData.append('file', file);
-    const res = await fetch('/api/upload', { method: 'POST', body: formData });
+    if (referenceType) formData.append('referenceType', referenceType);
+    if (referenceId !== undefined) formData.append('referenceId', String(referenceId));
+
+    const res = await fetch('/api/images', { method: 'POST', body: formData });
     if (!res.ok) throw new Error('上传失败');
     const data = await res.json();
     return data.url;
@@ -91,10 +108,14 @@ export default function ImageUploader({
     setDownloading(true);
     setErrorMsg(null);
     try {
-      const res = await fetch('/api/download-image', {
+      const body: any = { url: trimmedUrl };
+      if (referenceType) body.referenceType = referenceType;
+      if (referenceId !== undefined) body.referenceId = referenceId;
+
+      const res = await fetch('/api/images', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ url: trimmedUrl }),
+        body: JSON.stringify(body),
       });
       if (!res.ok) {
         const error = await res.json();
@@ -121,11 +142,10 @@ export default function ImageUploader({
     <div className={className}>
       {label && <label className="block font-medium mb-1">{label}</label>}
 
-      {/* 多图预览网格（单图模式下同样适用） */}
       <div className="flex flex-wrap gap-3 mb-3">
         {imageList.map((url, idx) => (
           <div key={idx} className={`relative w-32 ${aspectClass} border rounded overflow-hidden bg-gray-50 group`}>
-            <img src={url} alt={`preview-${idx}`} className="w-full h-full object-cover" />
+            <img src={getDisplayImageUrl(url)} alt={`preview-${idx}`} className="w-full h-full object-cover" />
             <button
               type="button"
               onClick={() => removeImage(idx)}
@@ -136,7 +156,6 @@ export default function ImageUploader({
           </div>
         ))}
 
-        {/* 添加图片占位符（未超过最大数量时显示） */}
         {imageList.length < maxCount && (
           <div
             className={`w-32 ${aspectClass} border border-dashed rounded bg-gray-50 flex flex-col items-center justify-center text-gray-400 cursor-pointer hover:bg-gray-100 transition`}
@@ -148,7 +167,6 @@ export default function ImageUploader({
         )}
       </div>
 
-      {/* 操作按钮组 */}
       <div className="flex gap-2">
         <button
           type="button"
@@ -183,7 +201,6 @@ export default function ImageUploader({
       {errorMsg && <p className="text-xs text-red-500 mt-1">{errorMsg}</p>}
       {hint && <p className="text-xs text-gray-500 mt-1">{hint}</p>}
 
-      {/* 网络图片模态框 */}
       {showUrlModal && (
         <div
           className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50"

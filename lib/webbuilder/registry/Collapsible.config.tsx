@@ -1,41 +1,59 @@
 import type { ComponentConfig } from '@measured/puck';
 import { Collapsible } from '@/components/webbuilder/blocks/Advanced/Collapsible';
 import { ColorPickerField } from '@/components/webbuilder/fields/ColorPickerField';
-import { CollapsibleListField } from '@/components/webbuilder/fields/CollapsibleListField';
-import { LanguageSwitcherField } from '@/components/webbuilder/fields/LanguageSwitcherField';
 import ImageUpload from '@/components/ImageUpload';
+import { DEFAULT_COLLAPSIBLE } from '@/lib/webbuilder/defaults/Collapsible';
 import type { CollapsibleProps } from '@/lib/webbuilder/types';
+
+// 电商/商业相关图标选项（精简）
+const ICON_OPTIONS = [
+  { label: '无', value: 'none' },
+  { label: '购物车', value: 'shopping_cart' },
+  { label: '标签', value: 'tag' },
+  { label: '锁', value: 'lock' },
+  { label: '心形', value: 'heart' },
+  { label: '星星', value: 'star' },
+  { label: '卡车（物流）', value: 'truck' },
+  { label: '火焰（热门）', value: 'flame' },
+  { label: '叶子（天然）', value: 'leaf' },
+  { label: '闪电（快速）', value: 'zap' },
+  { label: '飞机（运输）', value: 'plane' },
+  { label: '地图标记（位置）', value: 'map_pin' },
+  { label: '问号（帮助）', value: 'help_circle' },
+  { label: '对勾（认证）', value: 'check' },
+  { label: '剪贴板（列表）', value: 'clipboard' },
+  { label: '眼睛（查看）', value: 'eye' },
+  { label: '用户（个人）', value: 'user' },
+  { label: '衬衫（服装）', value: 'shirt' },
+  // 已移除 'shoe'
+  { label: '盒子（包装）', value: 'box' },
+  { label: '价格标签', value: 'price_tag' },
+  { label: '回收（环保）', value: 'recycle' },
+  { label: '返回', value: 'undo' },
+  { label: '尺子（尺寸）', value: 'ruler' },
+  { label: '餐具（食品）', value: 'utensils' },
+  { label: '雪花（冷链）', value: 'snowflake' },
+  { label: '秒表（时效）', value: 'timer' },
+];
 
 export const config: ComponentConfig<CollapsibleProps> = {
   label: '可折叠',
   category: 'Media/Banner',
   defaultProps: {
-    languageSwitcher: { label: '', type: 'language-switcher' },
-    bannerType: 'standard',
-    backgroundColor: '#ffffff',
-    globalTitle: { zh: '常见问题', en: 'FAQ', textId: '' },
-    globalTitleFontSize: 40,
-    globalTitleColor: '#000000',
-    globalTitleAlign: 'center',
-    imageUrl: '',
-    imageRatio: 'adapt',
-    imagePlacement: 'left',
-    rowTitleColor: '#000000',
-    rowTitleFontSize: 18,
-    rowContentColor: '#666666',
-    rowContentFontSize: 16,
-    containerType: 'none',
-    containerBgColor: 'transparent',
-    paddingTop: 32,
-    paddingBottom: 32,
-    items: [],
+    bannerGroup: { ...DEFAULT_COLLAPSIBLE.bannerGroup },
+    titleGroup: { ...DEFAULT_COLLAPSIBLE.titleGroup },
+    imageGroup: { ...DEFAULT_COLLAPSIBLE.imageGroup },
+    contentGroup: { ...DEFAULT_COLLAPSIBLE.contentGroup },
+    containerGroup: { ...DEFAULT_COLLAPSIBLE.containerGroup },
+    paddingGroup: { ...DEFAULT_COLLAPSIBLE.paddingGroup },
+    spacingGroup: { ...DEFAULT_COLLAPSIBLE.spacingGroup },
+    items: DEFAULT_COLLAPSIBLE.items,
   },
   fields: {
-    languageSwitcher: { label: '', type: 'language-switcher' },
-
+    // ===== 大分组：通栏设置 =====
     bannerGroup: {
-      label: '通栏设置',
       type: 'object',
+      label: '通栏设置',
       objectFields: {
         bannerType: {
           label: '通栏类型',
@@ -48,42 +66,65 @@ export const config: ComponentConfig<CollapsibleProps> = {
         backgroundColor: {
           label: '通栏背景色',
           type: 'custom',
-          render: ({ value, onChange }: { value: any; onChange: any }) => <ColorPickerField field={{}} value={value || '#ffffff'} onChange={onChange} />,
+          render: ({ value, onChange }) => (
+            <ColorPickerField field={{}} value={value || '#ffffff'} onChange={onChange} />
+          ),
         },
       },
     },
 
+    // ===== 大分组：折叠栏设置 =====
     titleGroup: {
-      label: '全局标题设置',
-      type: 'object',
-      objectFields: {
-        globalTitle: { label: '标题', type: 'collapsible-title' },
-        globalTitleFontSize: { label: '标题大小 (px)', type: 'number', min: 20, max: 120, step: 1 },
-        globalTitleColor: {
-          label: '标题颜色',
-          type: 'custom',
-          render: ({ value, onChange }: { value: any; onChange: any }) => <ColorPickerField field={{}} value={value || '#000000'} onChange={onChange} />,
-        },
-        globalTitleAlign: {
-          label: '标题对齐方式',
-          type: 'select',
-          options: [
-            { label: '左', value: 'left' },
-            { label: '中', value: 'center' },
-            { label: '右', value: 'right' },
-          ],
+        type: 'object',
+        label: '折叠栏设置',
+        objectFields: {
+          globalTitle: { label: '标题', type: 'text' },
+          globalTitleFontSize: { label: '标题大小 (px)', type: 'number', min: 20, max: 120, step: 1 },
+          globalTitleColor: {
+            label: '标题颜色',
+            type: 'custom',
+            render: ({ value, onChange }) => (
+              <ColorPickerField field={{}} value={value || '#000000'} onChange={onChange} />
+            ),
+          },
+          globalTitleAlign: {
+            label: '标题对齐方式',
+            type: 'select',
+            options: [
+              { label: '左', value: 'left' },
+              { label: '中', value: 'center' },
+              { label: '右', value: 'right' },
+            ],
+          },
+          // ✅ 新增：折叠栏背景色
+          rowBackgroundColor: {
+            label: '折叠栏背景色',
+            type: 'custom',
+            render: ({ value, onChange }) => (
+              <ColorPickerField field={{}} value={value || '#f9fafb'} onChange={onChange} />
+            ),
+          },
         },
       },
-    },
 
+    // ===== 大分组：图片设置 =====
     imageGroup: {
-      label: '图片设置',
       type: 'object',
+      label: '图片设置',
       objectFields: {
         imageUrl: {
           label: '图片',
           type: 'custom',
-          render: ({ value, onChange }: { value: any; onChange: any }) => <ImageUpload value={value || ''} onChange={onChange} maxCount={1} label="" hint="支持上传本地图片或输入网络图片地址" previewAspectRatio="16:9" />,
+          render: ({ value, onChange }) => (
+            <ImageUpload
+              value={value || ''}
+              onChange={(url) => onChange(typeof url === 'string' ? url : url[0])}
+              maxCount={1}
+              label=""
+              hint="支持上传本地图片或输入网络图片地址"
+              previewAspectRatio="16:9"
+            />
+          ),
         },
         imageRatio: {
           label: '图片比例',
@@ -95,7 +136,7 @@ export const config: ComponentConfig<CollapsibleProps> = {
           ],
         },
         imagePlacement: {
-          label: '放置',
+          label: '图片位置',
           type: 'select',
           options: [
             { label: '左边', value: 'left' },
@@ -105,31 +146,43 @@ export const config: ComponentConfig<CollapsibleProps> = {
       },
     },
 
-    rowGroup: {
-      label: '可折叠行设置',
+    // ===== 大分组：内容列表设置 =====
+    contentGroup: {
       type: 'object',
+      label: '内容列表设置',
       objectFields: {
+        rowTitleFontSize: { label: '标题大小 (px)', type: 'number', min: 8, max: 120, step: 1 },
         rowTitleColor: {
           label: '标题颜色',
           type: 'custom',
-          render: ({ value, onChange }: { value: any; onChange: any }) => <ColorPickerField field={{}} value={value || '#000000'} onChange={onChange} />,
+          render: ({ value, onChange }) => (
+            <ColorPickerField field={{}} value={value || '#000000'} onChange={onChange} />
+          ),
         },
-        rowTitleFontSize: { label: '标题大小 (px)', type: 'number', min: 20, max: 120, step: 1 },
-        rowContentColor: {
-          label: '行内容颜色',
+        // 小分组分隔线
+        _sep1: {
+          label: '',
           type: 'custom',
-          render: ({ value, onChange }: { value: any; onChange: any }) => <ColorPickerField field={{}} value={value || '#666666'} onChange={onChange} />,
+          render: () => <div className="h-2 border-b border-gray-200 my-2" />,
         },
-        rowContentFontSize: { label: '内容文本大小 (px)', type: 'number', min: 20, max: 120, step: 1 },
+        rowContentFontSize: { label: '文本大小 (px)', type: 'number', min: 8, max: 120, step: 1 },
+        rowContentColor: {
+          label: '文本颜色',
+          type: 'custom',
+          render: ({ value, onChange }) => (
+            <ColorPickerField field={{}} value={value || '#666666'} onChange={onChange} />
+          ),
+        },
       },
     },
 
-    layoutGroup: {
-      label: '布局设置',
+    // ===== 大分组：内容容器 =====
+    containerGroup: {
       type: 'object',
+      label: '内容容器',
       objectFields: {
         containerType: {
-          label: '容器',
+          label: '容器类型',
           type: 'select',
           options: [
             { label: '无', value: 'none' },
@@ -140,24 +193,53 @@ export const config: ComponentConfig<CollapsibleProps> = {
         containerBgColor: {
           label: '容器背景色',
           type: 'custom',
-          render: ({ value, onChange }: { value: any; onChange: any }) => <ColorPickerField field={{}} value={value || 'transparent'} onChange={onChange} />,
+          render: ({ value, onChange }) => (
+            <ColorPickerField field={{}} value={value || 'transparent'} onChange={onChange} />
+          ),
         },
       },
     },
 
+    // ===== 可折叠项目管理（标准 array） =====
+    items: {
+      label: '可折叠项目列表',
+      type: 'array',
+      itemLabel: 'Item #{index}',
+      arrayFields: {
+        title: { label: '标题', type: 'text' },
+        _sep2: {
+          label: '',
+          type: 'custom',
+          render: () => <div className="h-2 border-b border-gray-200 my-2" />,
+        },
+        icon: {
+          label: '图标',
+          type: 'select',
+          options: ICON_OPTIONS,
+        },
+        _sep3: {
+          label: '',
+          type: 'custom',
+          render: () => <div className="h-2 border-b border-gray-200 my-2" />,
+        },
+        content: { label: '内容', type: 'textarea' },
+      },
+      defaultItem: () => ({
+        id: `collapsible-item-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+        title: '新问题',
+        icon: 'help_circle',
+        content: '在此输入答案...',
+      }),
+    },
+
+    // ===== 大分组：填充设置（置于最底） =====
     paddingGroup: {
-      label: '填充设置',
       type: 'object',
+      label: '填充设置',
       objectFields: {
         paddingTop: { label: '顶部填充 (px)', type: 'number', min: 0, max: 100, step: 1 },
         paddingBottom: { label: '底部填充 (px)', type: 'number', min: 0, max: 100, step: 1 },
       },
-    },
-
-    items: {
-      label: '可折叠行管理',
-      type: 'custom',
-      render: ({ value, onChange }: { value: any; onChange: any }) => <CollapsibleListField value={value} onChange={onChange} />,
     },
   },
   render: ({ puck, ...props }) => <Collapsible puck={puck} {...props} />,

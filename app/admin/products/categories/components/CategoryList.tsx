@@ -4,6 +4,7 @@ import { useState, useEffect, useRef } from 'react';
 import { Edit, Trash2, ChevronDown, ChevronRight } from 'lucide-react';
 import CategoryForm from './CategoryForm';
 import SeriesManager from './SeriesManager';
+import { getImageUrl } from '@/lib/files/url'; // 新增导入
 
 export default function CategoryList({ 
   categories, 
@@ -338,7 +339,6 @@ export default function CategoryList({
       )}
 
       {categories.map((cat: any) => {
-        // 获取二级分类数量（基于前端 cat.series 数组）
         const subCategoryCount = cat.series?.length ?? 0;
         return (
           <div key={cat.id} className="border rounded-lg bg-white shadow-sm overflow-hidden">
@@ -375,7 +375,8 @@ export default function CategoryList({
                     <div className="flex gap-4">
                       {cat.image && (
                         <div className="flex-shrink-0">
-                          <img src={cat.image} className="w-16 h-16 object-cover rounded" alt="" />
+                          {/* 使用 getImageUrl 转换图片地址 */}
+                          <img src={getImageUrl(cat.image)} className="w-16 h-16 object-cover rounded" alt="" />
                         </div>
                       )}
                       <div>

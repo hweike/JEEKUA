@@ -1,16 +1,25 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { useLocale } from 'next-intl';
+import { getImageUrl } from '@/lib/files/url';
+import { DEFAULT_IMAGE_BANNER } from '@/lib/webbuilder/defaults/ImageBanner';
+import { getAltSuffix } from '@/lib/webbuilder/alt-suffix-config';
+
+function getString(field: any): string {
+  if (typeof field === 'string') return field;
+  if (field && typeof field === 'object') {
+    return field.zh || field.en || '';
+  }
+  return '';
+}
 
 const HEIGHT_MAP: Record<string, string> = {
-  small: '42rem',
-  medium: '56rem',
-  large: '72rem',
+  small: 'clamp(300px, 40vh, 400px)',
+  medium: 'clamp(400px, 60vh, 650px)',
+  large: 'clamp(500px, 80vh, 1080px)',
   auto: 'auto',
 };
 
-// 位置映射到 CSS Grid 的 justify-self 和 align-self
 const POSITION_MAP: Record<string, { justifySelf: string; alignSelf: string }> = {
   'top-left': { justifySelf: 'start', alignSelf: 'start' },
   'top-center': { justifySelf: 'center', alignSelf: 'start' },
@@ -31,38 +40,7 @@ export function ImageBanner({
   __runtime,
 }: any) {
   const isEditMode = !!puck?.isEditing;
-  const pageLocale = useLocale();
 
-  // 编辑器内语言同步
-  const [editLocale, setEditLocale] = useState<string>(() => {
-    if (typeof window !== 'undefined' && isEditMode) {
-      const stored = localStorage.getItem('webbuilder_edit_locale');
-      if (stored && (stored === 'zh' || stored === 'en')) return stored;
-    }
-    return pageLocale;
-  });
-
-  useEffect(() => {
-    if (!isEditMode) return;
-    const handler = (e: StorageEvent) => {
-      if (e.key === 'webbuilder_edit_locale') {
-        const newLocale = e.newValue;
-        if (newLocale && (newLocale === 'zh' || newLocale === 'en')) setEditLocale(newLocale);
-      }
-    };
-    window.addEventListener('storage', handler);
-    return () => window.removeEventListener('storage', handler);
-  }, [isEditMode]);
-
-  useEffect(() => {
-    if (!isEditMode) return;
-    const stored = localStorage.getItem('webbuilder_edit_locale');
-    if (!stored) setEditLocale(pageLocale);
-  }, [isEditMode, pageLocale]);
-
-  const displayLocale = isEditMode ? editLocale : pageLocale;
-
-  // 提取配置
   const image1Url = imageSettings?.image1Url || '';
   const image2Url = imageSettings?.image2Url || '';
   const overlayOpacity = imageSettings?.overlayOpacity ?? 0;
@@ -70,41 +48,101 @@ export function ImageBanner({
   const animation = imageSettings?.animation ?? 'none';
 
   const cs = contentSettings || {};
-  const title = cs.title;
-  const titleFontSize = cs.titleFontSize ?? 48;
-  const titleColor = cs.titleColor ?? '#ffffff';
-  const text = cs.text;
-  const textFontSize = cs.textFontSize ?? 24;
-  const textColor = cs.textColor ?? '#ffffff';
-  const button1Text = cs.button1Text;
-  const button1Color = cs.button1Color ?? '#000000';
-  const button1Link = cs.button1Link ?? '';
-  const button2Text = cs.button2Text;
-  const button2Color = cs.button2Color ?? '#000000';
-  const button2Link = cs.button2Link ?? '';
-  const contentPosition = cs.contentPosition ?? 'center-center';
-  const textAlign = cs.textAlign ?? 'center';
-  const containerEnabled = cs.containerEnabled ?? false;
-  const containerBgColor = cs.containerBgColor ?? 'rgba(0,0,0,0.6)';
-  const containerBorderRadius = cs.containerBorderRadius ?? 16;
-  const containerPadding = cs.containerPadding; // 可能为 undefined
 
-  // 多语言获取
-  const getText = (field: any) => {
-    if (typeof field === 'string') return field;
-    if (!field || typeof field !== 'object') return '';
-    if (__runtime?.texts && field.textId && __runtime.texts[field.textId]) return __runtime.texts[field.textId];
-    return field[displayLocale] || '';
+  // 读取 mobileScaleFactor（默认 0.7）
+  const mobileScaleFactor = DEFAULT_IMAGE_BANNER.mobileScaleFactor ?? 0.7;
+
+  const {
+    title = DEFAULT_IMAGE_BANNER.contentSettings.title,
+    titleFontSize = DEFAULT_IMAGE_BANNER.contentSettings.titleFontSize,
+    titleColor = DEFAULT_IMAGE_BANNER.contentSettings.titleColor,
+    text = DEFAULT_IMAGE_BANNER.contentSettings.text,
+    textFontSize = DEFAULT_IMAGE_BANNER.contentSettings.textFontSize,
+    textColor = DEFAULT_IMAGE_BANNER.contentSettings.textColor,
+    button1Text = DEFAULT_IMAGE_BANNER.contentSettings.button1Text,
+    button1Color = DEFAULT_IMAGE_BANNER.contentSettings.button1Color,
+    button1Link = DEFAULT_IMAGE_BANNER.contentSettings.button1Link,
+    button2Text = DEFAULT_IMAGE_BANNER.contentSettings.button2Text,
+    button2Color = DEFAULT_IMAGE_BANNER.contentSettings.button2Color,
+    button2Link = DEFAULT_IMAGE_BANNER.contentSettings.button2Link,
+    contentPosition = DEFAULT_IMAGE_BANNER.contentSettings.contentPosition,
+    textAlign = DEFAULT_IMAGE_BANNER.contentSettings.textAlign,
+    containerEnabled = DEFAULT_IMAGE_BANNER.contentSettings.containerEnabled,
+    containerBgColor = DEFAULT_IMAGE_BANNER.contentSettings.containerBgColor,
+    containerOpacity = DEFAULT_IMAGE_BANNER.contentSettings.containerOpacity,
+    containerBorderRadius = DEFAULT_IMAGE_BANNER.contentSettings.containerBorderRadius,
+    containerPadding = DEFAULT_IMAGE_BANNER.contentSettings.containerPadding,
+    buttonPaddingX = DEFAULT_IMAGE_BANNER.contentSettings.buttonPaddingX,
+    buttonPaddingY = DEFAULT_IMAGE_BANNER.contentSettings.buttonPaddingY,
+    buttonBorderRadius = DEFAULT_IMAGE_BANNER.contentSettings.buttonBorderRadius,
+  } = cs;
+
+  // 旧数据兼容
+  const finalTitle = getString(title);
+  const finalText = getString(text);
+  const finalButton1Text = getString(button1Text);
+  const finalButton2Text = getString(button2Text);
+
+  // ===== 工具函数 =====
+  const getContainerBgWithOpacity = () => {
+    if (!containerEnabled) return 'transparent';
+    const opacity = containerOpacity / 100;
+    let color = containerBgColor || '#000000';
+    if (color.startsWith('#')) {
+      const hex = color.replace('#', '');
+      let r, g, b;
+      if (hex.length === 3) {
+        r = parseInt(hex[0] + hex[0], 16);
+        g = parseInt(hex[1] + hex[1], 16);
+        b = parseInt(hex[2] + hex[2], 16);
+      } else if (hex.length === 6) {
+        r = parseInt(hex.substring(0, 2), 16);
+        g = parseInt(hex.substring(2, 4), 16);
+        b = parseInt(hex.substring(4, 6), 16);
+      } else {
+        return color;
+      }
+      return `rgba(${r}, ${g}, ${b}, ${opacity})`;
+    }
+    if (color.startsWith('rgb')) {
+      const match = color.match(/[\d.]+/g);
+      if (match && match.length >= 3) {
+        const r = parseInt(match[0]);
+        const g = parseInt(match[1]);
+        const b = parseInt(match[2]);
+        return `rgba(${r}, ${g}, ${b}, ${opacity})`;
+      }
+      return color;
+    }
+    return color;
   };
 
-  const titleText = getText(title);
-  const descText = getText(text);
-  const btn1Text = getText(button1Text);
-  const btn2Text = getText(button2Text);
+  const getDisplayImageUrl = (url: string) => {
+    if (!url) return '';
+    const fullUrl = getImageUrl(url);
+    if (!isEditMode && fullUrl && !fullUrl.startsWith('http://') && !fullUrl.startsWith('https://')) {
+      const baseUrl = process.env.NEXT_PUBLIC_APP_URL || '';
+      return baseUrl + (fullUrl.startsWith('/') ? '' : '/') + fullUrl;
+    }
+    return isEditMode ? `/api/proxy-image?url=${encodeURIComponent(fullUrl)}` : fullUrl;
+  };
 
-  // 动态高度
+  const img1Url = getDisplayImageUrl(image1Url);
+  const img2Url = getDisplayImageUrl(image2Url);
+
+  const hasImage1 = !!image1Url;
+  const hasImage2 = !!image2Url;
+  const hasTwoImages = hasImage1 && hasImage2;
+
+  // ===== Alt 自动生成 =====
+  const seoTitle = __runtime?.seoTitle || '';
+  const locale = __runtime?.locale || 'zh';
+  const suffix = getAltSuffix('ImageBanner', locale);
+  const alt1 = hasImage1 ? (seoTitle ? `${seoTitle} - ${suffix} 1` : `${suffix} 1`) : '';
+  const alt2 = hasImage2 ? (seoTitle ? `${seoTitle} - ${suffix} 2` : `${suffix} 2`) : '';
+
+  const primaryImageUrl = img1Url || img2Url;
   const [dynamicHeight, setDynamicHeight] = useState<number | null>(null);
-  const primaryImageUrl = image1Url || image2Url;
 
   useEffect(() => {
     if (heightPreset !== 'auto' || !primaryImageUrl) {
@@ -124,69 +162,49 @@ export function ImageBanner({
       }
       return { minHeight: '300px' };
     }
-    const remValue = HEIGHT_MAP[heightPreset] || '56rem';
-    return { minHeight: remValue };
+    const val = HEIGHT_MAP[heightPreset] || '56rem';
+    return { minHeight: val };
   };
   const heightStyle = getHeightStyle();
 
-  // 外层容器样式
   const containerClasses = `relative overflow-hidden ${
     bannerType === 'fullwidth'
       ? 'w-screen left-1/2 right-1/2 -ml-[50vw] mr-[50vw]'
       : 'max-w-7xl mx-auto'
   }`;
-  const containerMargin = bannerType === 'standard' ? { marginTop: '10px', marginBottom: '10px' } : {};
+  const containerMargin = bannerType === 'standard' ? { marginTop: '0px', marginBottom: '0px' } : {};
 
-  const hasImage1 = image1Url;
-  const hasImage2 = image2Url;
-
-  // 背景图片层（作为 Grid 子项）
-  const bgImageStyle: React.CSSProperties = {
-    backgroundImage: `url(${hasImage1 || hasImage2})`,
-    backgroundSize: 'cover',
-    backgroundPosition: 'center',
-    backgroundAttachment: animation === 'fixed' ? 'fixed' : 'scroll',
-    transition: animation === 'scale' ? 'transform 0.3s ease' : 'none',
-    gridArea: '1 / 1 / 1 / 1', // 与内容重叠
-  };
-
-  // 遮罩层（同样重叠）
-  const overlayStyle: React.CSSProperties = {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    bottom: 0,
-    backgroundColor: 'black',
-    opacity: overlayOpacity / 100,
-    pointerEvents: 'none',
-    gridArea: '1 / 1 / 1 / 1',
-  };
-
-  // 响应式检测
-  const [isDesktop, setIsDesktop] = useState(false);
+  // 响应式断点检测
+  const [isMobile, setIsMobile] = useState(false);
   useEffect(() => {
-    const handleResize = () => setIsDesktop(window.innerWidth >= 750);
-    handleResize();
-    window.addEventListener('resize', handleResize);
-    return () => window.removeEventListener('resize', handleResize);
+    const mq = window.matchMedia('(max-width: 768px)');
+    const handleChange = () => setIsMobile(mq.matches);
+    handleChange();
+    mq.addEventListener('change', handleChange);
+    return () => mq.removeEventListener('change', handleChange);
   }, []);
 
-  // 文字背景框样式
-  // 如果用户定义了 containerPadding（数字，单位 px），则使用该值作为所有方向的内边距
-  // 否则使用默认响应式内边距（桌面 64px 56px，移动 64px 24px）
+  const [isDesktop, setIsDesktop] = useState(false);
+  useEffect(() => {
+    const mq = window.matchMedia('(min-width: 769px)');
+    const handleChange = () => setIsDesktop(mq.matches);
+    handleChange();
+    mq.addEventListener('change', handleChange);
+    return () => mq.removeEventListener('change', handleChange);
+  }, []);
+
   const getBoxPadding = () => {
     if (containerPadding !== undefined && containerPadding !== null && containerEnabled) {
       return `${containerPadding}px`;
     }
     if (containerEnabled) {
-      return isDesktop ? '64px 56px' : '64px 24px';
+      return isDesktop ? 'clamp(2rem, 4vw, 4rem) clamp(1.5rem, 3vw, 3.5rem)' : '2rem 1.5rem';
     }
     return 0;
   };
 
   const boxStyle: React.CSSProperties = {
-    backgroundColor: containerEnabled ? containerBgColor : 'transparent',
+    backgroundColor: getContainerBgWithOpacity(),
     borderRadius: `${containerBorderRadius}px`,
     textAlign,
     maxWidth: '100%',
@@ -194,7 +212,6 @@ export function ImageBanner({
     padding: getBoxPadding(),
   };
 
-  // 按钮组对齐
   const getButtonGroupJustify = () => {
     if (textAlign === 'center') return 'center';
     if (textAlign === 'right') return 'flex-end';
@@ -212,90 +229,212 @@ export function ImageBanner({
     );
   }
 
+  // 自适应字体（引入 mobileScaleFactor）
+  const titleSizeStyle = {
+    fontSize: `clamp(${titleFontSize * mobileScaleFactor}px, 4.5vw, ${titleFontSize}px)`,
+  };
+  const textSizeStyle = {
+    fontSize: `clamp(${textFontSize * mobileScaleFactor}px, 2.2vw, ${textFontSize}px)`,
+  };
+
+  // 按钮尺寸响应式（也应用 mobileScaleFactor）
+  const buttonPaddingXFinal = isMobile ? Math.min(buttonPaddingX, 16) : buttonPaddingX;
+  const buttonPaddingYFinal = isMobile ? Math.min(buttonPaddingY, 8) : buttonPaddingY;
+  const buttonBorderRadiusFinal = isMobile ? Math.min(buttonBorderRadius, 4) : buttonBorderRadius;
+  // 按钮字体自适应（使用 clamp，最小值基于 mobileScaleFactor）
+  const buttonFontSizeClamp = `clamp(${16 * mobileScaleFactor}px, 1.2vw, 16px)`;
+
   const renderContent = () => (
     <div style={boxStyle}>
-      {titleText && (
-        <div className="mb-4" style={{ fontSize: `${titleFontSize}px`, color: titleColor }}>
-          {titleText}
+      {finalTitle && (
+        <div className="mb-4" style={{ ...titleSizeStyle, color: titleColor }}>
+          {finalTitle}
         </div>
       )}
-      {descText && (
-        <div className="mb-6" style={{ fontSize: `${textFontSize}px`, color: textColor }}>
-          {descText}
+      {finalText && (
+        <div className="mb-6" style={{ ...textSizeStyle, color: textColor }}>
+          {finalText}
         </div>
       )}
       <div className="flex flex-wrap gap-4" style={{ justifyContent: getButtonGroupJustify() }}>
-        {btn1Text &&
+        {finalButton1Text &&
           (button1Link ? (
             <a
               href={button1Link}
-              className="px-6 py-2 rounded-md inline-block transition hover:opacity-80"
-              style={{ backgroundColor: button1Color, color: '#fff' }}
+              style={{
+                backgroundColor: button1Color,
+                color: '#fff',
+                padding: `${buttonPaddingYFinal}px ${buttonPaddingXFinal}px`,
+                borderRadius: `${buttonBorderRadiusFinal}px`,
+                display: 'inline-block',
+                transition: 'opacity 0.2s',
+                textDecoration: 'none',
+                cursor: 'pointer',
+                fontSize: buttonFontSizeClamp,
+              }}
               target="_blank"
               rel="noopener noreferrer"
             >
-              {btn1Text}
+              {finalButton1Text}
             </a>
           ) : (
             <span
-              className="px-6 py-2 rounded-md inline-block bg-gray-400 text-white cursor-default"
-              style={{ backgroundColor: button1Color, color: '#fff', opacity: 0.6 }}
+              style={{
+                backgroundColor: button1Color,
+                color: '#fff',
+                padding: `${buttonPaddingYFinal}px ${buttonPaddingXFinal}px`,
+                borderRadius: `${buttonBorderRadiusFinal}px`,
+                display: 'inline-block',
+                opacity: 0.6,
+                cursor: 'default',
+                fontSize: buttonFontSizeClamp,
+              }}
             >
-              {btn1Text}
+              {finalButton1Text}
             </span>
           ))}
-        {btn2Text &&
+        {finalButton2Text &&
           (button2Link ? (
             <a
               href={button2Link}
-              className="px-6 py-2 rounded-md inline-block transition hover:opacity-80"
-              style={{ backgroundColor: button2Color, color: '#fff' }}
+              style={{
+                backgroundColor: button2Color,
+                color: '#fff',
+                padding: `${buttonPaddingYFinal}px ${buttonPaddingXFinal}px`,
+                borderRadius: `${buttonBorderRadiusFinal}px`,
+                display: 'inline-block',
+                transition: 'opacity 0.2s',
+                textDecoration: 'none',
+                cursor: 'pointer',
+                fontSize: buttonFontSizeClamp,
+              }}
               target="_blank"
               rel="noopener noreferrer"
             >
-              {btn2Text}
+              {finalButton2Text}
             </a>
           ) : (
             <span
-              className="px-6 py-2 rounded-md inline-block bg-gray-400 text-white cursor-default"
-              style={{ backgroundColor: button2Color, color: '#fff', opacity: 0.6 }}
+              style={{
+                backgroundColor: button2Color,
+                color: '#fff',
+                padding: `${buttonPaddingYFinal}px ${buttonPaddingXFinal}px`,
+                borderRadius: `${buttonBorderRadiusFinal}px`,
+                display: 'inline-block',
+                opacity: 0.6,
+                cursor: 'default',
+                fontSize: buttonFontSizeClamp,
+              }}
             >
-              {btn2Text}
+              {finalButton2Text}
             </span>
           ))}
       </div>
     </div>
   );
 
+  // 双图时：网格两列（桌面）或单列（移动端）
+  const gridTemplateColumns = hasTwoImages ? (isDesktop ? '1fr 1fr' : '1fr') : '1fr';
+
+  // 构建图片元素（复用）
+  const renderImage = (src: string, alt: string, minHeight: string) => (
+    <div
+      style={{
+        position: 'relative',
+        overflow: 'hidden',
+        minHeight,
+        width: '100%',
+        height: '100%',
+      }}
+    >
+      <img
+        src={src}
+        alt={alt}
+        loading="lazy"
+        style={{
+          position: 'absolute',
+          top: 0,
+          left: 0,
+          width: '100%',
+          height: '100%',
+          objectFit: 'cover',
+          display: 'block',
+        }}
+      />
+      <div
+        style={{
+          position: 'absolute',
+          inset: 0,
+          backgroundColor: 'black',
+          opacity: overlayOpacity / 100,
+          pointerEvents: 'none',
+        }}
+      />
+    </div>
+  );
+
   return (
     <div ref={puck?.dragRef} className={containerClasses} style={containerMargin}>
       <div className="relative w-full" style={heightStyle}>
-        {/* 使用 Grid 布局，背景和内容重叠 */}
         <div
           className="grid"
           style={{
-            gridTemplateColumns: '1fr',
+            gridTemplateColumns,
             gridTemplateRows: '1fr',
             width: '100%',
             height: '100%',
             minHeight: 'inherit',
           }}
         >
-          {/* 背景图片 */}
-          <div style={bgImageStyle} />
-          {/* 遮罩层 */}
-          <div style={overlayStyle} />
+          {hasTwoImages ? (
+            <>
+              {/* 图1 */}
+              <div
+                style={{
+                  gridColumn: isDesktop ? '1 / 2' : '1 / -1',
+                  gridRow: '1 / 2',
+                  position: 'relative',
+                }}
+              >
+                {renderImage(img1Url, alt1, 'clamp(200px, 40vh, 400px)')}
+              </div>
+              {/* 图2 */}
+              <div
+                style={{
+                  gridColumn: isDesktop ? '2 / 3' : '1 / -1',
+                  gridRow: isDesktop ? '1 / 2' : '2 / 3',
+                  position: 'relative',
+                }}
+              >
+                {renderImage(img2Url, alt2, 'clamp(200px, 40vh, 400px)')}
+              </div>
+            </>
+          ) : (
+            /* 单图（全宽） */
+            <div
+              style={{
+                gridColumn: '1 / -1',
+                gridRow: '1 / 2',
+                position: 'relative',
+              }}
+            >
+              {renderImage(img1Url || img2Url, alt1, 'auto')}
+            </div>
+          )}
 
-          {/* 内容层：通过 justify-self 和 align-self 定位，宽度由内容决定 */}
+          {/* 内容层 */}
           <div
             style={{
-              gridArea: '1 / 1 / 1 / 1',
+              gridColumn: '1 / -1',
+              gridRow: '1 / 2',
               justifySelf: position.justifySelf,
               alignSelf: position.alignSelf,
               display: 'inline-block',
               maxWidth: '100%',
               pointerEvents: 'none',
-              margin: '40px',   // 👈 添加这一行，可调整上下左右外边距
+              margin: 'clamp(1rem, 4vw, 3rem)',
+              position: 'relative',
+              zIndex: 10,
             }}
           >
             {isFullwidth ? <div className="max-w-7xl mx-auto w-full">{renderContent()}</div> : renderContent()}

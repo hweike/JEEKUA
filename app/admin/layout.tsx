@@ -27,7 +27,9 @@ import {
   Map,
   RefreshCw,
   History,
-  Sliders, // 新增图标
+  Sliders,
+  Scan,
+  MessageCircle,  // ✅ 新增导入
 } from 'lucide-react';
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
@@ -40,7 +42,7 @@ interface MenuItem {
   children?: MenuItem[];
 }
 
-// 辅助函数：根据路径获取菜单名称
+// 辅助函数：根据路径获取菜单名称（用于日志）
 function getMenuNameByPath(path: string): string {
   const mapping: Record<string, string> = {
     '/admin/products': '产品分类',
@@ -64,6 +66,9 @@ function getMenuNameByPath(path: string): string {
     '/admin/logs': '网站日志',
     '/admin/profile': '个人信息',
     '/admin/account': '修改密码',
+    '/admin/discovery/search': '全站搜索',
+    '/admin/discovery/scan': '页面索引',
+    '/admin/litechat': 'Chat Online',  // ✅ 新增
   };
   return mapping[path] || path;
 }
@@ -79,7 +84,7 @@ function getMenuKeyByName(menuName: string): string {
     '页面管理': 'pageManagement',
     '网站设置': 'website',
     '站点同步与翻译': 'translate',
-    '智能SEO': 'smartSEO', // 添加映射
+    '智能SEO': 'smartSEO',
   };
   return mapping[menuName] || menuName;
 }
@@ -114,6 +119,27 @@ function findParentMenuKey(pathname: string, menuConfig: MenuItem[]): string | n
   return null;
 }
 
+// 根据路径查找当前页面信息（仅用于标题）
+function getCurrentPageName(pathname: string, menuConfig: MenuItem[]): string | null {
+  const matches: { name: string; href: string }[] = [];
+  const traverse = (items: MenuItem[]) => {
+    for (const item of items) {
+      if (item.href) {
+        if (item.href === pathname || pathname.startsWith(item.href + '/')) {
+          matches.push({ name: item.name, href: item.href });
+        }
+      }
+      if (item.children) {
+        traverse(item.children);
+      }
+    }
+  };
+  traverse(menuConfig);
+  if (matches.length === 0) return null;
+  const best = matches.reduce((a, b) => a.href.length > b.href.length ? a : b);
+  return best.name;
+}
+
 export default function AdminLayout({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const router = useRouter();
@@ -123,6 +149,17 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
   const [openMenus, setOpenMenus] = useState<Record<string, boolean>>({});
   const userMenuRef = useRef<HTMLDivElement>(null);
   const lastLoggedPath = useRef<string>('');
+
+  // ✅ 设置后台专属 Favicon
+  useEffect(() => {
+    let link = document.querySelector("link[rel*='icon']") as HTMLLinkElement;
+    if (!link) {
+      link = document.createElement('link');
+      link.rel = 'icon';
+      document.head.appendChild(link);
+    }
+    link.href = '/admin-favicon.ico';
+  }, []);
 
   // 获取用户信息
   useEffect(() => {
@@ -146,7 +183,8 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
       '/admin/products', '/admin/products/manage', '/admin/docs', '/admin/blog',
       '/admin/videosys/categories', '/admin/videosys/videos', '/admin/crm', '/admin/inquiries',
       '/admin/pages', '/admin/themes', '/admin/menus', '/admin/settings/header',
-      '/admin/settings/footer', '/admin/settings/admins', '/admin/logs'
+      '/admin/settings/footer', '/admin/settings/admins', '/admin/logs',
+      '/admin/discovery/search', '/admin/discovery/scan', '/admin/litechat'  // ✅ 新增
     ].some(p => pathname === p || pathname.startsWith(p + '/'));
     if (!shouldLog) return;
 
@@ -194,7 +232,7 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
     setOpenMenus(prev => ({ ...prev, [key]: !prev[key] }));
   };
 
-  // 基础菜单配置
+  // 基础菜单配置（不含智能SEO和网站设置）
   const baseMenuConfig: MenuItem[] = [
     {
       name: '产品目录',
@@ -202,6 +240,7 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
       children: [
         { name: '产品分类', href: '/admin/products/categories', icon: <FolderTree className="w-4 h-4" /> },
         { name: '产品管理', href: '/admin/products/manage', icon: <Package className="w-4 h-4" /> },
+        { name: '多语言同步', href: '/admin/discovery/Site-sync', icon: <RefreshCw className="w-4 h-4" /> },
         { name: '基本设置', href: '/admin/products/settings', icon: <Settings className="w-4 h-4" /> },
       ],
     },
@@ -235,6 +274,7 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
       children: [
         { name: '客户列表', href: '/admin/crm', icon: <Users className="w-4 h-4" /> },
         { name: '客户询盘', href: '/admin/inquiries', icon: <Mail className="w-4 h-4" /> },
+        { name: 'Chat Online', href: '/admin/litechat', icon: <MessageCircle className="w-4 h-4" /> },  // ✅ 新增
       ],
     },
     {
@@ -253,8 +293,8 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
     { name: '多语言站点', href: '/admin/settings/languages', icon: <Languages className="w-4 h-4" /> },
     { name: '网站主题', href: '/admin/themes', icon: <Palette className="w-4 h-4" /> },
     { name: '菜单管理', href: '/admin/menus', icon: <Menu className="w-4 h-4" /> },
-    { name: '页头设置', href: '/admin/settings/header', icon: <PanelTop className="w-4 h-4" /> },
-    { name: '页脚设置', href: '/admin/settings/footer', icon: <PanelBottom className="w-4 h-4" /> },
+    { name: '页头|页脚', href: '/admin/settings/header-footer', icon: <PanelTop className="w-4 h-4" /> },
+    { name: '翻译配置', href: '/admin/discovery/translation-config', icon: <Settings className="w-4 h-4" /> },
   ];
 
   // 根据角色动态添加网站管理员和网站日志菜单
@@ -268,19 +308,21 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
   // 完整菜单配置（使用 useMemo 避免不必要的重新计算）
   const menuConfig = useMemo(() => {
     const config: MenuItem[] = [
+      {
+        name: '全站搜索',
+        href: '/admin/discovery/search',
+        icon: <Search className="w-4 h-4" />,
+      },
       ...baseMenuConfig,
       {
         name: '智能SEO',
         icon: <BarChart3 className="w-4 h-4" />,
         children: [
-          { name: 'SEO优化', href: '/admin/discovery', icon: <FileText className="w-4 h-4" /> },
+          { name: '页面索引', href: '/admin/discovery/scan', icon: <Scan className="w-4 h-4" /> },
           { name: '站点地图', href: '/admin/discovery/sitemap', icon: <Map className="w-4 h-4" /> },
-          { name: '全站搜索', href: '/admin/discovery/search', icon: <Search className="w-4 h-4" /> },
-          { name: '站点同步与翻译', href: '/admin/discovery/translate', icon: <RefreshCw className="w-4 h-4" /> }, 
+          { name: 'SEO优化', href: '/admin/discovery/seo', icon: <FileText className="w-4 h-4" /> },
+          { name: 'SEO策略', href: '/admin/discovery/seo/strategies', icon: <Sliders className="w-4 h-4" /> },
           { name: '同步日志', href: '/admin/discovery/sync-logs', icon: <History className="w-4 h-4" /> },
-          { name: '翻译配置', href: '/admin/discovery/translation-config', icon: <Settings className="w-4 h-4" /> },
-          // 新增 SEO 策略菜单项，使用 Sliders 图标
-          { name: 'SEO策略', href: '/admin/discovery/seo-strategies', icon: <Sliders className="w-4 h-4" /> },
         ],
       },
       {
@@ -305,19 +347,25 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
     setOpenMenus(newOpenMenus);
   }, [pathname, menuConfig]);
 
-  // 修复后的激活判断函数（增加特殊规则避免子菜单互相高亮）
+  // ✅ 动态设置浏览器标签页标题（根据当前菜单，不在页面中重复显示）
+  useEffect(() => {
+    if (pathname === '/admin/login') return;
+
+    const pageName = getCurrentPageName(pathname, menuConfig);
+    if (pageName) {
+      document.title = `${pageName} - JEEKUA网站运营平台`;
+    } else {
+      document.title = 'JEEKUA网站运营平台';
+    }
+  }, [pathname, menuConfig]);
+
+  // 激活判断函数
   const isActive = (href: string) => {
     if (href === '/admin') return pathname === href;
-
-    // 特殊处理：文档库管理路径不应激活文档管理
     if (href === '/admin/docs' && pathname === '/admin/docs/docs-libs') return false;
-    // 特殊处理：Blog文章不应激活Blog分类（分类编辑页面也不激活）
     if (href === '/admin/blog' && pathname?.startsWith('/admin/blog/categories')) return false;
-    // 特殊处理：Blog分类不应激活Blog文章（避免双向匹配，但一般无需，为保险也加上）
     if (href === '/admin/blog/categories' && pathname?.startsWith('/admin/blog/') && !pathname?.startsWith('/admin/blog/categories')) return false;
-    // 特殊处理：SEO优化子菜单（避免“SEO优化”与“站点地图/全站搜索”同时高亮）
-    if (href === '/admin/discovery' && pathname !== '/admin/discovery') return false;
-    // 通用规则：以 href 开头（且不是上面排除的子路径）
+    if (href === '/admin/discovery/seo' && pathname !== '/admin/discovery/seo') return false;
     return pathname?.startsWith(href);
   };
 
@@ -418,7 +466,9 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
           )}
         </div>
       </aside>
-      <main className="flex-1 overflow-auto p-6">{children}</main>
+      <main className="flex-1 overflow-auto p-6">
+        {children}
+      </main>
     </div>
   );
 }

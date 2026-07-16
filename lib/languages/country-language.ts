@@ -206,145 +206,205 @@ export const countries = [
   { code: 'TW', nativeName: 'Taiwan', zhName: '台湾地区' },
 ];
 
-// ==================== 国家 -> 官方语言映射 ====================
-// 基于常见官方语言，只映射到上述语言列表中的语言
+// ==================== 国家 -> 官方语言映射（去重，每个国家仅一个语言） ====================
 export const countryOfficialLanguage: Record<string, string> = {
-  CN: 'zh', TW: 'zh', HK: 'zh', MO: 'zh', SG: 'zh', // 中文
-  US: 'en', GB: 'en', AU: 'en', CA: 'en', NZ: 'en', IE: 'en', ZA: 'en', // 英语
-  JP: 'ja', // 日语
-  DE: 'de', AT: 'de', CH: 'de', LI: 'de', // 德语
-  FR: 'fr', BE: 'fr', LU: 'fr', MC: 'fr', CH: 'fr', // 法语（瑞士同时有德语、法语，取法语作为常用）
-  IN: 'hi', // 印地语（印度官方语言之一，多语言，选择印地语）
-  ES: 'es', MX: 'es', AR: 'es', CO: 'es', PE: 'es', VE: 'es', CL: 'es', EC: 'es', GT: 'es', BO: 'es', DO: 'es', HN: 'es', PY: 'es', SV: 'es', CR: 'es', PA: 'es', UY: 'es', CU: 'es', // 西班牙语
-  PT: 'pt', BR: 'pt', AO: 'pt', MZ: 'pt', CV: 'pt', ST: 'pt', // 葡萄牙语
-  RU: 'ru', BY: 'ru', KZ: 'ru', KG: 'ru', // 俄语
-  IT: 'it', // 意大利语
-  NL: 'nl', BE: 'nl', // 荷兰语（比利时官方语言还有法语、德语，这里取荷兰语）
-  SV: 'sv', // 瑞典语
-  NO: 'no', // 挪威语
-  DK: 'da', // 丹麦语
-  FI: 'fi', // 芬兰语
-  PL: 'pl', // 波兰语
-  TR: 'tr', // 土耳其语
-  TH: 'th', // 泰语
-  VN: 'vi', // 越南语
-  ID: 'id', // 印尼语
-  MY: 'ms', // 马来语
-  PH: 'en', // 菲律宾官方语言英语和他加禄语，取英语
-  EG: 'ar', SA: 'ar', AE: 'ar', QA: 'ar', KW: 'ar', OM: 'ar', BH: 'ar', JO: 'ar', LB: 'ar', IQ: 'ar', LY: 'ar', DZ: 'ar', MA: 'ar', TN: 'ar', SD: 'ar', SY: 'ar', YE: 'ar', SO: 'ar', // 阿拉伯语
-  IL: 'he', // 希伯来语
-  KR: 'ko', // 韩语
-  GR: 'el', // 希腊语
-  CZ: 'cs', // 捷克语
-  HU: 'hu', // 匈牙利语
-  RO: 'ro', // 罗马尼亚语
-  UA: 'uk', // 乌克兰语
-  BG: 'bg', // 保加利亚语
-  HR: 'hr', // 克罗地亚语
-  RS: 'sr', // 塞尔维亚语
-  SK: 'sk', // 斯洛伐克语
-  SI: 'sl', // 斯洛文尼亚语
-  LT: 'lt', // 立陶宛语
-  LV: 'lv', // 拉脱维亚语
-  EE: 'et', // 爱沙尼亚语
-  IS: 'en', // 冰岛官方语言冰岛语，不在列表，用英语
-  MT: 'en', // 马耳他语不在列表，用英语
-  CY: 'el', // 塞浦路斯官方希腊语和土耳其语，取希腊语
-  PK: 'ur', // 乌尔都语不在列表，用英语
-  BD: 'bn', // 孟加拉语不在列表，用英语
-  LK: 'ta', // 泰米尔语（斯里兰卡官方语言之一）
-  MM: 'my', // 缅甸语不在列表，用英语
-  KH: 'km', // 高棉语不在列表，用英语
-  LA: 'lo', // 老挝语不在列表，用英语
-  BN: 'ms', // 文莱官方马来语
-  MN: 'mn', // 蒙古语不在列表，用英语
-  NP: 'ne', // 尼泊尔语不在列表，用英语
-  BT: 'dz', // 宗卡语不在列表，用英语
-  MV: 'dv', // 迪维希语不在列表，用英语
-  AF: 'ps', // 普什图语不在列表，用英语
-  AL: 'sq', // 阿尔巴尼亚语
-  AM: 'hy', // 亚美尼亚语不在列表，用英语
-  AZ: 'az', // 阿塞拜疆语不在列表，用英语
-  BA: 'bs', // 波斯尼亚语不在列表，用英语
-  BW: 'en', // 博茨瓦纳英语
-  BF: 'fr', // 布基纳法索法语
-  BI: 'fr', // 布隆迪法语
-  CM: 'fr', // 喀麦隆法语/英语，取法语
-  CF: 'fr', // 中非法语
-  TD: 'fr', // 乍得法语
-  KM: 'fr', // 科摩罗法语
-  CG: 'fr', // 刚果（布）法语
-  CD: 'fr', // 刚果（金）法语
-  CI: 'fr', // 科特迪瓦法语
-  DJ: 'fr', // 吉布提法语
-  DM: 'en', // 多米尼克英语
-  TL: 'pt', // 东帝汶葡萄牙语
-  GQ: 'es', // 赤道几内亚西班牙语
-  ER: 'ar', // 厄立特里亚阿拉伯语
-  ET: 'am', // 阿姆哈拉语不在列表，用英语
-  FJ: 'en', // 斐济英语
-  GA: 'fr', // 加蓬法语
-  GM: 'en', // 冈比亚英语
-  GE: 'ka', // 格鲁吉亚语不在列表，用英语
-  GH: 'en', // 加纳英语
-  GD: 'en', // 格林纳达英语
-  GN: 'fr', // 几内亚法语
-  GW: 'pt', // 几内亚比绍葡萄牙语
-  GY: 'en', // 圭亚那英语
-  HT: 'fr', // 海地法语
-  IR: 'fa', // 波斯语不在列表，用英语
-  JM: 'en', // 牙买加英语
-  KI: 'en', // 基里巴斯英语
-  KP: 'ko', // 朝鲜韩语
-  LS: 'en', // 莱索托英语
-  LR: 'en', // 利比里亚英语
-  MG: 'fr', // 马达加斯加法语
-  MW: 'en', // 马拉维英语
-  ML: 'fr', // 马里法语
-  MH: 'en', // 马绍尔群岛英语
-  MR: 'ar', // 毛里塔尼亚阿拉伯语
-  MU: 'en', // 毛里求斯英语
-  FM: 'en', // 密克罗尼西亚英语
-  MD: 'ro', // 摩尔多瓦罗马尼亚语
-  ME: 'sr', // 黑山塞尔维亚语
-  MA: 'ar', // 摩洛哥阿拉伯语
-  NA: 'en', // 纳米比亚英语
-  NR: 'en', // 瑙鲁英语
-  NI: 'es', // 尼加拉瓜西班牙语
-  NE: 'fr', // 尼日尔法语
-  MK: 'mk', // 北马其顿马其顿语
-  PW: 'en', // 帕劳英语
-  PS: 'ar', // 巴勒斯坦阿拉伯语
-  PG: 'en', // 巴布亚新几内亚英语
-  RW: 'fr', // 卢旺达法语/英语，取法语
-  KN: 'en', // 圣基茨和尼维斯英语
-  LC: 'en', // 圣卢西亚英语
-  VC: 'en', // 圣文森特和格林纳丁斯英语
-  WS: 'en', // 萨摩亚英语
-  SM: 'it', // 圣马力诺意大利语
-  SN: 'fr', // 塞内加尔法语
-  SC: 'fr', // 塞舌尔法语/英语，取法语
-  SL: 'en', // 塞拉利昂英语
-  SB: 'en', // 所罗门群岛英语
-  SS: 'en', // 南苏丹英语
-  SR: 'nl', // 苏里南荷兰语
-  SZ: 'en', // 斯威士兰英语
-  TJ: 'tg', // 塔吉克语不在列表，用英语
-  TZ: 'sw', // 斯瓦希里语不在列表，用英语
-  TG: 'fr', // 多哥法语
-  TO: 'en', // 汤加英语
-  TT: 'en', // 特立尼达和多巴哥英语
-  TM: 'tk', // 土库曼语不在列表，用英语
-  TV: 'en', // 图瓦卢英语
-  UG: 'en', // 乌干达英语
-  UZ: 'uz', // 乌兹别克语不在列表，用英语
-  VU: 'fr', // 瓦努阿图法语/英语，取法语
-  VA: 'it', // 梵蒂冈意大利语
-  YE: 'ar', // 也门阿拉伯语
-  ZM: 'en', // 赞比亚英语
-  ZW: 'en', // 津巴布韦英语
-  CK: 'en', // 库克群岛英语
-  NU: 'en', // 纽埃英语
+  CN: 'zh',
+  TW: 'zh',
+  HK: 'zh',
+  MO: 'zh',
+  SG: 'zh',
+  US: 'en',
+  GB: 'en',
+  AU: 'en',
+  CA: 'en',
+  NZ: 'en',
+  IE: 'en',
+  ZA: 'en',
+  JP: 'ja',
+  DE: 'de',
+  AT: 'de',
+  // CH（瑞士）保留法语作为常用语言（根据原注释）
+  CH: 'fr',
+  LI: 'de',
+  FR: 'fr',
+  BE: 'nl', // 比利时保留荷兰语（根据注释）
+  LU: 'fr',
+  MC: 'fr',
+  IN: 'hi',
+  ES: 'es',
+  MX: 'es',
+  AR: 'es',
+  CO: 'es',
+  PE: 'es',
+  VE: 'es',
+  CL: 'es',
+  EC: 'es',
+  GT: 'es',
+  BO: 'es',
+  DO: 'es',
+  HN: 'es',
+  PY: 'es',
+  SV: 'es',
+  CR: 'es',
+  PA: 'es',
+  UY: 'es',
+  CU: 'es',
+  PT: 'pt',
+  BR: 'pt',
+  AO: 'pt',
+  MZ: 'pt',
+  CV: 'pt',
+  ST: 'pt',
+  RU: 'ru',
+  BY: 'ru',
+  KZ: 'ru',
+  KG: 'ru',
+  IT: 'it',
+  NL: 'nl',
+  SV: 'sv',
+  NO: 'no',
+  DK: 'da',
+  FI: 'fi',
+  PL: 'pl',
+  TR: 'tr',
+  TH: 'th',
+  VN: 'vi',
+  ID: 'id',
+  MY: 'ms',
+  // PH（菲律宾）使用英语作为官方语言之一
+  PH: 'en',
+  EG: 'ar',
+  SA: 'ar',
+  AE: 'ar',
+  QA: 'ar',
+  KW: 'ar',
+  OM: 'ar',
+  BH: 'ar',
+  JO: 'ar',
+  LB: 'ar',
+  IQ: 'ar',
+  LY: 'ar',
+  DZ: 'ar',
+  MA: 'ar',
+  TN: 'ar',
+  SD: 'ar',
+  SY: 'ar',
+  YE: 'ar',
+  SO: 'ar',
+  IL: 'he',
+  KR: 'ko',
+  GR: 'el',
+  CZ: 'cs',
+  HU: 'hu',
+  RO: 'ro',
+  UA: 'uk',
+  BG: 'bg',
+  HR: 'hr',
+  RS: 'sr',
+  SK: 'sk',
+  SI: 'sl',
+  LT: 'lt',
+  LV: 'lv',
+  EE: 'et',
+  // 冰岛（IS）和马耳他（MT）使用英语作为后备
+  IS: 'en',
+  MT: 'en',
+  CY: 'el',
+  // 巴基斯坦、孟加拉国使用英语（官方语言之一）
+  PK: 'en',
+  BD: 'en',
+  LK: 'ta',
+  // 缅甸、柬埔寨、老挝、蒙古、尼泊尔、不丹、马尔代夫、阿富汗等使用英语作为后备
+  MM: 'en',
+  KH: 'en',
+  LA: 'en',
+  BN: 'ms',
+  MN: 'en',
+  NP: 'en',
+  BT: 'en',
+  MV: 'en',
+  AF: 'en',
+  AL: 'sq',
+  AM: 'en',
+  AZ: 'en',
+  BA: 'en',
+  BW: 'en',
+  BF: 'fr',
+  BI: 'fr',
+  CM: 'fr',
+  CF: 'fr',
+  TD: 'fr',
+  KM: 'fr',
+  CG: 'fr',
+  CD: 'fr',
+  CI: 'fr',
+  DJ: 'fr',
+  DM: 'en',
+  TL: 'pt',
+  GQ: 'es',
+  ER: 'ar',
+  ET: 'en',
+  FJ: 'en',
+  GA: 'fr',
+  GM: 'en',
+  GE: 'en',
+  GH: 'en',
+  GD: 'en',
+  GN: 'fr',
+  GW: 'pt',
+  GY: 'en',
+  HT: 'fr',
+  IR: 'en',
+  JM: 'en',
+  KI: 'en',
+  KP: 'ko',
+  LS: 'en',
+  LR: 'en',
+  MG: 'fr',
+  MW: 'en',
+  ML: 'fr',
+  MH: 'en',
+  MR: 'ar',
+  MU: 'en',
+  FM: 'en',
+  MD: 'ro',
+  ME: 'sr',
+  NA: 'en',
+  NR: 'en',
+  NI: 'es',
+  NE: 'fr',
+  MK: 'mk',
+  PW: 'en',
+  PS: 'ar',
+  PG: 'en',
+  RW: 'fr',
+  KN: 'en',
+  LC: 'en',
+  VC: 'en',
+  WS: 'en',
+  SM: 'it',
+  SN: 'fr',
+  SC: 'fr',
+  SL: 'en',
+  SB: 'en',
+  SS: 'en',
+  SR: 'nl',
+  SZ: 'en',
+  TJ: 'en',
+  TZ: 'en',
+  TG: 'fr',
+  TO: 'en',
+  TT: 'en',
+  TM: 'en',
+  TV: 'en',
+  UG: 'en',
+  UZ: 'en',
+  VU: 'fr',
+  VA: 'it',
+  ZM: 'en',
+  ZW: 'en',
+  CK: 'en',
+  NU: 'en',
 };
 
 /**
@@ -366,4 +426,15 @@ export function getCountries() {
  */
 export function getLanguages() {
   return languages;
+}
+
+// 拉丁语系语言集合
+const LATIN_SCRIPT_LANGUAGES = new Set([
+  'en', 'es', 'fr', 'pt', 'de', 'id', 'tr', 'it', 'vi',
+  'pl', 'nl', 'sv', 'cs', 'ro', 'hu', 'fi', 'da', 'no',
+  'ms', 'hr', 'sk', 'lt', 'sl', 'et', 'lv', 'sq', 'ca', 'eu'
+]);
+
+export function isLatinLanguage(code: string): boolean {
+  return LATIN_SCRIPT_LANGUAGES.has(code);
 }

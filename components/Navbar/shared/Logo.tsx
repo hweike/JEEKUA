@@ -3,6 +3,7 @@
 import Link from 'next/link';
 import { useLocale } from 'next-intl';
 import { HeaderConfig } from '@/lib/config-loader';
+import { getImageUrl } from '@/lib/files/url'; // 公共函数
 
 interface LogoProps {
   logoConfig: HeaderConfig['logo'];
@@ -35,7 +36,7 @@ export default function Logo({ logoConfig, siteName }: LogoProps) {
       <Link href={homeUrl} className="flex items-center">
         {logoSrc ? (
           <img 
-            src={logoSrc} 
+            src={getImageUrl(logoSrc)} // 使用公共函数转换
             alt={siteName} 
             width={width} 
             height="auto"

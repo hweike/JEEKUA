@@ -1,44 +1,32 @@
 // app/api/admin/blog/categories/route.ts
 import { NextRequest, NextResponse } from 'next/server';
-import { getPrivateStorage } from '@/lib/storage/factory';
+import {
+  getCategories,
+  getCategoriesBatch,
+  createCategory,
+  copyCategory,
+  updateCategory,
+  deleteCategory,
+} from '@/lib/blog/services/category.service';
 
-function generateId(): string {
-  return Math.floor(10000000 + Math.random() * 90000000).toString();
-}
-
-function getCategoryKey(locale: string): string {
-  // 直接存储为 blog/{locale}/categories.json（无 data/ 前缀）
-  return `blog/${locale}/categories.json`;
-}
-
-async function readCategories(locale: string): Promise<any[]> {
-  const storage = getPrivateStorage();
-  const key = getCategoryKey(locale);
-  try {
-    const content = await storage.read(key, 'utf8');
-    return JSON.parse(content as string);
-  } catch (error: any) {
-    if (error?.Code === 'NoSuchKey' || error?.code === 'NoSuchKey' || error?.message?.includes('NoSuchKey')) {
-      return [];
-    }
-    console.error(`读取分类文件失败 [${locale}]:`, error);
-    throw error;
-  }
-}
-
-async function writeCategories(locale: string, categories: any[]): Promise<void> {
-  const storage = getPrivateStorage();
-  const key = getCategoryKey(locale);
-  await storage.write(key, JSON.stringify(categories, null, 2), {
-    contentType: 'application/json',
-  });
-}
-
+// ---------- GET ----------
 export async function GET(request: NextRequest) {
   const searchParams = request.nextUrl.searchParams;
-  const locale = searchParams.get('locale') || 'zh';
+  const locale = searchParams.get('locale');
+  const localesParam = searchParams.get('locales');
+
   try {
-    const categories = await readCategories(locale);
+    if (localesParam) {
+      const locales = localesParam.split(',').filter(Boolean);
+      if (locales.length === 0) {
+        return NextResponse.json({ error: 'No valid locales provided' }, { status: 400 });
+      }
+      const result = await getCategoriesBatch(locales);
+      return NextResponse.json(result);
+    }
+
+    const targetLocale = locale || 'zh';
+    const categories = await getCategories(targetLocale);
     return NextResponse.json(categories);
   } catch (error) {
     console.error('GET /api/admin/blog/categories error:', error);
@@ -46,30 +34,45 @@ export async function GET(request: NextRequest) {
   }
 }
 
+// ---------- POST ----------
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
-    const { locale, ...categoryData } = body;
+    const { action, sourceLocale, targetLocale, id, locale, ...categoryData } = body;
+
+    if (action === 'copy') {
+      if (!sourceLocale || !targetLocale || !id) {
+        return NextResponse.json(
+          { error: '缺少必要参数 (sourceLocale, targetLocale, id)' },
+          { status: 400 }
+        );
+      }
+      try {
+        const result = await copyCategory(sourceLocale, targetLocale, id);
+        return NextResponse.json({ success: true, data: result });
+      } catch (err: any) {
+        return NextResponse.json({ error: err.message }, { status: err.message.includes('不存在') ? 404 : 400 });
+      }
+    }
+
     if (!locale) {
       return NextResponse.json({ error: '缺少语言参数' }, { status: 400 });
     }
 
-    const categories = await readCategories(locale);
-    const newCategory = {
-      id: generateId(),
-      ...categoryData,
-      updated_at: new Date().toISOString(),
-      created_at: new Date().toISOString(),
-    };
-    categories.push(newCategory);
-    await writeCategories(locale, categories);
-    return NextResponse.json(newCategory);
+    try {
+      // 统一使用 createCategory，第三个参数为可选的 id
+      const newCategory = await createCategory(locale, categoryData, id);
+      return NextResponse.json(newCategory);
+    } catch (err: any) {
+      return NextResponse.json({ error: err.message }, { status: err.message.includes('已存在') ? 409 : 500 });
+    }
   } catch (error) {
     console.error('POST /api/admin/blog/categories error:', error);
-    return NextResponse.json({ error: '创建失败' }, { status: 500 });
+    return NextResponse.json({ error: '操作失败' }, { status: 500 });
   }
 }
 
+// ---------- PUT ----------
 export async function PUT(request: NextRequest) {
   try {
     const body = await request.json();
@@ -78,26 +81,19 @@ export async function PUT(request: NextRequest) {
       return NextResponse.json({ error: '缺少必要参数' }, { status: 400 });
     }
 
-    const categories = await readCategories(locale);
-    const index = categories.findIndex((c: any) => c.id === id);
-    if (index === -1) {
-      return NextResponse.json({ error: '分类不存在' }, { status: 404 });
+    try {
+      const updated = await updateCategory(locale, id, updateData);
+      return NextResponse.json(updated);
+    } catch (err: any) {
+      return NextResponse.json({ error: err.message }, { status: err.message.includes('不存在') ? 404 : 500 });
     }
-
-    const updated = {
-      ...categories[index],
-      ...updateData,
-      updated_at: new Date().toISOString(),
-    };
-    categories[index] = updated;
-    await writeCategories(locale, categories);
-    return NextResponse.json(updated);
   } catch (error) {
     console.error('PUT /api/admin/blog/categories error:', error);
     return NextResponse.json({ error: '更新失败' }, { status: 500 });
   }
 }
 
+// ---------- DELETE ----------
 export async function DELETE(request: NextRequest) {
   const searchParams = request.nextUrl.searchParams;
   const locale = searchParams.get('locale');
@@ -107,15 +103,12 @@ export async function DELETE(request: NextRequest) {
   }
 
   try {
-    let categories = await readCategories(locale);
-    const filtered = categories.filter((c: any) => c.id !== id);
-    if (filtered.length === categories.length) {
-      return NextResponse.json({ error: '分类不存在' }, { status: 404 });
-    }
-    await writeCategories(locale, filtered);
+    await deleteCategory(locale, id);
     return NextResponse.json({ success: true });
-  } catch (error) {
-    console.error('DELETE /api/admin/blog/categories error:', error);
-    return NextResponse.json({ error: '删除失败' }, { status: 500 });
+  } catch (err: any) {
+    return NextResponse.json(
+      { error: err.message },
+      { status: err.message.includes('不存在') ? 404 : 500 }
+    );
   }
 }

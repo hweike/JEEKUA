@@ -1,123 +1,121 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { useLocale } from 'next-intl';
+import { DEFAULT_RICHTEXT } from '@/lib/webbuilder/defaults/Richtext';
 
-export function Richtext({
-  bannerType,
-  title,
-  titleFontSize,
-  titleColor,
-  text,
-  textFontSize,
-  textColor,
-  button1Text,
-  button1Color,
-  button1Link,
-  button2Text,
-  button2Color,
-  button2Link,
-  contentPosition,
-  textAlign,
-  containerPaddingTop,
-  containerPaddingBottom,
-  backgroundColor,
-  puck,
-  __runtime,
-}: any) {
-  const isEditMode = !!puck?.isEditing;
-  const pageLocale = useLocale();
+export function Richtext(props: any) {
+  const isEditMode = !!props.puck?.isEditing;
 
-  const [editLocale, setEditLocale] = useState<string>(() => {
-    if (typeof window !== 'undefined' && isEditMode) {
-      const stored = localStorage.getItem('webbuilder_edit_locale');
-      if (stored && (stored === 'zh' || stored === 'en')) return stored;
-    }
-    return pageLocale;
-  });
+  // 合并默认值和传入值，确保所有字段存在
+  const mergedBannerType = props.bannerType ?? DEFAULT_RICHTEXT.bannerType;
+  const mergedBackgroundColor = props.backgroundColor ?? DEFAULT_RICHTEXT.backgroundColor;
+  const mergedTitleGroup = { ...DEFAULT_RICHTEXT.titleGroup, ...props.titleGroup };
+  const mergedTextGroup = { ...DEFAULT_RICHTEXT.textGroup, ...props.textGroup };
+  const mergedButton1Group = { ...DEFAULT_RICHTEXT.button1Group, ...props.button1Group };
+  const mergedButton2Group = { ...DEFAULT_RICHTEXT.button2Group, ...props.button2Group };
+  const mergedButtonStyleGroup = { ...DEFAULT_RICHTEXT.buttonStyleGroup, ...props.buttonStyleGroup };
+  const mergedLayoutGroup = { ...DEFAULT_RICHTEXT.layoutGroup, ...props.layoutGroup };
+  const mergedPaddingGroup = { ...DEFAULT_RICHTEXT.paddingGroup, ...props.paddingGroup };
+  const mergedSpacingGroup = { ...DEFAULT_RICHTEXT.spacingGroup, ...props.spacingGroup };
 
-  useEffect(() => {
-    if (!isEditMode) return;
-    const handler = (e: StorageEvent) => {
-      if (e.key === 'webbuilder_edit_locale') {
-        const newLocale = e.newValue;
-        if (newLocale && (newLocale === 'zh' || newLocale === 'en')) setEditLocale(newLocale);
-      }
-    };
-    window.addEventListener('storage', handler);
-    return () => window.removeEventListener('storage', handler);
-  }, [isEditMode]);
+  const {
+    title,
+    titleFontSize,
+    titleColor,
+  } = mergedTitleGroup;
 
-  useEffect(() => {
-    if (!isEditMode) return;
-    const stored = localStorage.getItem('webbuilder_edit_locale');
-    if (!stored) setEditLocale(pageLocale);
-  }, [isEditMode, pageLocale]);
+  const {
+    text,
+    textFontSize,
+    textColor,
+  } = mergedTextGroup;
 
-  const displayLocale = isEditMode ? editLocale : pageLocale;
+  const {
+    button1Text,
+    button1Color,
+    button1Link,
+    button1FontSize,
+  } = mergedButton1Group;
 
-  const getText = (field: any) => {
-    if (typeof field === 'string') return field;
-    if (!field || typeof field !== 'object') return '';
-    if (__runtime?.texts && field.textId && __runtime.texts[field.textId]) return __runtime.texts[field.textId];
-    return field[displayLocale] || '';
-  };
+  const {
+    button2Text,
+    button2Color,
+    button2Link,
+    button2FontSize,
+  } = mergedButton2Group;
 
-  const titleText = getText(title);
-  const descText = getText(text);
-  const btn1Text = getText(button1Text);
-  const btn2Text = getText(button2Text);
+  const {
+    buttonPaddingX,
+    buttonPaddingY,
+    buttonBorderRadius,
+  } = mergedButtonStyleGroup;
 
-  const outerClasses = `relative overflow-hidden ${
-    bannerType === 'fullwidth'
-      ? 'w-screen left-1/2 right-1/2 -ml-[50vw] mr-[50vw]'
-      : 'max-w-7xl mx-auto'
-  }`;
-  const outerMargin = bannerType === 'standard' ? { marginTop: '10px', marginBottom: '10px' } : {};
-
-  const outerStyle: React.CSSProperties = {
-    backgroundColor,
-    ...outerMargin,
-  };
-
-  const [isDesktop, setIsDesktop] = useState(false);
-  useEffect(() => {
-    const handleResize = () => setIsDesktop(window.innerWidth >= 750);
-    handleResize();
-    window.addEventListener('resize', handleResize);
-    return () => window.removeEventListener('resize', handleResize);
-  }, []);
-
-  const contentStyle: React.CSSProperties = {
+  const {
+    contentPosition,
     textAlign,
+  } = mergedLayoutGroup;
+
+  const {
+    containerPaddingTop,
+    containerPaddingBottom,
+  } = mergedPaddingGroup;
+
+  const {
+    titleMarginBottom,
+    textMarginBottom,
+    buttonGap,
+    mobileScaleFactor,
+  } = mergedSpacingGroup;
+
+  // 自适应字体：与 PicwithText 统一，使用 mobileScaleFactor 作为最小值基数
+  const titleFontSizeClamp = `clamp(${titleFontSize * mobileScaleFactor}px, 4vw, ${titleFontSize}px)`;
+  const textFontSizeClamp = `clamp(${textFontSize * mobileScaleFactor}px, 2.5vw, ${textFontSize}px)`;
+  const button1FontSizeClamp = `clamp(${button1FontSize * mobileScaleFactor}px, 2vw, ${button1FontSize}px)`;
+  const button2FontSizeClamp = `clamp(${button2FontSize * mobileScaleFactor}px, 2vw, ${button2FontSize}px)`;
+
+  // 统一通栏宽度控制：与 PicwithText 完全一致
+  const outerStyle: React.CSSProperties = {
+    backgroundColor: mergedBackgroundColor,
+    ...(mergedBannerType === 'fullwidth'
+      ? {
+          position: 'relative',
+          left: '50%',
+          transform: 'translateX(-50%)',
+          width: '100vw',
+          maxWidth: '100vw',
+        }
+      : {
+          maxWidth: '80rem',
+          marginLeft: 'auto',
+          marginRight: 'auto',
+        }),
+    ...(mergedBannerType === 'standard' ? { marginTop: '10px', marginBottom: '10px' } : {}),
+  };
+
+  const outerClasses = 'relative overflow-hidden';
+
+  // 内容内边距：与 PicwithText 统一（clamp 自适应）
+  const contentPaddingStyle: React.CSSProperties = {
     paddingTop: `${containerPaddingTop}px`,
     paddingBottom: `${containerPaddingBottom}px`,
-    paddingLeft: isDesktop ? '56px' : '24px',
-    paddingRight: isDesktop ? '56px' : '24px',
+    paddingLeft: 'clamp(1rem, 2vw, 2rem)',
+    paddingRight: 'clamp(1rem, 2vw, 2rem)',
   };
 
-  const getButtonGroupJustify = () => {
-    if (textAlign === 'center') return 'center';
-    if (textAlign === 'right') return 'flex-end';
-    return 'flex-start';
+  const baseButtonStyle = {
+    padding: `${buttonPaddingY}px ${buttonPaddingX}px`,
+    borderRadius: `${buttonBorderRadius}px`,
+    display: 'inline-block',
+    transition: 'opacity 0.2s',
+    textDecoration: 'none',
+    cursor: 'pointer',
+    color: '#fff',
+    textAlign: textAlign as 'left' | 'center' | 'right',
   };
 
-  const getContentMargin = () => {
-    switch (contentPosition) {
-      case 'left':
-        return { marginLeft: '0', marginRight: '250px' };
-      case 'center':
-        return { marginLeft: '125px', marginRight: '125px' };
-      case 'right':
-        return { marginLeft: '250px', marginRight: '0' };
-      default:
-        return { marginLeft: '125px', marginRight: '125px' };
-    }
-  };
-
-  if (isEditMode && !titleText && !descText && !btn1Text && !btn2Text) {
+  if (isEditMode && !title && !text && !button1Text && !button2Text) {
     return (
-      <div ref={puck?.dragRef} className={outerClasses} style={outerStyle}>
+      <div ref={props.puck?.dragRef} className={outerClasses} style={outerStyle}>
         <div className="border-2 border-dashed border-gray-300 p-8 text-center text-gray-400">
           〖富文本横幅 - 请添加内容〗
         </div>
@@ -126,95 +124,114 @@ export function Richtext({
   }
 
   const renderContent = () => (
-    <div style={contentStyle}>
-      {titleText && (
-        <div className="mb-4" style={{ fontSize: `${titleFontSize}px`, color: titleColor }}>
-          {titleText}
+    <div style={{ ...contentPaddingStyle, textAlign }}>
+      {title && (
+        <div
+          style={{
+            fontSize: titleFontSizeClamp,
+            color: titleColor,
+            marginBottom: `${titleMarginBottom}px`,
+          }}
+        >
+          {title}
         </div>
       )}
-      {descText && (
-        <div className="mb-6" style={{ fontSize: `${textFontSize}px`, color: textColor }}>
-          {descText}
+      {text && (
+        <div
+          style={{
+            fontSize: textFontSizeClamp,
+            color: textColor,
+            marginBottom: `${textMarginBottom}px`,
+          }}
+        >
+          {text}
         </div>
       )}
-      <div className="flex flex-wrap gap-4" style={{ justifyContent: getButtonGroupJustify() }}>
-        {btn1Text &&
-          (button1Link ? (
+      <div
+        className="flex flex-wrap"
+        style={{
+          justifyContent: textAlign === 'center' ? 'center' : textAlign === 'right' ? 'flex-end' : 'flex-start',
+          gap: `${buttonGap}px`,
+        }}
+      >
+        {button1Text && (
+          button1Link ? (
             <a
               href={button1Link}
-              className="px-6 py-2 rounded-md inline-block transition hover:opacity-80"
-              style={{ backgroundColor: button1Color, color: '#fff' }}
+              style={{
+                ...baseButtonStyle,
+                backgroundColor: button1Color,
+                fontSize: button1FontSizeClamp,
+              }}
               target="_blank"
               rel="noopener noreferrer"
             >
-              {btn1Text}
+              {button1Text}
             </a>
           ) : (
             <span
-              className="px-6 py-2 rounded-md inline-block bg-gray-400 text-white cursor-default"
-              style={{ backgroundColor: button1Color, color: '#fff', opacity: 0.6 }}
+              style={{
+                ...baseButtonStyle,
+                backgroundColor: button1Color,
+                fontSize: button1FontSizeClamp,
+                opacity: 0.6,
+                cursor: 'default',
+              }}
             >
-              {btn1Text}
+              {button1Text}
             </span>
-          ))}
-        {btn2Text &&
-          (button2Link ? (
+          )
+        )}
+        {button2Text && (
+          button2Link ? (
             <a
               href={button2Link}
-              className="px-6 py-2 rounded-md inline-block transition hover:opacity-80"
-              style={{ backgroundColor: button2Color, color: '#fff' }}
+              style={{
+                ...baseButtonStyle,
+                backgroundColor: button2Color,
+                fontSize: button2FontSizeClamp,
+              }}
               target="_blank"
               rel="noopener noreferrer"
             >
-              {btn2Text}
+              {button2Text}
             </a>
           ) : (
             <span
-              className="px-6 py-2 rounded-md inline-block bg-gray-400 text-white cursor-default"
-              style={{ backgroundColor: button2Color, color: '#fff', opacity: 0.6 }}
+              style={{
+                ...baseButtonStyle,
+                backgroundColor: button2Color,
+                fontSize: button2FontSizeClamp,
+                opacity: 0.6,
+                cursor: 'default',
+              }}
             >
-              {btn2Text}
+              {button2Text}
             </span>
-          ))}
+          )
+        )}
       </div>
     </div>
   );
 
-  // 全屏通栏：内部限制页头宽度
-  if (bannerType === 'fullwidth') {
-    return (
-      <div ref={puck?.dragRef} className={outerClasses} style={outerStyle}>
-        <div className="relative w-full">
-          <div className="max-w-7xl mx-auto w-full">
-            <div
-              className="flex"
-              style={{
-                alignItems: 'center',
-                minHeight: '200px',
-                width: '100%',
-              }}
-            >
-              <div style={getContentMargin()}>{renderContent()}</div>
-            </div>
-          </div>
-        </div>
-      </div>
-    );
-  }
+  const contentJustify = contentPosition === 'left' ? 'flex-start' : contentPosition === 'right' ? 'flex-end' : 'center';
 
-  // 标准通栏
   return (
-    <div ref={puck?.dragRef} className={outerClasses} style={outerStyle}>
+    <div ref={props.puck?.dragRef} className={outerClasses} style={outerStyle}>
       <div className="relative w-full">
-        <div
-          className="flex"
-          style={{
-            alignItems: 'center',
-            minHeight: '200px',
-            width: '100%',
-          }}
-        >
-          <div style={getContentMargin()}>{renderContent()}</div>
+        <div style={{ maxWidth: '80rem', margin: '0 auto', width: '100%' }}>
+          <div
+            className="flex"
+            style={{
+              alignItems: 'center',
+              minHeight: '200px',
+              width: '90%',
+              margin: '0 auto',          // ✅ 添加这一行
+              justifyContent: contentJustify,
+            }}
+          >
+            <div style={{ maxWidth: '100%' }}>{renderContent()}</div>
+          </div>
         </div>
       </div>
     </div>

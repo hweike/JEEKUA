@@ -1,143 +1,82 @@
 // app/api/admin/products/categories/route.ts
 import { NextRequest, NextResponse } from 'next/server';
-import { getPrivateStorage } from '@/lib/storage/factory';
+import {
+  getCategories,
+  getProductLines,
+  saveCategories,
+  saveProductLines,
+} from '@/lib/products/services';
 
-// 私有桶中存储路径（无 data/ 前缀）
-function getStorageKey(locale: string): string {
-  return `products/${locale}/categories.json`;
-}
+// ========== 内存缓存 ==========
+const cache = new Map<string, { data: any; timestamp: number }>();
+const CACHE_TTL = 60 * 1000; // 1 分钟（可根据需要调整）
 
-interface Series {
-  id: string;
-  name: string;
-  slug: string;
-  order: number;
-  image: string;
-  description: string;
-  seoTitle: string;
-  seoDescription: string;
-  seoKeywords: string;
-}
-
-interface Category {
-  id: string;
-  name: string;
-  slug: string;
-  order: number;
-  productLineId: string;
-  templateId: string;
-  image: string;
-  description: string;
-  seoTitle: string;
-  seoDescription: string;
-  seoKeywords: string;
-  attributeTemplateId: string;
-  series: Series[];
-}
-
-interface ProductLine {
-  id: string;
-  name: string;
-  order: number;
-  templateId: string;
-  slug: string;
-  seoTitle: string;
-  seoDescription: string;
-  seoKeywords: string;
-}
-
-function normalizeSeries(raw: any): Series {
-  return {
-    id: String(raw.id || ''),
-    name: String(raw.name || ''),
-    slug: String(raw.slug || ''),
-    order: typeof raw.order === 'number' ? raw.order : 0,
-    image: String(raw.image || ''),
-    description: String(raw.description || ''),
-    seoTitle: String(raw.seoTitle || ''),
-    seoDescription: String(raw.seoDescription || ''),
-    seoKeywords: String(raw.seoKeywords || ''),
-  };
-}
-
-function normalizeCategory(raw: any): Category {
-  return {
-    id: String(raw.id || ''),
-    name: String(raw.name || ''),
-    slug: String(raw.slug || ''),
-    order: typeof raw.order === 'number' ? raw.order : 0,
-    productLineId: String(raw.productLineId || ''),
-    templateId: String(raw.templateId || ''),
-    image: String(raw.image || ''),
-    description: String(raw.description || ''),
-    seoTitle: String(raw.seoTitle || ''),
-    seoDescription: String(raw.seoDescription || ''),
-    seoKeywords: String(raw.seoKeywords || ''),
-    attributeTemplateId: String(raw.attributeTemplateId || ''),
-    series: (raw.series || []).map(normalizeSeries),
-  };
-}
-
-function normalizeProductLine(raw: any): ProductLine {
-  return {
-    id: String(raw.id || ''),
-    name: String(raw.name || ''),
-    order: typeof raw.order === 'number' ? raw.order : 0,
-    templateId: String(raw.templateId || ''),
-    slug: String(raw.slug || ''),
-    seoTitle: String(raw.seoTitle || ''),
-    seoDescription: String(raw.seoDescription || ''),
-    seoKeywords: String(raw.seoKeywords || ''),
-  };
-}
-
+/**
+ * GET /api/admin/products/categories?locale=zh
+ * 返回该语言的所有产品线和分类数据（已排序），带缓存
+ */
 export async function GET(request: NextRequest) {
   try {
     const locale = request.nextUrl.searchParams.get('locale') || 'zh';
-    const storage = getPrivateStorage();
-    const key = getStorageKey(locale);
-    let rawData: any = { productLines: [], categories: [] };
-    try {
-      const content = await storage.read(key, 'utf8');
-      rawData = JSON.parse(content as string);
-    } catch (error: any) {
-      // 文件不存在时使用默认空结构（兼容 AWS SDK 错误）
-      if (error?.code === 'NoSuchKey' || error?.Code === 'NoSuchKey' || error?.message?.includes('File not found')) {
-        rawData = { productLines: [], categories: [] };
-      } else {
-        throw error;
-      }
+    const cacheKey = `categories_${locale}`;
+
+    // 1. 检查缓存
+    const cached = cache.get(cacheKey);
+    if (cached && Date.now() - cached.timestamp < CACHE_TTL) {
+      return NextResponse.json(cached.data);
     }
-    const productLines = (rawData.productLines || []).map(normalizeProductLine);
-    const categories = (rawData.categories || []).map(normalizeCategory);
-    productLines.sort((a: ProductLine, b: ProductLine) => a.order - b.order);
-    categories.sort((a: Category, b: Category) => a.order - b.order);
-    for (const cat of categories) {
-      cat.series.sort((a: Series, b: Series) => a.order - b.order);
-    }
-    return NextResponse.json({ productLines, categories });
+
+    // 2. 并行获取数据
+    const [productLines, categories] = await Promise.all([
+      getProductLines(locale),
+      getCategories(locale),
+    ]);
+
+    const data = { productLines, categories };
+
+    // 3. 写入缓存
+    cache.set(cacheKey, { data, timestamp: Date.now() });
+
+    return NextResponse.json(data);
   } catch (error) {
     console.error('GET Error:', error);
-    return NextResponse.json({ error: 'Internal Server Error' }, { status: 500 });
+    return NextResponse.json(
+      { error: 'Internal Server Error' },
+      { status: 500 }
+    );
   }
 }
 
+/**
+ * PUT /api/admin/products/categories?locale=zh
+ * 完全替换该语言的产品线和分类数据，并更新图片引用
+ * 请求体格式：{ productLines: [...], categories: [...] }
+ */
 export async function PUT(request: NextRequest) {
   try {
     const locale = request.nextUrl.searchParams.get('locale') || 'zh';
     const body = await request.json();
+
     if (!body.productLines || !body.categories) {
-      return NextResponse.json({ error: '缺少 productLines 或 categories 字段' }, { status: 400 });
+      return NextResponse.json(
+        { error: '缺少 productLines 或 categories 字段' },
+        { status: 400 }
+      );
     }
-    const cleanedProductLines = (body.productLines || []).map(normalizeProductLine);
-    const cleanedCategories = (body.categories || []).map(normalizeCategory);
-    const cleanData = { productLines: cleanedProductLines, categories: cleanedCategories };
-    const storage = getPrivateStorage();
-    const key = getStorageKey(locale);
-    await storage.write(key, JSON.stringify(cleanData, null, 2), { contentType: 'application/json' });
+
+    await saveProductLines(locale, body.productLines);
+    await saveCategories(locale, body.categories);
+
+    // 🔄 保存成功后清除该语言的缓存，确保下次读取最新数据
+    const cacheKey = `categories_${locale}`;
+    cache.delete(cacheKey);
+
     return NextResponse.json({ success: true });
   } catch (error) {
     console.error('PUT Error:', error);
-    return NextResponse.json({ error: '保存失败' }, { status: 500 });
+    return NextResponse.json(
+      { error: '保存失败' },
+      { status: 500 }
+    );
   }
 }

@@ -1,5 +1,5 @@
 import { NextIntlClientProvider } from 'next-intl';
-import { getMessages } from 'next-intl/server';
+import { getMessages, setRequestLocale } from 'next-intl/server';
 import { notFound } from 'next/navigation';
 import { headers } from 'next/headers';
 import { locales } from '@/i18n/config';
@@ -8,8 +8,8 @@ import Footer from '@/components/Footer';
 import { getHeaderConfig, getMenuBySourceId, getFooterConfig, getMultipleMenus } from '@/lib/config-loader';
 import { getSiteSettings } from '@/lib/getSiteSettings';
 import DetectLanguage from '@/components/DetectLanguage';
-import { setRequestLocale } from 'next-intl/server';
 import { getEnabledLanguages } from '@/lib/languages/settings';
+import ChatWidgetWrapper from '@/components/litechat/ChatWidgetWrapper';
 
 // 只生成已开通的语言的静态页面，而不是所有 locales
 export async function generateStaticParams() {
@@ -19,20 +19,35 @@ export async function generateStaticParams() {
 
 export async function generateMetadata({ params }: { params: Promise<{ locale: string }> }) {
   const { locale } = await params;
-  const headersList = await headers();
-  const host = headersList.get('host') || '';
-  const pathname = headersList.get('x-pathname') || '';
-  const baseUrl = `https://${host}`;
 
-  const languages: Record<string, string> = {};
-  for (const lng of locales) {
-    languages[lng] = `${baseUrl}/${lng}${pathname}`;
+  // 获取站点配置的域名
+  const settings = await getSiteSettings();
+  const configuredDomain = settings.websiteUrl?.trim()?.replace(/\/+$/, '');
+
+  // 获取当前请求的路径
+  const headersList = await headers();
+  const pathname = headersList.get('x-pathname') || '/';
+
+  // 构建 baseUrl：优先使用配置的域名，本地开发时使用 host
+  let baseUrl: string;
+  if (configuredDomain) {
+    baseUrl = configuredDomain;
+  } else {
+    // 本地开发降级方案
+    const host = headersList.get('host') || 'localhost:3000';
+    const protocol = host.includes('localhost') ? 'http' : 'https';
+    baseUrl = `${protocol}://${host}`;
   }
+
+  // 构建当前页面的完整 URL
+  const canonicalUrl = `${baseUrl}/${locale}${pathname}`;
 
   return {
     alternates: {
-      languages,
-      canonical: `${baseUrl}/${locale}${pathname}`,
+      canonical: canonicalUrl,
+    },
+    openGraph: {
+      locale: locale,
     },
   };
 }
@@ -47,7 +62,7 @@ export default async function LocaleLayout({
   const { locale } = await params;
   if (!locales.includes(locale as any)) notFound();
 
-  setRequestLocale(locale); // 避免 DYNAMIC_SERVER_USAGE 错误
+  setRequestLocale(locale);
 
   // 并行获取配置
   let messages, headerConfig, siteSettings, footerConfig;
@@ -96,7 +111,7 @@ export default async function LocaleLayout({
             {headerMissing && menuMissing && <span>网站页头和导航菜单均未设置，请检查配置。</span>}
           </div>
         )}
-        {/* 导航栏（背景全宽，内容与主区域对齐） */}
+        {/* 导航栏 */}
         <div className="sticky top-0 z-50">
           <Navbar
             headerConfig={headerConfig}
@@ -105,16 +120,18 @@ export default async function LocaleLayout({
             footerConfig={footerConfig}
           />
         </div>
-        {/* 主内容区域：不再限制宽度，宽度由子页面内部容器控制，确保与导航栏/页脚内容宽度一致 */}
-        <main className="flex-grow w-full py-8 relative z-0">
+        {/* 主内容区域 */}
+        <main className="flex-grow w-full pb-8 relative z-0">
           {children}
         </main>
-        {/* 页脚（背景全宽，内容与主区域对齐） */}
+        {/* 页脚 */}
         <Footer
           footerConfig={footerConfig}
           menusMap={footerMenusMap}
           siteSettings={siteSettings}
         />
+        {/* 聊天挂件 - 仅在客户端渲染 */}
+        <ChatWidgetWrapper />
       </div>
     </NextIntlClientProvider>
   );

@@ -1,3 +1,5 @@
+// app/admin/products/manage/page.tsx
+
 'use client';
 
 import { useState, useEffect, useCallback, useTransition, useRef, useMemo } from 'react';
@@ -11,10 +13,15 @@ import { SearchBar } from './components/SearchBar';
 import { ChevronDown, ChevronUp } from 'lucide-react';
 import { TemplateSelector } from '@/components/webbuilder/TemplateSelector';
 import { LANGUAGES } from '@/lib/languages/config';
+// ═══ 新增：导入 AI 翻译产品弹窗 ═══
+import AiHelperProductModal from './components/AiHelperProductModal';
 
 // 懒加载弹窗组件
-const CategorySelectModal = dynamic(() => import('./components/CategorySelectModal'), { ssr: false });
-const VariantEditModal = dynamic(() => import('./components/VariantEditModal'), { ssr: false });
+const CategorySelectModal = dynamic(
+  () => import('./components/CategorySelectModal').then(mod => mod.default || mod.CategorySelectModal),
+  { ssr: false }
+);
+// const VariantEditModal = dynamic(() => import('./components/VariantEditModal'), { ssr: false });
 const ImportProductsModal = dynamic(() => import('./components/ImportProductsModal'), { ssr: false });
 const ImportProductsJsonModal = dynamic(() => import('./components/ImportProductsJsonModal'), { ssr: false });
 
@@ -66,6 +73,8 @@ function ProductCardSkeleton() {
 // ==================== 常量 ====================
 const validLocaleCodes = LANGUAGES.map(lang => lang.code);
 const PAGE_SIZE = 20;
+const CATEGORY_CACHE_KEY = (locale: string) => `categoryMap_${locale}`;
+const CACHE_TTL = 60 * 60 * 1000; // 1小时
 
 const getInitialLocale = (): string => {
   if (typeof window === 'undefined') return validLocaleCodes[0] || 'zh';
@@ -99,6 +108,7 @@ export default function ProductManagePage() {
   const [uncategorizedCount, setUncategorizedCount] = useState(0);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [initialized, setInitialized] = useState(false);
   const [selectedProductIds, setSelectedProductIds] = useState<Set<string>>(new Set());
   const [showCategoryModal, setShowCategoryModal] = useState(false);
   const [editingVariant, setEditingVariant] = useState<{ parentId: string; variant: any } | null>(null);
@@ -113,6 +123,9 @@ export default function ProductManagePage() {
   const [showImportJsonModal, setShowImportJsonModal] = useState(false);
   const [showTemplateModal, setShowTemplateModal] = useState(false);
   const [selectedTemplateId, setSelectedTemplateId] = useState('');
+
+  // ═══ 新增：AI 翻译弹窗状态 ═══
+  const [showAiHelper, setShowAiHelper] = useState(false);
 
   // Toast 自动关闭
   useEffect(() => {
@@ -147,8 +160,27 @@ export default function ProductManagePage() {
     initLocale();
   }, []);
 
-  // 加载分类数据
+  // 加载分类数据（带 sessionStorage 缓存）
   useEffect(() => {
+    const cacheKey = CATEGORY_CACHE_KEY(locale);
+    const cached = sessionStorage.getItem(cacheKey);
+    if (cached) {
+      try {
+        const { data, timestamp } = JSON.parse(cached);
+        if (Date.now() - timestamp < CACHE_TTL) {
+          const restoredMap = new Map<string, CategoryInfo>();
+          data.forEach(([key, value]: [string, any]) => {
+            const seriesMap = new Map(value.series);
+            restoredMap.set(key, { name: value.name, series: seriesMap });
+          });
+          setCategoryMap(restoredMap);
+          return;
+        }
+      } catch (e) {
+        console.warn('解析分类缓存失败', e);
+      }
+    }
+
     fetch(`/api/admin/products/categories?locale=${locale}`)
       .then(res => res.json())
       .then(data => {
@@ -159,11 +191,16 @@ export default function ProductManagePage() {
           map.set(cat.id, { name: cat.name, series: seriesMap });
         });
         setCategoryMap(map);
+        const serializableMap = Array.from(map.entries()).map(([key, value]) => [
+          key,
+          { name: value.name, series: Array.from(value.series.entries()) },
+        ]);
+        sessionStorage.setItem(cacheKey, JSON.stringify({ data: serializableMap, timestamp: Date.now() }));
       })
       .catch(console.error);
   }, [locale]);
 
-  // 获取产品列表（合并未分类计数）
+  // 获取产品列表
   const fetchProducts = useCallback(async (signal: AbortSignal) => {
     setLoading(true);
     setError(null);
@@ -188,16 +225,20 @@ export default function ProductManagePage() {
       setTotal(data.total || 0);
       setStatusCount(data.statusCount || { published: 0, draft: 0, offline: 0 });
       
-      // 只在非未分类视图下刷新未分类计数（减少请求）
-      if (!uncategorized) {
+      if (data.uncategorizedCount !== undefined) {
+        setUncategorizedCount(data.uncategorizedCount);
+      } else if (!uncategorized) {
         const countRes = await fetch(`/api/admin/products/manage?locale=${locale}&uncategorized=true&size=1`);
         if (countRes.ok) {
           const countData = await countRes.json();
           setUncategorizedCount(countData.total || 0);
         }
       }
+      setInitialized(true);
     } catch (err: any) {
-      if (err.name !== 'AbortError') setError(err.message);
+      if (err.name !== 'AbortError') {
+        setError(err.message);
+      }
     } finally {
       setLoading(false);
     }
@@ -221,7 +262,7 @@ export default function ProductManagePage() {
       const newLocale = String(updates.locale);
       if (validLocaleCodes.includes(newLocale)) {
         localStorage.setItem('admin_selected_language', newLocale);
-        setLocale(newLocale); // 同步组件状态
+        setLocale(newLocale);
       }
     }
     startTransition(() => router.push(`?${params.toString()}`));
@@ -273,7 +314,8 @@ export default function ProductManagePage() {
 
   const handlePageChange = (newPage: number) => updateParams({ page: newPage });
 
-  const handleDelete = async (productId: string) => {
+  // ========== 稳定回调函数 ==========
+  const handleDelete = useCallback(async (productId: string) => {
     if (!confirm('确定删除该产品吗？')) return;
     try {
       const res = await fetch(`/api/admin/products/manage?productId=${productId}&locale=${locale}`, { method: 'DELETE' });
@@ -284,18 +326,45 @@ export default function ProductManagePage() {
     } catch {
       setToast({ message: '删除失败', type: 'error' });
     }
-  };
+  }, [locale, fetchProducts]);
 
+  const toggleSelect = useCallback((id: string) => {
+    setSelectedProductIds(prev => {
+      const newSet = new Set(prev);
+      if (newSet.has(id)) newSet.delete(id);
+      else newSet.add(id);
+      return newSet;
+    });
+  }, []);
+
+  const handleEditVariant = useCallback((parentId: string, variant: any) => {
+    router.push(`/admin/products/manage/variant/edit?locale=${locale}&parentId=${parentId}&productId=${variant.productId}`);
+  }, [locale, router]);
+
+  const handleCategorySelected = useCallback((catId: string, selectedSeriesId: string) => {
+    setShowCategoryModal(false);
+    if (categoryModalMode === 'new') {
+      router.push(`/admin/products/manage/edit?locale=${locale}&categoryId=${catId}&seriesId=${selectedSeriesId}`);
+    } else {
+      batchOperation('category', { categoryId: catId, seriesId: selectedSeriesId });
+    }
+  }, [categoryModalMode, locale, router]);
+
+  const confirmBatchTemplate = useCallback(async () => {
+    if (!selectedTemplateId) {
+      setToast({ message: '请选择模板', type: 'error' });
+      return;
+    }
+    const success = await batchOperation('template', { templateId: selectedTemplateId });
+    if (success) {
+      setShowTemplateModal(false);
+    }
+  }, [selectedTemplateId]);
+
+  // 其余辅助函数
   const toggleSelectAll = () => {
     if (selectedProductIds.size === products.length) setSelectedProductIds(new Set());
     else setSelectedProductIds(new Set(products.map(p => p.productId)));
-  };
-
-  const toggleSelect = (id: string) => {
-    const newSet = new Set(selectedProductIds);
-    if (newSet.has(id)) newSet.delete(id);
-    else newSet.add(id);
-    setSelectedProductIds(newSet);
   };
 
   const batchOperation = async (action: string, payload: any = {}) => {
@@ -349,17 +418,6 @@ export default function ProductManagePage() {
     setCategoryModalMode('new');
     setShowCategoryModal(true);
   };
-  const handleCategorySelected = (catId: string, selectedSeriesId: string) => {
-    setShowCategoryModal(false);
-    if (categoryModalMode === 'new') {
-      router.push(`/admin/products/manage/edit?locale=${locale}&categoryId=${catId}&seriesId=${selectedSeriesId}`);
-    } else {
-      batchOperation('category', { categoryId: catId, seriesId: selectedSeriesId });
-    }
-  };
-  const handleEditVariant = (parentId: string, variant: any) => {
-    router.push(`/admin/products/manage/variant/edit?locale=${locale}&parentId=${parentId}&productId=${variant.productId}`);
-  };
   const handleVariantSaved = () => {
     setEditingVariant(null);
     fetchProducts(abortControllerRef.current?.signal!);
@@ -372,16 +430,6 @@ export default function ProductManagePage() {
     setSelectedTemplateId('');
     setShowTemplateModal(true);
   };
-  const confirmBatchTemplate = async () => {
-    if (!selectedTemplateId) {
-      setToast({ message: '请选择模板', type: 'error' });
-      return;
-    }
-    const success = await batchOperation('template', { templateId: selectedTemplateId });
-    if (success) {
-      setShowTemplateModal(false);
-    }
-  };
 
   useEffect(() => {
     if (!showMoreMenu) return;
@@ -393,17 +441,23 @@ export default function ProductManagePage() {
     return () => document.removeEventListener('click', handleClickOutside);
   }, [showMoreMenu]);
 
-  const getCategoryPath = (product: Product) => {
-    const catInfo = categoryMap.get(product.categoryId);
-    if (!catInfo) return '';
-    const categoryName = catInfo.name;
-    const seriesName = product.seriesId ? catInfo.series.get(product.seriesId) : '';
-    return seriesName ? `${categoryName} > ${seriesName}` : categoryName;
-  };
+  // ========== 预计算分类路径映射 ==========
+  const productCategoryPathMap = useMemo(() => {
+    const map = new Map<string, string>();
+    products.forEach(product => {
+      const catInfo = categoryMap.get(product.categoryId);
+      if (!catInfo) return;
+      const categoryName = catInfo.name;
+      const seriesName = product.seriesId ? catInfo.series.get(product.seriesId) : '';
+      const path = seriesName ? `${categoryName} > ${seriesName}` : categoryName;
+      map.set(product.productId, path);
+    });
+    return map;
+  }, [products, categoryMap]);
 
   const totalPages = useMemo(() => Math.ceil(total / PAGE_SIZE), [total]);
 
-  // 骨架屏渲染（加载时显示5个卡片）
+  // ========== 渲染内容 ==========
   const renderContent = () => {
     if (loading) {
       return (
@@ -414,7 +468,20 @@ export default function ProductManagePage() {
         </div>
       );
     }
-    if (products.length === 0) {
+    if (error) {
+      return (
+        <div className="text-center py-12 text-red-500">
+          加载失败：{error}
+          <button
+            onClick={() => fetchProducts(abortControllerRef.current?.signal!)}
+            className="ml-2 text-blue-600 underline"
+          >
+            重试
+          </button>
+        </div>
+      );
+    }
+    if (initialized && products.length === 0) {
       return <div className="text-center py-12 text-gray-500">暂无产品数据</div>;
     }
     return (
@@ -428,7 +495,7 @@ export default function ProductManagePage() {
             onEditVariant={handleEditVariant}
             isSelected={selectedProductIds.has(product.productId)}
             onSelectChange={toggleSelect}
-            categoryPath={getCategoryPath(product)}
+            categoryPath={productCategoryPathMap.get(product.productId)}
           />
         ))}
       </div>
@@ -482,7 +549,7 @@ export default function ProductManagePage() {
         </button>
       </div>
 
-      <SearchBar onSearch={handleSearch} initialKeyword={keyword} initialCategoryId={categoryId} initialSeriesId={seriesId} />
+      <SearchBar onSearch={handleSearch} initialKeyword={keyword} initialCategoryId={categoryId} initialSeriesId={seriesId} locale={locale}  />
 
       {products.length > 0 && (
         <div className="flex items-center justify-between bg-gray-50 p-3 rounded-md mb-4">
@@ -584,7 +651,38 @@ export default function ProductManagePage() {
         </div>
       )}
 
+      {/* ===== 悬浮按钮区域 ===== */}
       <div className="fixed bottom-8 right-8 flex flex-col gap-2">
+        {/* ═══ 新增：AI 翻译按钮（仅 en/zh 显示） ═══ */}
+        {(locale === 'en' || locale === 'zh') && (
+          <button
+            onClick={() => {
+              if (selectedProductIds.size === 0) {
+                setToast({ message: '请先选择要翻译的产品', type: 'error' });
+                return;
+              }
+              if (selectedProductIds.size > 20) {
+                setToast({ message: '最多选择 20 个产品进行翻译', type: 'error' });
+                return;
+              }
+              setShowAiHelper(true);
+            }}
+            disabled={selectedProductIds.size === 0 || selectedProductIds.size > 20}
+            className={`px-6 py-3 rounded-full shadow-lg transition-colors flex items-center gap-2 ${
+              selectedProductIds.size > 0 && selectedProductIds.size <= 20
+                ? 'bg-purple-600 hover:bg-purple-700 text-white'
+                : 'bg-gray-400 text-gray-200 cursor-not-allowed'
+            }`}
+          >
+            🤖 AI翻译
+            {selectedProductIds.size > 0 && selectedProductIds.size <= 20 && (
+              <span className="bg-white/20 text-xs px-2 py-0.5 rounded-full">
+                {selectedProductIds.size}
+              </span>
+            )}
+          </button>
+        )}
+
         <button
           onClick={handleNewProduct}
           className="bg-green-600 text-white px-6 py-3 rounded-full shadow-lg hover:bg-green-700 transition-colors"
@@ -695,6 +793,18 @@ export default function ProductManagePage() {
             </div>
           </div>
         </div>
+      )}
+
+      {/* ═══ 新增：AI 翻译产品弹窗 ═══ */}
+      {showAiHelper && (
+        <AiHelperProductModal
+          sourceLocale={locale}
+          selectedProductIds={Array.from(selectedProductIds)}
+          onClose={() => setShowAiHelper(false)}
+          onImportSuccess={() => {
+            fetchProducts(abortControllerRef.current?.signal!);
+          }}
+        />
       )}
 
       {toast && <Toast message={toast.message} type={toast.type} onClose={() => setToast(null)} />}

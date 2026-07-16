@@ -13,23 +13,36 @@ function getSecretKey() {
 export interface JWTPayload {
   username: string; // 邮箱
   id: string;
-  siteId: string;   // 新增：站点标识
+  siteId: string;
+  role?: string;    // 扩展角色字段
+}
+
+// ========== 通用 JWT 工具（前后台共用）==========
+/**
+ * 签名生成 JWT
+ */
+export async function sign(payload: Record<string, any>, options?: { expiresIn?: string }): Promise<string> {
+  const secretKey = getSecretKey();
+  const expiresIn = options?.expiresIn || JWT_EXPIRES_IN;
+  const jwt = new SignJWT(payload)
+    .setProtectedHeader({ alg: 'HS256' })
+    .setIssuedAt()
+    .setExpirationTime(expiresIn);
+  return await jwt.sign(secretKey);
 }
 
 /**
- * 生成 JWT 并设置 HttpOnly Cookie
- * @param username 用户邮箱
- * @param userId 用户ID
- * @param siteId 用户所属站点ID
+ * 验证并解码 JWT
  */
-export async function setAuthCookie(username: string, userId: string, siteId: string): Promise<void> {
+export async function verify(token: string): Promise<any> {
   const secretKey = getSecretKey();
-  const token = await new SignJWT({ username, id: userId, siteId })
-    .setProtectedHeader({ alg: 'HS256' })
-    .setIssuedAt()
-    .setExpirationTime(JWT_EXPIRES_IN)
-    .sign(secretKey);
-  
+  const { payload } = await jwtVerify(token, secretKey);
+  return payload;
+}
+
+// ========== 后台管理专用（原有功能，内部调用 sign/verify）==========
+export async function setAuthCookie(username: string, userId: string, siteId: string): Promise<void> {
+  const token = await sign({ username, id: userId, siteId, role: 'admin' });
   const cookieStore = await cookies();
   cookieStore.set('auth_token', token, {
     httpOnly: true,
@@ -40,9 +53,6 @@ export async function setAuthCookie(username: string, userId: string, siteId: st
   });
 }
 
-/**
- * 从请求中获取当前用户信息
- */
 export async function getCurrentUser(request?: NextRequest): Promise<JWTPayload | null> {
   let token: string | undefined;
   if (request) {
@@ -53,26 +63,19 @@ export async function getCurrentUser(request?: NextRequest): Promise<JWTPayload 
   }
   if (!token) return null;
   try {
-    const secretKey = getSecretKey();
-    const { payload } = await jwtVerify(token, secretKey);
-    return payload as unknown as JWTPayload;
+    const payload = await verify(token);
+    return payload as JWTPayload;
   } catch (error) {
     console.error('JWT verify error:', error);
     return null;
   }
 }
 
-/**
- * 清除 Cookie
- */
 export async function clearAuthCookie(): Promise<void> {
   const cookieStore = await cookies();
   cookieStore.set('auth_token', '', { maxAge: 0, path: '/' });
 }
 
-/**
- * 验证 API 请求（中间件辅助）
- */
 export async function validateAuth(request: NextRequest): Promise<JWTPayload | NextResponse> {
   const user = await getCurrentUser(request);
   if (!user) {

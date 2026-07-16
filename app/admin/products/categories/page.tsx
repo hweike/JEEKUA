@@ -1,3 +1,5 @@
+// app/admin/products/categories/page.tsx
+
 'use client';
 
 import { useEffect, useState, useCallback, useMemo, useRef } from 'react';
@@ -7,6 +9,7 @@ import LanguageSelector from '@/components/common/LanguageSelector';
 import Toast from '@/components/Toast';
 import { Settings } from 'lucide-react';
 import { LANGUAGES } from '@/lib/languages/config';
+import AiHelperCategoryModal from './components/AiHelper-CategoryModal'; // 新增导入
 
 const CategoryList = dynamic(() => import('./components/CategoryList'), {
   ssr: false,
@@ -19,7 +22,7 @@ const ImportModal = dynamic(() => import('./components/ImportModal'), { ssr: fal
 interface ProductLine {
   id: string;
   name: string;
-  order?: number;               // 可选，与组件定义一致
+  order?: number;
   templateId?: string;
   slug?: string;
   seoTitle?: string;
@@ -70,6 +73,9 @@ export default function CategoriesPage() {
   const [otherLocaleHasLines, setOtherLocaleHasLines] = useState(false);
   const [copying, setCopying] = useState(false);
   const [loadingOtherStatus, setLoadingOtherStatus] = useState(false);
+
+  // 新增：AI助手弹窗状态
+  const [showAiHelper, setShowAiHelper] = useState(false);
 
   const loadAbortController = useRef<AbortController | null>(null);
   const saveAbortController = useRef<AbortController | null>(null);
@@ -314,54 +320,74 @@ export default function CategoriesPage() {
   }
 
   if (productLines.length === 0) {
-    let showCopyBtn = false;
-    let copySourceLocale = '';
-    if (locale === 'en') {
-      copySourceLocale = 'zh';
-      showCopyBtn = otherLocaleHasLines && !loadingOtherStatus;
-    } else {
-      copySourceLocale = 'en';
-      showCopyBtn = otherLocaleHasLines && !loadingOtherStatus;
-    }
+  let showCopyBtn = false;
+  let copySourceLocale = '';
+  if (locale === 'en') {
+    copySourceLocale = 'zh';
+    showCopyBtn = otherLocaleHasLines && !loadingOtherStatus;
+  } else {
+    copySourceLocale = 'en';
+    showCopyBtn = otherLocaleHasLines && !loadingOtherStatus;
+  }
 
-    return (
-      <div className="min-h-screen bg-gray-100 py-8">
-        <div className="w-4/5 mx-auto bg-white rounded-lg shadow p-6">
-          <div className="flex justify-between items-center mb-6">
-            <h1 className="text-2xl font-bold">产品分类管理 - {locale.toUpperCase()}</h1>
-            <LanguageSelector currentLocale={locale} onLocaleChange={handleLocaleChange} displayMode="zh" />
+  // 根据复制源获取站点显示名称
+  const sourceLangName = copySourceLocale === 'en' ? '英文站' : '中文站';
+
+  return (
+    <div className="min-h-screen bg-gray-100 py-8">
+      <div className="w-4/5 mx-auto bg-white rounded-lg shadow p-6">
+        <div className="flex justify-between items-center mb-6">
+          <h1 className="text-2xl font-bold">产品分类管理 - {locale.toUpperCase()}</h1>
+          <LanguageSelector currentLocale={locale} onLocaleChange={handleLocaleChange} displayMode="zh" />
+        </div>
+        <div className="text-center py-12">
+          <p className="text-gray-500 mb-4">请先创建产品线</p>
+
+          {/* 创建说明 - 动态根据复制源显示 */}
+          <div className="text-sm text-gray-600 mb-4 max-w-md mx-auto">
+            {showCopyBtn ? (
+              <>
+                创建说明：如果当前站点销售的产品与 {sourceLangName} 一致，建议使用
+                “复制 {sourceLangName} 产品线及分类”快速创建；若销售产品不同，
+                可点击下方“创建新产品线”手动创建。
+              </>
+            ) : (
+              <>
+                创建说明：若当前站点销售产品与另一语言站点不同，请点击下方
+                “创建新产品线”手动创建产品线。
+              </>
+            )}
           </div>
-          <div className="text-center py-12">
-            <p className="text-gray-500 mb-4">请先创建产品线</p>
-            <div className="flex gap-4 justify-center">
-              {showCopyBtn && (
-                <button
-                  onClick={() => copyProductLinesFrom(copySourceLocale)}
-                  disabled={copying}
-                  className="bg-green-600 text-white px-4 py-2 rounded inline-flex items-center gap-2"
-                >
-                  {copying ? '复制中...' : `复制${copySourceLocale === 'en' ? '英文站' : '中文站'}产品线及分类`}
-                </button>
-              )}
+
+          <div className="flex gap-4 justify-center">
+            {showCopyBtn && (
               <button
-                onClick={() => setShowProductLineModal(true)}
-                className="bg-blue-600 text-white px-4 py-2 rounded inline-flex items-center gap-2"
+                onClick={() => copyProductLinesFrom(copySourceLocale)}
+                disabled={copying}
+                className="bg-green-600 text-white px-4 py-2 rounded inline-flex items-center gap-2"
               >
-                立即创建
+                {copying ? '复制中...' : `复制 ${sourceLangName} 产品线及分类`}
               </button>
-            </div>
+            )}
+            <button
+              onClick={() => setShowProductLineModal(true)}
+              className="bg-blue-600 text-white px-4 py-2 rounded inline-flex items-center gap-2"
+            >
+              创建新产品线
+            </button>
           </div>
         </div>
-        {showProductLineModal && (
-          <ProductLineManager
-            productLines={productLines}
-            onSave={(newLines: ProductLine[]) => updateProductLines(newLines)}
-            onClose={() => setShowProductLineModal(false)}
-          />
-        )}
-        {toast && <Toast message={toast.message} type={toast.type} onClose={() => setToast(null)} />}
       </div>
-    );
+      {showProductLineModal && (
+        <ProductLineManager
+          productLines={productLines}
+          onSave={(newLines: ProductLine[]) => updateProductLines(newLines)}
+          onClose={() => setShowProductLineModal(false)}
+        />
+      )}
+      {toast && <Toast message={toast.message} type={toast.type} onClose={() => setToast(null)} />}
+    </div>
+  );
   }
 
   return (
@@ -395,6 +421,16 @@ export default function CategoriesPage() {
         </div>
 
         <div className="flex items-center gap-3">
+          {/* 仅在英文或中文时显示 AI 翻译按钮 */}
+          {(locale === 'en' || locale === 'zh') && (
+            <button
+              onClick={() => setShowAiHelper(true)}
+              className="bg-purple-600 text-white px-4 py-2 rounded hover:bg-purple-700 transition-colors"
+            >
+              🤖 AI翻译
+            </button>
+          )}
+
           <button
             onClick={() => setShowImportModal(true)}
             className="bg-blue-600 text-white px-4 py-2 rounded"
@@ -436,7 +472,19 @@ export default function CategoriesPage() {
             delete cache[locale];
             loadData(true);
           }}
-          onImportResult={(message, type) => setToast({ message, type })}  // 新增这一行
+          onImportResult={(message, type) => setToast({ message, type })}
+        />
+      )}
+
+      {/* AI 翻译弹窗 */}
+      {showAiHelper && (
+        <AiHelperCategoryModal
+          sourceLocale={locale}
+          onClose={() => setShowAiHelper(false)}
+          onImportSuccess={() => {
+            delete cache[locale];
+            loadData(true);
+          }}
         />
       )}
 

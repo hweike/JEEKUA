@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import SeoFields from '@/components/common/SeoFields';
 import { TemplateSelector } from '@/components/webbuilder/TemplateSelector';
+import Toast from '@/components/Toast';
 
 interface CategoryFormProps {
   mode: 'new' | 'edit';
@@ -30,9 +31,11 @@ export default function CategoryForm({
 }: CategoryFormProps) {
   const router = useRouter();
 
+  // key 不显示在 UI 上，但作为隐藏状态
   const [key] = useState(() => {
-    if (mode === 'edit' && initialKey) return initialKey;
-    return Math.floor(10000000 + Math.random() * 90000000).toString();
+    if (initialKey) return initialKey; // 新建其他语言版本时固定 key
+    if (mode === 'edit' && initialKey) return initialKey; // 编辑时使用 URL 中的 key
+    return Math.floor(10000000 + Math.random() * 90000000).toString(); // 全新创建时自动生成
   });
 
   const [name, setName] = useState(initialData?.name || '');
@@ -42,7 +45,6 @@ export default function CategoryForm({
   );
   const [template, setTemplate] = useState(initialData?.template || '');
 
-  // SEO 字段直接使用平铺字段
   const [slug, setSlug] = useState(initialData?.slug || '');
   const [seoKeywords, setSeoKeywords] = useState(initialData?.seo_keywords || '');
   const [seoTitle, setSeoTitle] = useState(initialData?.seo_title || '');
@@ -50,10 +52,11 @@ export default function CategoryForm({
 
   const [errors, setErrors] = useState<{ [key: string]: string }>({});
   const [saving, setSaving] = useState(false);
+  const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
 
   // 新建时自动计算 order
   useEffect(() => {
-    if (mode === 'new') {
+    if (mode === 'new' && !initialData) {
       const fetchOrder = async () => {
         const res = await fetch(`/api/admin/videosys-categories?locale=${locale}`);
         const data = await res.json();
@@ -62,9 +65,8 @@ export default function CategoryForm({
       };
       fetchOrder();
     }
-  }, [locale, mode]);
+  }, [locale, mode, initialData]);
 
-  // 简化校验：只检查名称和 Slug 是否为空
   const validate = () => {
     const newErrors: typeof errors = {};
     if (!name.trim()) newErrors.name = '分类名称不能为空';
@@ -77,6 +79,7 @@ export default function CategoryForm({
     e.preventDefault();
     if (!validate()) return;
     setSaving(true);
+
     const category = {
       name: name.trim(),
       slug: slug.trim(),
@@ -87,18 +90,26 @@ export default function CategoryForm({
       seo_title: seoTitle.trim() || '',
       seo_description: seoDescription.trim() || '',
     };
-    const res = await fetch('/api/admin/videosys-categories', {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ locale, key, category }),
-    });
-    if (res.ok) {
-      router.push(`/admin/videosys/categories?locale=${locale}`);
-    } else {
-      const { error } = await res.json();
-      alert(error || '保存失败');
+
+    try {
+      const res = await fetch('/api/admin/videosys-categories', {
+        method: 'POST', // 统一使用 POST（支持 Upsert）
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ locale, key, category }),
+      });
+
+      const data = await res.json();
+      if (res.ok) {
+        setToast({ message: mode === 'edit' ? '更新成功' : '创建成功', type: 'success' });
+        router.push(`/admin/videosys/categories?locale=${locale}`);
+      } else {
+        setToast({ message: data.error || '保存失败', type: 'error' });
+      }
+    } catch (error) {
+      setToast({ message: '网络错误', type: 'error' });
+    } finally {
+      setSaving(false);
     }
-    setSaving(false);
   };
 
   const handleSeoChange = (seoData: any) => {
@@ -112,6 +123,8 @@ export default function CategoryForm({
 
   return (
     <div className="p-6 max-w-7xl mx-auto">
+      {toast && <Toast message={toast.message} type={toast.type} onClose={() => setToast(null)} />}
+
       <div className="flex justify-between items-center mb-6">
         <h1 className="text-2xl font-bold">{title}</h1>
         <div className="flex gap-3">
@@ -130,6 +143,7 @@ export default function CategoryForm({
             <div className="bg-white rounded-lg shadow p-6">
               <h2 className="text-lg font-semibold mb-4">基本信息</h2>
               <div className="space-y-4">
+                {/* 分类标识 (Key) 已隐藏，但仍在状态中 */}
                 <div>
                   <label className="block text-sm font-medium">分类名称 *</label>
                   <input
@@ -170,7 +184,6 @@ export default function CategoryForm({
                 showDescription
               />
               {errors.slug && <p className="text-red-500 text-xs mt-1">{errors.slug}</p>}
-              {/* 移除 metaTitle / metaDescription 错误提示，由 SeoFields 内部处理 */}
             </div>
           </div>
 

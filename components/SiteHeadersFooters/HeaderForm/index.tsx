@@ -5,7 +5,7 @@ import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
 import { useState } from 'react';
 import { HeaderConfig } from '@/lib/SiteHeadersFooters/types';
-import ImageUploader from '../common/ImageUploader';
+import ImageUpload from '@/components/ImageUpload';  // 改用全局组件
 import SliderInput from '../common/SliderInput';
 import ToggleSwitch from '../common/ToggleSwitch';
 import MenuSelector from '../common/MenuSelector';
@@ -110,14 +110,12 @@ export default function HeaderForm({ initialConfig, locale }: HeaderFormProps) {
         {/* ========== Logo 设置 ========== */}
         <div className="border rounded-lg p-6 space-y-4">
           <h2 className="text-lg font-semibold">Logo 设置</h2>
-          <ImageUploader
+          <ImageUpload
             value={watch('logo.imageUrl')}
-            onChange={(url) => setValue('logo.imageUrl', url)}
+            onChange={(url) => setValue('logo.imageUrl', Array.isArray(url) ? url[0] : url)}
+            maxCount={1}
             label="Logo"
             hint="建议尺寸 250×100px (2.5:1)，优先使用 PNG 格式"
-            width={250}
-            aspectRatio={2.5}
-            buttonText="上传图片"
           />
           <SliderInput
             value={watch('logo.width')}
@@ -138,14 +136,12 @@ export default function HeaderForm({ initialConfig, locale }: HeaderFormProps) {
               {MOBILE_LOGO_POSITIONS.map(opt => <option key={opt.value} value={opt.value}>{opt.label}</option>)}
             </select>
           </div>
-          <ImageUploader
+          <ImageUpload
             value={watch('logo.faviconUrl')}
-            onChange={(url) => setValue('logo.faviconUrl', url)}
+            onChange={(url) => setValue('logo.faviconUrl', Array.isArray(url) ? url[0] : url)}
+            maxCount={1}
             label="网站图标"
             hint="以 32×32px 显示，格式建议 .ico 或 PNG"
-            width={32}
-            height={32}
-            buttonText="上传图片"
           />
         </div>
 
@@ -156,7 +152,7 @@ export default function HeaderForm({ initialConfig, locale }: HeaderFormProps) {
             value={watch('menu.menuSourceId')}
             onChange={(id) => setValue('menu.menuSourceId', id)}
             label="菜单"
-            locale={locale}   // ✅ 关键修改：传递 locale
+            locale={locale}
           />
           <div>
             <label className="block text-sm font-medium">菜单类型</label>

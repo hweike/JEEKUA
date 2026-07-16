@@ -47,6 +47,7 @@ import { useHeadingDropdownMenu } from '@/hooks/useHeadingDropdownMenu';
 import { useList } from '@/hooks/useList';
 import { useLinkPopover } from '@/hooks/useLinkPopover';
 import { useToast } from '@/contexts/ToastContext';
+import { getImageUrl } from '@/lib/files/url'; // 导入公共函数
 
 const lowlight = createLowlight(common);
 
@@ -81,7 +82,6 @@ export default function RichTextEditor({ value, onChange, placeholder = '开始�
   const { showToast } = useToast();
 
   const extensions = useMemo(() => [
-    // ✅ 修复：移除 html: true（StarterKit 不支持该配置）
     StarterKit.configure({ codeBlock: false }),
     Underline,
     TextAlign.configure({ types: ['heading', 'paragraph'] }),
@@ -219,56 +219,67 @@ export default function RichTextEditor({ value, onChange, placeholder = '开始�
   const openFullscreen = () => setIsFullscreen(true);
   const closeFullscreen = () => setIsFullscreen(false);
 
-  const handleLocalImageUpload = async () => {
-    const input = document.createElement('input');
-    input.type = 'file';
-    input.accept = 'image/*';
-    input.onchange = async (e) => {
-      const file = (e.target as HTMLInputElement).files?.[0];
-      if (!file) return;
-      setUploading(true);
-      const formData = new FormData();
-      formData.append('file', file);
-      try {
-        const res = await fetch('/api/admin/upload', { method: 'POST', body: formData });
-        const data = await res.json();
-        if (data.url) {
-          editor?.chain().focus().setImage({ src: data.url }).run();
-        } else {
-          showToast('上传失败', 'error');
-        }
-      } catch (err) {
-        console.error(err);
-        showToast('上传失败', 'error');
-      } finally {
-        setUploading(false);
-      }
-    };
-    input.click();
-  };
-
-  const insertImageByUrl = async () => {
-    if (!imageUrl || !editor) return;
+  // 本地上传：使用统一接口 /api/images，返回相对路径，再包装代理
+ const handleLocalImageUpload = async () => {
+  const input = document.createElement('input');
+  input.type = 'file';
+  input.accept = 'image/*';
+  input.onchange = async (e) => {
+    const file = (e.target as HTMLInputElement).files?.[0];
+    if (!file) return;
+    setUploading(true);
+    const formData = new FormData();
+    formData.append('file', file);
     try {
-      const res = await fetch(imageUrl, { method: 'HEAD' });
-      if (!res.ok) {
-        showToast('图片地址无效', 'error');
-        return;
-      }
-      const allowOrigin = res.headers.get('access-control-allow-origin');
-      if (!allowOrigin || (allowOrigin !== '*' && !allowOrigin.includes(window.location.origin))) {
-        showToast('该图片可能因跨域限制无法显示，建议下载后使用上传功能', 'error');
+      const res = await fetch('/api/images', { method: 'POST', body: formData });
+      const data = await res.json();
+      if (data.url) {
+        // 1. 将相对路径转换为完整 R2 URL
+        const fullUrl = getImageUrl(data.url);
+        // 2. 包装成代理 URL（同源，避免 CORS）
+        const proxiedUrl = `/api/proxy-image?url=${encodeURIComponent(fullUrl)}`;
+        editor?.chain().focus().setImage({ src: proxiedUrl }).run();
+      } else {
+        showToast('上传失败', 'error');
       }
     } catch (err) {
-      showToast('图片地址无效或跨域无法访问', 'error');
+      console.error(err);
+      showToast('上传失败', 'error');
+    } finally {
+      setUploading(false);
+    }
+  };
+  input.click();
+};
+
+  // 网络图片插入：用户输入的 URL 可能是完整 URL 或相对路径，统一转为完整 URL 后包装代理
+ const insertImageByUrl = async () => {
+  if (!imageUrl || !editor) return;
+  // 用户输入的 URL 可能是相对路径（比如已有图片的相对地址）或完整 URL
+  let fullUrl = imageUrl;
+  if (!fullUrl.startsWith('http://') && !fullUrl.startsWith('https://')) {
+    fullUrl = getImageUrl(fullUrl);
+  }
+  // 可选的跨域检查（仅提示，不影响插入）
+  try {
+    const res = await fetch(fullUrl, { method: 'HEAD' });
+    if (!res.ok) {
+      showToast('图片地址无效', 'error');
       return;
     }
-    editor.chain().focus().setImage({ src: imageUrl }).run();
-    setImageUrl('');
-    setImageUrlPopoverOpen(false);
-  };
+  } catch (err) {
+    showToast('图片地址无效或无法访问', 'error');
+    return;
+  }
+  // 包装代理 URL 后插入
+  const proxiedUrl = `/api/proxy-image?url=${encodeURIComponent(fullUrl)}`;
+  editor.chain().focus().setImage({ src: proxiedUrl }).run();
+  setImageUrl('');
+  setImageUrlPopoverOpen(false);
+};
 
   const insertVideoByUrl = () => {
+    // 视频处理保持不变
     if (!videoUrl) return;
 
     const youtubeMatch = videoUrl.match(/(?:youtube\.com\/watch\?v=|youtu\.be\/)([\w-]+)/);
@@ -279,7 +290,6 @@ export default function RichTextEditor({ value, onChange, placeholder = '开始�
       return;
     }
 
-    // 为 embed 函数添加类型标注
     const platforms: Array<{
       pattern: RegExp;
       embed: (url: string, width: number, height: number) => string;
@@ -390,6 +400,7 @@ export default function RichTextEditor({ value, onChange, placeholder = '开始�
 
   const renderToolbar = (fullscreenMode = false) => (
     <div className="flex flex-wrap gap-1 p-2 border-b bg-gray-50 sticky top-0 z-10">
+      {/* 原有工具栏代码保持不变，仅需确保 handleLocalImageUpload 和 insertImageByUrl 已更新 */}
       <button type="button" onClick={() => editor?.chain().focus().undo().run()} className="bg-gray-100 hover:bg-gray-200 p-2 rounded" title="撤销">
         <Undo size={18} />
       </button>

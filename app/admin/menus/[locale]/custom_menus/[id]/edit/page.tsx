@@ -1,14 +1,9 @@
-// app/admin/menus/[locale]/custom_menus/[id]/edit/page.tsx
 'use client';
 import { useParams, useRouter } from 'next/navigation';
 import { useEffect, useState, useCallback, useRef } from 'react';
 import MenuTreeEditor, { MenuTreeEditorRef } from '@/components/admin/menus/MenuTreeEditor';
 import Toast from '@/components/common/Toast';
-
-const localeNames: Record<string, string> = {
-  zh: '中文',
-  en: 'English',
-};
+import { getLanguageDisplayName } from '@/lib/languages/config'; // 新增
 
 export default function EditCustomMenuPage() {
   const params = useParams();
@@ -51,7 +46,6 @@ export default function EditCustomMenuPage() {
 
   const onEditorSave = async (items: any[]) => {
     try {
-      // 获取当前所有自定义菜单
       const res = await fetch(`/api/admin/menus?locale=${locale}`);
       const data = await res.json();
       const updatedCustom = data.customMenus.map((m: any) =>
@@ -64,7 +58,7 @@ export default function EditCustomMenuPage() {
       });
       if (putRes.ok) {
         setToast({ message: '保存成功', type: 'success' });
-        await fetchMenuData(); // 刷新数据，更新树
+        await fetchMenuData();
       } else {
         const err = await putRes.json();
         setToast({ message: err.error || '保存失败', type: 'error' });
@@ -75,8 +69,16 @@ export default function EditCustomMenuPage() {
     }
   };
 
-  const handleSave = () => {
-    editorRef.current?.save();
+  const handleSave = async () => {
+    setSaving(true);
+    try {
+      editorRef.current?.save();
+    } catch (error) {
+      console.error(error);
+      setToast({ message: '保存失败', type: 'error' });
+    } finally {
+      setSaving(false);
+    }
   };
 
   const handleCancel = () => {
@@ -86,10 +88,11 @@ export default function EditCustomMenuPage() {
   if (loading) return <div className="p-8">加载中...</div>;
   if (!menu) return <div className="p-8">菜单不存在</div>;
 
-  const siteName = localeNames[locale] || locale;
+  // 使用 getLanguageDisplayName 获取语言显示名称
+  const siteName = getLanguageDisplayName(locale, 'zh');
 
   return (
-    <div className="p-6 max-w-5xl mx-auto">
+    <div className="p-6 max-w-5xl mx-auto pb-24">
       {toast && <Toast message={toast.message} type={toast.type} onClose={() => setToast(null)} />}
 
       <div className="mb-6">
@@ -122,17 +125,22 @@ export default function EditCustomMenuPage() {
         />
       </div>
 
-      {/* 独立按钮行 */}
-      <div className="flex justify-end space-x-3 mt-6">
-        <button onClick={handleCancel} className="px-4 py-2 border rounded-md hover:bg-gray-100">
+      {/* 悬浮按钮 */}
+      <div className="fixed bottom-0 left-0 right-0 bg-white border-t shadow-lg p-4 flex justify-end gap-4 z-50">
+        <button
+          type="button"
+          onClick={handleCancel}
+          className="bg-gray-300 hover:bg-gray-400 px-4 py-2 rounded"
+        >
           返回菜单列表
         </button>
         <button
+          type="submit"
           onClick={handleSave}
           disabled={saving}
-          className="px-4 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 disabled:opacity-50"
+          className="bg-green-600 hover:bg-green-700 text-white px-6 py-2 rounded disabled:bg-gray-400 disabled:cursor-not-allowed"
         >
-          保存菜单
+          {saving ? '保存中...' : '保存菜单'}
         </button>
       </div>
     </div>

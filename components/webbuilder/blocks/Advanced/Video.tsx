@@ -3,208 +3,243 @@
 import { useState, useEffect } from 'react';
 import { useLocale } from 'next-intl';
 import { parseVideoUrl, getVideoEmbedUrl } from '@/lib/video-utils';
+import { DEFAULT_VIDEO } from '@/lib/webbuilder/defaults/Video';
+import { getAltSuffix } from '@/lib/webbuilder/alt-suffix-config';
+import { getImageUrl } from '@/lib/files/url';
+
+// 兼容旧多语言数据
+function getString(field: any): string {
+  if (typeof field === 'string') return field;
+  if (field && typeof field === 'object') {
+    return field.zh || field.en || '';
+  }
+  return '';
+}
+
+// 图片代理
+function getDisplayImageUrl(url: string, isEditMode: boolean): string {
+  if (!url) return '';
+  const fullUrl = getImageUrl(url);
+  if (isEditMode) {
+    return `/api/proxy-image?url=${encodeURIComponent(fullUrl)}`;
+  }
+  return fullUrl;
+}
 
 export function Video(props: any) {
-  // 智能提取视频 URL：顶层 > videoSettings > videoGroup
-  const finalVideoUrl =
-    props.videoUrl ??
-    props.videoSettings?.videoUrl ??
-    props.videoGroup?.videoUrl ??
-    '';
+  const isEditMode = !!props.puck?.isEditing;
 
-  const finalLoop =
-    props.loop ??
-    props.videoSettings?.loop ??
-    props.videoGroup?.loop ??
-    false;
+  // ===== 解构分组 =====
+  const {
+    bannerType,
+    backgroundColor,
+    titleGroup: propTitleGroup,
+    videoGroup: propVideoGroup,
+    paddingGroup: propPaddingGroup,
+    // 顶层扁平字段（兼容旧数据）
+    title: oldTitle,
+    titleFontSize: oldTitleFontSize,
+    titleColor: oldTitleColor,
+    titleAlign: oldTitleAlign,
+    videoUrl: oldVideoUrl,
+    videoThumbnail: oldVideoThumbnail,
+    loop: oldLoop,
+    paddingTop: oldPaddingTop,
+    paddingBottom: oldPaddingBottom,
+  } = props;
 
-  const finalThumbnail =
-    props.videoThumbnail ??
-    props.videoSettings?.videoThumbnail ??
-    props.videoGroup?.videoThumbnail ??
-    '';
+  const titleGroup = propTitleGroup || {};
+  const videoGroup = propVideoGroup || {};
+  const paddingGroup = propPaddingGroup || {};
 
-  // 调试输出（可删除）
-  console.log('[Video] finalVideoUrl:', finalVideoUrl);
+  // 获取 mobileScaleFactor
+  const mobileScaleFactor = DEFAULT_VIDEO.mobileScaleFactor ?? 0.7;
 
+  const title = getString(titleGroup.title ?? oldTitle ?? DEFAULT_VIDEO.titleGroup.title);
+  const titleFontSize = titleGroup.titleFontSize ?? oldTitleFontSize ?? DEFAULT_VIDEO.titleGroup.titleFontSize;
+  const titleColor = titleGroup.titleColor ?? oldTitleColor ?? DEFAULT_VIDEO.titleGroup.titleColor;
+  const titleAlign = titleGroup.titleAlign ?? oldTitleAlign ?? DEFAULT_VIDEO.titleGroup.titleAlign;
+
+  const videoUrl = videoGroup.videoUrl ?? oldVideoUrl ?? DEFAULT_VIDEO.videoGroup.videoUrl;
+  const videoThumbnail = videoGroup.videoThumbnail ?? oldVideoThumbnail ?? DEFAULT_VIDEO.videoGroup.videoThumbnail;
+  const loop = videoGroup.loop ?? oldLoop ?? DEFAULT_VIDEO.videoGroup.loop;
+
+  const paddingTop = paddingGroup.paddingTop ?? oldPaddingTop ?? DEFAULT_VIDEO.paddingGroup.paddingTop;
+  const paddingBottom = paddingGroup.paddingBottom ?? oldPaddingBottom ?? DEFAULT_VIDEO.paddingGroup.paddingBottom;
+
+  // ===== Alt 自动生成 =====
+  const __runtime = props.__runtime || {};
+  const seoTitle = __runtime.seoTitle || '';
+  const locale = __runtime.locale || 'zh';
+  const suffix = getAltSuffix('Video', locale);
+  const coverAlt = seoTitle ? `${seoTitle} - ${suffix}` : suffix;
+
+  // ===== 视频解析状态 =====
   const [showVideo, setShowVideo] = useState(false);
   const [embedUrl, setEmbedUrl] = useState<string>('');
   const [thumbnailUrl, setThumbnailUrl] = useState<string>('');
   const [isClient, setIsClient] = useState(false);
-  const [isParsingFailed, setIsParsingFailed] = useState(false); // 标记解析失败
+  const [isParsingFailed, setIsParsingFailed] = useState(false);
 
-  const isEditMode = !!props.puck?.isEditing;
-  const pageLocale = useLocale();
+  const displayThumbnail = getDisplayImageUrl(videoThumbnail || '', isEditMode);
 
-  const [editLocale, setEditLocale] = useState<string>(() => {
-    if (typeof window !== 'undefined' && isEditMode) {
-      const stored = localStorage.getItem('webbuilder_edit_locale');
-      if (stored && (stored === 'zh' || stored === 'en')) return stored;
-    }
-    return pageLocale;
-  });
-
-  useEffect(() => {
-    if (!isEditMode) return;
-    const handler = (e: StorageEvent) => {
-      if (e.key === 'webbuilder_edit_locale') {
-        const newLocale = e.newValue;
-        if (newLocale && (newLocale === 'zh' || newLocale === 'en')) setEditLocale(newLocale);
-      }
-    };
-    window.addEventListener('storage', handler);
-    return () => window.removeEventListener('storage', handler);
-  }, [isEditMode]);
-
-  useEffect(() => {
-    if (!isEditMode) return;
-    const stored = localStorage.getItem('webbuilder_edit_locale');
-    if (!stored) setEditLocale(pageLocale);
-  }, [isEditMode, pageLocale]);
-
-  const displayLocale = isEditMode ? editLocale : pageLocale;
-
-  const getText = (field: any) => {
-    if (typeof field === 'string') return field;
-    if (!field || typeof field !== 'object') return '';
-    if (props.__runtime?.texts && field.textId && props.__runtime.texts[field.textId])
-      return props.__runtime.texts[field.textId];
-    if (field[displayLocale]) return field[displayLocale];
-    if (field.en) return field.en;
-    if (field.zh) return field.zh;
-    return '';
+  // ===== 响应式字体（引入 mobileScaleFactor） =====
+  const titleSizeStyle = {
+    fontSize: `clamp(${titleFontSize * mobileScaleFactor}px, 3vw, ${titleFontSize}px)`,
+    color: titleColor,
+    textAlign: titleAlign,
+    marginBottom: '1rem',
+    wordBreak: 'break-word',
   };
 
-  const titleText = getText(props.title);
+  // 填充：使用 clamp 以用户设置值为首选
+  const paddingTopFinal = typeof paddingTop === 'number' ? `clamp(8px, ${paddingTop}px, 120px)` : 0;
+  const paddingBottomFinal = typeof paddingBottom === 'number' ? `clamp(8px, ${paddingBottom}px, 120px)` : 0;
 
+  // ===== 视频解析 =====
   useEffect(() => {
     setIsClient(true);
   }, []);
 
-  // 解析视频（仅在客户端或编辑模式执行）
   useEffect(() => {
     if (!isClient && !isEditMode) return;
-    if (!finalVideoUrl) {
+    if (!videoUrl) {
       setEmbedUrl('');
       setThumbnailUrl('');
       setIsParsingFailed(false);
       return;
     }
-    const videoInfo = parseVideoUrl(finalVideoUrl);
+    const videoInfo = parseVideoUrl(videoUrl);
     if (videoInfo) {
-      setEmbedUrl(getVideoEmbedUrl(videoInfo, finalLoop));
-      setThumbnailUrl(finalThumbnail || videoInfo.thumbnailUrl || '');
+      setEmbedUrl(getVideoEmbedUrl(videoInfo, loop));
+      setThumbnailUrl(displayThumbnail || videoInfo.thumbnailUrl || '');
       setIsParsingFailed(false);
     } else {
       setEmbedUrl('');
-      setThumbnailUrl(finalThumbnail || '');
+      setThumbnailUrl(displayThumbnail || '');
       setIsParsingFailed(true);
     }
-  }, [isClient, isEditMode, finalVideoUrl, finalLoop, finalThumbnail]);
+  }, [isClient, isEditMode, videoUrl, loop, displayThumbnail]);
 
-  // 如果没有封面且不是编辑模式，直接显示视频（避免点击）
+  // 无封面自动播放
   useEffect(() => {
-    if (!isEditMode && finalVideoUrl && embedUrl && !thumbnailUrl && !showVideo) {
+    if (!isEditMode && videoUrl && embedUrl && !thumbnailUrl && !showVideo) {
       setShowVideo(true);
     }
-  }, [isEditMode, finalVideoUrl, embedUrl, thumbnailUrl, showVideo]);
+  }, [isEditMode, videoUrl, embedUrl, thumbnailUrl, showVideo]);
 
-  const outerClasses = `relative overflow-hidden ${
-    props.bannerType === 'fullwidth'
-      ? 'w-screen left-1/2 right-1/2 -ml-[50vw] mr-[50vw]'
-      : 'max-w-7xl mx-auto'
-  }`;
-  const outerMargin = props.bannerType === 'standard' ? { marginTop: '10px', marginBottom: '10px' } : {};
+  // ===== 通栏宽度统一（参考 PicwithText） =====
+  const isFullwidth = bannerType === 'fullwidth';
 
+  // 外层容器样式：标准模式限制宽度，全屏模式全屏背景
   const outerStyle: React.CSSProperties = {
-    backgroundColor: props.backgroundColor,
-    ...outerMargin,
+    backgroundColor: backgroundColor || DEFAULT_VIDEO.backgroundColor,
+    ...(isFullwidth
+      ? {
+          position: 'relative',
+          left: '50%',
+          transform: 'translateX(-50%)',
+          width: '100vw',
+          maxWidth: '100vw',
+        }
+      : {
+          maxWidth: '80rem',
+          marginLeft: 'auto',
+          marginRight: 'auto',
+        }),
+    ...(bannerType === 'standard' ? { marginTop: '10px', marginBottom: '10px' } : {}),
   };
 
+  const outerClasses = 'relative overflow-hidden';
+
+  // 内容包装器：统一左右内边距，与 PicwithText 一致
   const contentStyle: React.CSSProperties = {
-    paddingTop: `${props.paddingTop ?? 0}px`,
-    paddingBottom: `${props.paddingBottom ?? 0}px`,
+    paddingTop: paddingTopFinal,
+    paddingBottom: paddingBottomFinal,
+    maxWidth: '80rem',
+    margin: '0 auto',
+    width: '100%',
+    paddingLeft: 'clamp(1rem, 2vw, 2rem)',
+    paddingRight: 'clamp(1rem, 2vw, 2rem)',
   };
 
-  const titleStyle: React.CSSProperties = {
-    fontSize: `${props.titleFontSize ?? 32}px`,
-    color: props.titleColor ?? '#000000',
-    textAlign: props.titleAlign ?? 'left',
-    marginBottom: '1rem',
-  };
-
-  const centerContainerClass = 'max-w-7xl mx-auto w-full';
-
-  if (isEditMode && !finalVideoUrl) {
-    return (
-      <div ref={props.puck?.dragRef} className={outerClasses} style={outerStyle}>
-        <div className="border-2 border-dashed border-gray-300 p-8 text-center text-gray-400">
-          〖视频组件 - 请添加视频 URL〗
+  // ===== 渲染视频区域 =====
+  const renderVideoArea = () => {
+    // 1. 无视频 URL：显示灰色占位
+    if (!videoUrl) {
+      return (
+        <div className="border-2 border-dashed border-gray-300 rounded-lg p-8 text-center text-gray-400 bg-gray-50 w-full h-full flex items-center justify-center">
+          {isEditMode ? '〖视频组件 - 请添加视频 URL〗' : '暂无视频内容'}
         </div>
-      </div>
-    );
-  }
+      );
+    }
 
-  if (!isClient && !isEditMode) {
-    return (
-      <div ref={props.puck?.dragRef} className={outerClasses} style={outerStyle}>
-        <div className="relative w-full">
-          <div style={contentStyle}>
-            <div className={centerContainerClass}>
-              {titleText && <div style={titleStyle}>{titleText}</div>}
-            </div>
-            <div className={centerContainerClass}>
-              <div className="aspect-video bg-black rounded-lg flex items-center justify-center text-white">
-                加载中...
-              </div>
+    // 2. 有封面且未播放（非编辑模式）
+    if (!showVideo && thumbnailUrl && !isEditMode) {
+      return (
+        <div
+          className="cursor-pointer relative group w-full h-full"
+          onClick={() => setShowVideo(true)}
+        >
+          <img
+            src={thumbnailUrl}
+            alt={coverAlt}
+            className="w-full h-full object-cover"
+          />
+          <div className="absolute inset-0 flex items-center justify-center bg-black/30 transition group-hover:bg-black/40">
+            <div className="w-16 h-16 bg-white rounded-full flex items-center justify-center shadow-lg">
+              <svg className="w-8 h-8 text-black ml-1" fill="currentColor" viewBox="0 0 24 24">
+                <path d="M8 5v14l11-7z" />
+              </svg>
             </div>
           </div>
         </div>
+      );
+    }
+
+    // 3. 播放中或编辑模式：显示 iframe
+    if ((showVideo || isEditMode) && embedUrl) {
+      return (
+        <iframe
+          src={embedUrl}
+          title="Video player"
+          className="w-full h-full"
+          allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+          allowFullScreen
+        />
+      );
+    }
+
+    // 4. 视频解析失败
+    if (isParsingFailed) {
+      return (
+        <div className="flex items-center justify-center h-full text-white bg-black rounded-lg">
+          无法解析视频 URL，请检查链接
+        </div>
+      );
+    }
+
+    // 5. 其他情况
+    return (
+      <div className="flex items-center justify-center h-full text-gray-400 bg-gray-50 rounded-lg">
+        暂无视频内容
       </div>
     );
-  }
+  };
 
+  // ===== 渲染主体 =====
   return (
     <div ref={props.puck?.dragRef} className={outerClasses} style={outerStyle}>
       <div className="relative w-full">
         <div style={contentStyle}>
-          <div className={centerContainerClass}>
-            {titleText && <div style={titleStyle}>{titleText}</div>}
-          </div>
-          <div className={centerContainerClass}>
+          {title && (
+            <div className="max-w-full mx-auto">
+              <div style={titleSizeStyle}>{title}</div>
+            </div>
+          )}
+          <div className="max-w-full mx-auto">
             <div className="aspect-video relative bg-black rounded-lg overflow-hidden">
-              {/* 有封面且未播放时显示封面 */}
-              {!showVideo && thumbnailUrl && !isEditMode ? (
-                <div
-                  className="cursor-pointer relative group w-full h-full"
-                  onClick={() => setShowVideo(true)}
-                >
-                  <img
-                    src={thumbnailUrl}
-                    alt="视频封面"
-                    className="w-full h-full object-cover"
-                  />
-                  <div className="absolute inset-0 flex items-center justify-center bg-black/30 transition group-hover:bg-black/40">
-                    <div className="w-16 h-16 bg-white rounded-full flex items-center justify-center shadow-lg">
-                      <svg className="w-8 h-8 text-black ml-1" fill="currentColor" viewBox="0 0 24 24">
-                        <path d="M8 5v14l11-7z" />
-                      </svg>
-                    </div>
-                  </div>
-                </div>
-              ) : (showVideo || isEditMode) && embedUrl ? (
-                <iframe
-                  src={embedUrl}
-                  title="Video player"
-                  className="w-full h-full"
-                  allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
-                  allowFullScreen
-                />
-              ) : (
-                <div className="flex items-center justify-center h-full text-white">
-                  {isParsingFailed && finalVideoUrl ? '无法解析视频 URL，请检查链接' : '暂无视频内容'}
-                </div>
-              )}
+              {renderVideoArea()}
             </div>
           </div>
         </div>

@@ -63,10 +63,10 @@ export default function LanguageSettingsPage() {
   return (
     <div className="min-h-screen bg-gray-100 py-8">
       <div className="w-4/5 mx-auto space-y-6">
-        {/* 卡片1：多语言站点开通配置 */}
+        {/* 卡片1：多语言站点开通配置 - 完全不变 */}
         <div className="bg-white rounded-lg shadow p-6">
           <div className="flex justify-between items-center mb-4">
-            <h2 className="text-xl font-bold">多语言站点开通配置</h2>
+            <h2 className="text-xl font-bold">多语言站点开通配置(按重要性排序)</h2>
             <button
               onClick={handleSelectAll}
               className="text-sm text-blue-600 hover:text-blue-800"
@@ -130,7 +130,7 @@ export default function LanguageSettingsPage() {
           </div>
         </div>
 
-        {/* 卡片2：国家官方语言（只读） */}
+        {/* 卡片2：国家官方语言（只读） - 仅表格增加一列 */}
         <div className="bg-white rounded-lg shadow p-6">
           <h2 className="text-xl font-bold mb-4">国家官方语言（参考）</h2>
           <p className="text-sm text-gray-500 mb-4">根据用户IP所在国家自动切换对应语言</p>
@@ -142,6 +142,8 @@ export default function LanguageSettingsPage() {
                   <th className="border px-3 py-2 text-left">中文名称</th>
                   <th className="border px-3 py-2 text-left">原生名称</th>
                   <th className="border px-3 py-2 text-left">官方语言代码</th>
+                  {/* 新增列 */}
+                  <th className="border px-3 py-2 text-left">是否拉丁语</th>
                 </tr>
               </thead>
               <tbody>
@@ -151,6 +153,10 @@ export default function LanguageSettingsPage() {
                     <td className="border px-3 py-1">{item.countryZhName}</td>
                     <td className="border px-3 py-1">{item.countryNativeName}</td>
                     <td className="border px-3 py-1">{item.officialLanguageCode || '-'}</td>
+                    {/* 新增数据列，直接使用API返回的isLatin字段 */}
+                    <td className="border px-3 py-1 text-center">
+                      {item.officialLanguageCode ? (item.isLatin ? '是' : '否') : '-'}
+                    </td>
                   </tr>
                 ))}
               </tbody>

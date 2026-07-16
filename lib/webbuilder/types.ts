@@ -1,3 +1,4 @@
+// lib/webbuilder/types.ts
 /**
  * 模板分类枚举（与下拉选项一致）
  * 新增 product_line 分类用于产品线落地页模板
@@ -40,44 +41,60 @@ export interface BlankBlockProps {
 
 export interface HeadingProps {
   level: 1 | 2 | 3;
-  title: { zh: string; en: string; textId: string };
+  title: string;
   textAlign: 'left' | 'center' | 'right';
   bold: boolean;
   italic: boolean;
   underline: boolean;
-  link?: string;   // 新增
+  link?: string;
   fontSize: 'sm' | 'base' | 'lg' | 'xl' | '2xl' | '3xl' | '4xl' | '5xl';
-  __runtime?: { texts: Record<string, string>; locale: string };
+  spacingGroup: {
+    mobileScaleFactor: number;
+  };
+  // 编辑模式标记（由 Puck 注入）
+  puck?: { dragRef: (el: HTMLElement | null) => void; isEditing?: boolean };
 }
 
 export interface ParagraphProps {
-  text: { zh: string; en: string; textId: string };
+  text: string;
   fontSize: number;
   textAlign: 'left' | 'center' | 'right';
   bold: boolean;
   italic: boolean;
   underline: boolean;
   color: string;
-  link?: string;   // 新增
+  link?: string;
+  spacingGroup: {
+    mobileScaleFactor: number;
+  };
+  puck?: { dragRef: (el: HTMLElement | null) => void; isEditing?: boolean };
 }
 
 export interface ButtonProps {
-  text: { zh: string; en: string; textId: string };
-  buttonColor: string;          // 按钮背景色
-  textColor: string;            // 文字颜色
+  text: string;
+  buttonColor: string;
+  textColor: string;
   fontSize: number;
   bold: boolean;
   italic: boolean;
   underline: boolean;
   textAlign: 'left' | 'center' | 'right';
   buttonAlign: 'left' | 'center' | 'right';
-  link: string;
-  borderRadius: string;         // 例如 '0.375rem' 或 '9999px'
+  link?: string;
+  borderRadius: string;
+   paddingX: number;   // 新增
+  paddingY: number;   // 新增
+  spacingGroup: {
+    mobileScaleFactor: number;
+  };
+  puck?: { dragRef: (el: HTMLElement | null) => void; isEditing?: boolean };
 }
 
+// ==================== List 组件类型（单语言） ====================
 export interface ListItem {
   id: string;
-  text: { zh: string; en: string; textId: string };
+  icon: string;            // Lucide 图标名称
+  text: string;
   textColor: string;
   fontSize: number;
   textAlign: 'left' | 'center' | 'right';
@@ -88,97 +105,165 @@ export interface ListItem {
 }
 
 export interface ListProps {
+  spacingGroup: {
+    mobileScaleFactor: number;
+  };
   items: ListItem[];
-  iconType: 'none' | 'dot' | 'number' | 'star';
+  puck?: { dragRef: (el: HTMLElement | null) => void; isEditing?: boolean };
 }
 
+// ==================== 分割线组件类型 ====================
 export interface DividingLineProps {
   lineType: 'solid' | 'dashed' | 'dotted' | 'double';
   thickness: number;
   color: string;
+  widthType: 'full' | '90' | '80' | '50';
+  align: 'left' | 'center' | 'right';
+  puck?: { dragRef: (el: HTMLElement | null) => void; isEditing?: boolean };
 }
 
-export interface TableProps {
-  headers: string[];
-  rows: string[][];
-}
+
 
 // ==================== 富文本组件 ====================
 export interface RichtextProps {
   bannerType: 'standard' | 'fullwidth';
-  title: { zh: string; en: string; textId: string };
-  titleFontSize: number;
-  titleColor: string;
-  text: { zh: string; en: string; textId: string };
-  textFontSize: number;
-  textColor: string;
-  button1Text: { zh: string; en: string; textId: string };
-  button1Color: string;
-  button1Link: string;
-  button2Text: { zh: string; en: string; textId: string };
-  button2Color: string;
-  button2Link: string;
   backgroundColor: string;
-  contentPosition: 'left' | 'center' | 'right';
-  textAlign: 'left' | 'center' | 'right';  // ✅ 必须有
-  containerPaddingTop: number;
-  containerPaddingBottom: number;
+
+  titleGroup: {
+    title: string;
+    titleFontSize: number;
+    titleColor: string;
+  };
+  textGroup: {
+    text: string;
+    textFontSize: number;
+    textColor: string;
+  };
+  button1Group: {
+    button1Text: string;
+    button1FontSize: number;
+    button1Color: string;
+    button1Link: string;
+  };
+  button2Group: {
+    button2Text: string;
+    button2FontSize: number;
+    button2Color: string;
+    button2Link: string;
+  };
+  buttonStyleGroup: {
+    buttonPaddingX: number;
+    buttonPaddingY: number;
+    buttonBorderRadius: number;
+  };
+  layoutGroup: {
+    contentPosition: 'left' | 'center' | 'right';
+    textAlign: 'left' | 'center' | 'right';
+  };
+  paddingGroup: {
+    containerPaddingTop: number;
+    containerPaddingBottom: number;
+  };
+  spacingGroup: {
+    titleMarginBottom: number;
+    textMarginBottom: number;
+    buttonGap: number;
+    mobileScaleFactor: number;
+  };
 }
+
 
 // ==================== 视频组件 ====================
 export interface VideoProps {
   bannerType: 'standard' | 'fullwidth';
   backgroundColor: string;
-  title: { zh: string; en: string; textId: string };
+  title: string;
   titleFontSize: number;
   titleColor: string;
   titleAlign: 'left' | 'center' | 'right';
   videoUrl: string;
-  videoThumbnail: string;      // 用户自定义封面
-  videoDuration?: number;  // 改为可选，运行时注入
+  videoThumbnail: string;
+  videoDuration?: number;
   loop: boolean;
   paddingTop: number;
   paddingBottom: number;
-  languageSwitcher?: any;  // 新增
+  // 用于 UI 分组，不存储
+  _divider1?: any;
+  _divider2?: any;
+  _divider3?: any;
 }
 
 // ==================== 带图片文本组件 ====================
 export interface PicwithTextProps {
-  // 通栏类型
+  // 顶层字段
   bannerType: 'standard' | 'fullwidth';
-  // 通栏背景色
   backgroundColor: string;
-  // 图片设置
-  imageUrl: string;
-  imageHeight: 'auto' | 'small' | 'medium' | 'large';
-  imageWidth: 'small' | 'medium' | 'large';
-  imagePosition: 'left' | 'right';
-  animation: 'none' | 'ambient' | 'zoom';
-  // 标题（多语言）
-  title: { zh: string; en: string; textId: string };
-  titleFontSize: number;
-  titleColor: string;
-  // 文本（多语言）
-  text: { zh: string; en: string; textId: string };
-  textFontSize: number;
-  textColor: string;
-  // 按钮
-  buttonText: { zh: string; en: string; textId: string };
-  buttonFontSize: number;
-  buttonColor: string;
-  buttonLink: string;
-  // 内容位置（整体垂直对齐）
-  contentVertical: 'top' | 'center' | 'bottom';
-  // 文本区对齐（标题、文本、按钮的水平对齐）
-  textAlign: 'left' | 'center' | 'right';
-  // 文本区背景色
-  textAreaBackgroundColor: string;
-  // 填充
-  paddingTop: number;
-  paddingBottom: number;
+
+  // 分组字段（配置文件使用）
+  imageGroup?: {
+    imageUrl: string;
+    imageHeight: 'auto' | 'small' | 'medium' | 'large';
+    imageWidth: 'small' | 'medium' | 'large';
+    imagePosition: 'left' | 'right';
+    animation: 'none' | 'ambient' | 'zoom';
+  };
+  titleGroup?: {
+    title: string;
+    titleFontSize: number;
+    titleColor: string;
+  };
+  textGroup?: {
+    text: string;
+    textFontSize: number;
+    textColor: string;
+  };
+  buttonGroup?: {
+    buttonText: string;
+    buttonFontSize: number;
+    buttonColor: string;
+    buttonLink: string;
+    buttonPaddingX: number;
+    buttonPaddingY: number;
+    buttonBorderRadius: number;
+  };
+  layoutGroup?: {
+    contentVertical: 'top' | 'center' | 'bottom';
+    textAlign: 'left' | 'center' | 'right';
+    textAreaBackgroundColor: string;
+  };
+  paddingGroup?: {
+    paddingTop: number;
+    paddingBottom: number;
+  };
+
+  // 以下为旧扁平字段（兼容旧数据，新数据不会使用）
+  imageUrl?: string;
+  imageHeight?: 'auto' | 'small' | 'medium' | 'large';
+  imageWidth?: 'small' | 'medium' | 'large';
+  imagePosition?: 'left' | 'right';
+  animation?: 'none' | 'ambient' | 'zoom';
+  title?: string;
+  titleFontSize?: number;
+  titleColor?: string;
+  text?: string;
+  textFontSize?: number;
+  textColor?: string;
+  buttonText?: string;
+  buttonFontSize?: number;
+  buttonColor?: string;
+  buttonLink?: string;
+  buttonPaddingX?: number;
+  buttonPaddingY?: number;
+  buttonBorderRadius?: number;
+  contentVertical?: 'top' | 'center' | 'bottom';
+  textAlign?: 'left' | 'center' | 'right';
+  textAreaBackgroundColor?: string;
+  paddingTop?: number;
+  paddingBottom?: number;
 }
 
 // ==================== 图片横幅 ====================
+
 export interface ImageBannerProps {
   bannerType: 'standard' | 'fullwidth';
   // 原有扁平字段（保留，兼容旧数据）
@@ -186,19 +271,22 @@ export interface ImageBannerProps {
   image2Url?: string;
   overlayOpacity?: number;
   heightPreset?: 'auto' | 'small' | 'medium' | 'large';
-  animation?: 'none' | 'parallax' | 'fixed' | 'scale';
-  title?: { zh: string; en: string; textId: string };
+  // ❌ animation 字段已移除（组件不再支持 fixed/scale 动效）
+  title?: string;
   titleFontSize?: number;
   titleColor?: string;
-  text?: { zh: string; en: string; textId: string };
+  text?: string;
   textFontSize?: number;
   textColor?: string;
-  button1Text?: { zh: string; en: string; textId: string };
+  button1Text?: string;
   button1Color?: string;
   button1Link?: string;
-  button2Text?: { zh: string; en: string; textId: string };
+  button2Text?: string;
   button2Color?: string;
   button2Link?: string;
+  buttonPaddingX?: number;
+  buttonPaddingY?: number;
+  buttonBorderRadius?: number;
   contentPosition?: string;
   textAlign?: 'left' | 'center' | 'right';
   containerEnabled?: boolean;
@@ -212,20 +300,19 @@ export interface ImageBannerProps {
     image2Url: string;
     overlayOpacity: number;
     heightPreset: 'auto' | 'small' | 'medium' | 'large';
-    animation: 'none' | 'parallax' | 'fixed' | 'scale';
+    // ❌ animation 字段已移除
   };
   contentSettings?: {
-    languageSwitcher?: any;
-    title: { zh: string; en: string; textId: string };
+    title: string;
     titleFontSize: number;
     titleColor: string;
-    text: { zh: string; en: string; textId: string };
+    text: string;
     textFontSize: number;
     textColor: string;
-    button1Text: { zh: string; en: string; textId: string };
+    button1Text: string;
     button1Color: string;
     button1Link: string;
-    button2Text: { zh: string; en: string; textId: string };
+    button2Text: string;
     button2Color: string;
     button2Link: string;
     contentPosition: string;
@@ -237,44 +324,65 @@ export interface ImageBannerProps {
   };
 }
 
-// ========== Multicolumn 组件类型 ==========
+// ========== Multicolumn 组件类型（单语言，嵌套分组） ==========
 export interface MulticolumnItem {
   id: string;
   imageUrl: string;
-  title: { zh: string; en: string; textId: string };
-  description: { zh: string; en: string; textId: string };
-  buttonLabel: { zh: string; en: string; textId: string };
+  title: string;
+  description: string;
+  buttonLabel: string;
   buttonLink: string;
 }
 
 export interface MulticolumnProps {
-  languageSwitcher?: any; // ✅ 添加
-  // 通栏
-  bannerType: 'standard' | 'fullwidth';
-  backgroundColor: string;
-  // 全局标题
-  globalTitle: { zh: string; en: string; textId: string };
-  globalTitleFontSize: number;
-  globalTitleColor: string;
-  // 图片全局设置
-  imageWidth: 'full' | 'half' | 'third';
-  imageShape: 'adapt' | 'portrait' | 'square' | 'circle';
-  // 按钮全局设置
-  buttonFontSize: number;
-  buttonColor: string;
-  // 布局
-  columnsDesktop: number;      // 1-5
-  columnsAlign: 'left' | 'center';
-  columnsMobile: number;       // 1-2
-  mobileCarousel: boolean;
-  // 填充
-  paddingTop: number;
-  paddingBottom: number;
-  // 列配色
-  columnBgColor: string;
-  columnTitleColor: string;
-  columnDescColor: string;
-  // 动态列数组
+  bannerGroup: {
+    bannerType: 'standard' | 'fullwidth';
+    backgroundColor: string;
+  };
+
+  globalGroup: {
+    globalTitle: string;
+    globalTitleFontSize: number;
+    globalTitleColor: string;
+  };
+
+  imageGroup: {
+    imageWidth: 'full' | 'half' | 'third';
+    imageShape: 'adapt' | 'portrait' | 'square' | 'circle';
+  };
+
+  buttonGroup: {
+    buttonText: string;
+    buttonFontSize: number;
+    buttonColor: string;
+    buttonLink: string;
+    buttonPaddingX: number;      // ✅ 新增
+    buttonPaddingY: number;      // ✅ 新增
+    buttonBorderRadius: number;  // ✅ 新增
+  };
+
+  layoutGroup: {
+    columnsDesktop: number;       // 1-5
+    columnsAlign: 'left' | 'center';
+    columnsMobile: number;        // 1-2
+    mobileCarousel: boolean;
+  };
+
+  styleGroup: {
+    columnBgColor: string;
+    columnTitleColor: string;
+    columnDescColor: string;
+  };
+
+  paddingGroup: {
+    paddingTop: number;
+    paddingBottom: number;
+  };
+
+  spacingGroup: {
+    mobileScaleFactor: number;
+  };
+
   items: MulticolumnItem[];
 }
 
@@ -282,59 +390,104 @@ export interface MulticolumnProps {
 export interface MultirowItem {
   id: string;
   imageUrl: string;
-  title: { zh: string; en: string; textId: string };
-  description: { zh: string; en: string; textId: string };
-  linkLabel: { zh: string; en: string; textId: string };
+  title: string;
+  description: string;
+  linkLabel: string;
   linkUrl: string;
 }
 
 export interface MultirowProps {
-  languageSwitcher?: any; // ✅ 添加
-  bannerType: 'standard' | 'fullwidth';
-  backgroundColor: string;
-  imageHeight: 'auto' | 'small' | 'medium' | 'large';
-  imageWidth: 'small' | 'medium' | 'large';
-  imagePlacement: 'alternate-left' | 'alternate-right' | 'left' | 'right';
-  columnBgColor: string;
-  columnTitleColor: string;
-  columnTitleFontSize: number;
-  columnDescColor: string;
-  columnDescFontSize: number;
-  contentVertical: 'top' | 'middle' | 'bottom';
-  textAlign: 'left' | 'center' | 'right';
-  mobileTextAlign: 'left' | 'center' | 'right';
-  paddingTop: number;
-  paddingBottom: number;
+  bannerGroup: {
+    bannerType: 'standard' | 'fullwidth';
+    backgroundColor: string;
+  };
+
+  imageGroup: {
+    imageHeight: 'auto' | 'small' | 'medium' | 'large';
+    imageWidth: 'small' | 'medium' | 'large';
+    imagePlacement: 'alternate-left' | 'alternate-right' | 'left' | 'right';
+  };
+
+  contentGroup: {
+    columnBgColor: string;
+    columnTitleColor: string;
+    columnTitleFontSize: number;
+    columnDescColor: string;
+    columnDescFontSize: number;
+    contentVertical: 'top' | 'middle' | 'bottom';
+    textAlign: 'left' | 'center' | 'right';
+    mobileTextAlign: 'left' | 'center' | 'right';
+  };
+
+  paddingGroup: {
+    paddingTop: number;
+    paddingBottom: number;
+  };
+
+  spacingGroup: {
+    mobileScaleFactor: number;
+  };
+
   items: MultirowItem[];
 }
 
-// ========== 可折叠组件类型 ==========
+// ========== 可折叠组件类型（嵌套分组） ==========
 export interface CollapsibleItem {
   id: string;
-  title: { zh: string; en: string; textId: string };
+  title: string;
   icon: string;
-  content: { zh: string; en: string; textId: string };
+  content: string;
 }
 
 export interface CollapsibleProps {
-  languageSwitcher?: any; // ✅ 添加
-  bannerType: 'standard' | 'fullwidth';
-  backgroundColor: string;
-  globalTitle: { zh: string; en: string; textId: string };
-  globalTitleFontSize: number;
-  globalTitleColor: string;
-  globalTitleAlign: 'left' | 'center' | 'right';
-  imageUrl: string;
-  imageRatio: 'adapt' | 'small' | 'large';
-  imagePlacement: 'left' | 'right';
-  rowTitleColor: string;
-  rowTitleFontSize: number;
-  rowContentColor: string;
-  rowContentFontSize: number;
-  containerType: 'none' | 'row' | 'section';
-  containerBgColor: string;
-  paddingTop: number;
-  paddingBottom: number;
+  // 通栏设置
+  bannerGroup: {
+    bannerType: 'standard' | 'fullwidth';
+    backgroundColor: string;
+  };
+
+  // 折叠栏设置
+  titleGroup: {
+    globalTitle: string;
+    globalTitleFontSize: number;
+    globalTitleColor: string;
+    globalTitleAlign: 'left' | 'center' | 'right';
+    rowBackgroundColor: string;  // ✅ 新增
+  };
+
+  // 图片设置
+  imageGroup: {
+    imageUrl: string;
+    imageRatio: 'adapt' | 'small' | 'large';
+    imagePlacement: 'left' | 'right';
+  };
+
+  // 内容列表设置
+  contentGroup: {
+    rowTitleFontSize: number;
+    rowTitleColor: string;
+    rowContentFontSize: number;
+    rowContentColor: string;
+  };
+
+  // 内容容器
+  containerGroup: {
+    containerType: 'none' | 'row' | 'section';
+    containerBgColor: string;
+  };
+
+  // 填充设置
+  paddingGroup: {
+    paddingTop: number;
+    paddingBottom: number;
+  };
+
+  // 间距（内部使用，不暴露）
+  spacingGroup: {
+    mobileScaleFactor: number;
+  };
+
+  // 动态项
   items: CollapsibleItem[];
 }
 
@@ -342,33 +495,42 @@ export interface CollapsibleProps {
 export interface AccordionContentItem {
   id: string;
   imageUrl: string;
-  title: { zh: string; en: string; textId: string };
-  paragraph: { zh: string; en: string; textId: string };
+  title: string;          // 单语言
+  paragraph: string;      // 单语言
   link: string;
 }
 
 export interface AccordionItem {
   id: string;
-  title: { zh: string; en: string; textId: string };
+  title: string;          // 单语言
   contents: AccordionContentItem[];
 }
 
 export interface AccordionProps {
-  languageSwitcher?: any; // ✅ 添加
   bannerType: 'standard' | 'fullwidth';
   backgroundColor: string;
-  rowTitleColor: string;
-  rowTitleFontSize: number;
-  rowTitleAlign: 'left' | 'center' | 'right';
-  rowHeaderBgColor: string;
-  itemsPerRow: number;        // 2-4
-  itemsGap: number;           // 10-50px
-  contentTitleFontSize: number;
-  contentTitleAlign: 'left' | 'center' | 'right';
-  contentTextFontSize: number;
-  contentTextAlign: 'left' | 'center' | 'right';
-  paddingTop: number;
-  paddingBottom: number;
+
+  rowGroup: {
+    rowTitleColor: string;
+    rowTitleFontSize: number;
+    rowTitleAlign: 'left' | 'center' | 'right';
+    rowHeaderBgColor: string;
+    itemsPerRow: number;
+    itemsGap: number;
+  };
+  contentGroup: {
+    contentTitleFontSize: number;
+    contentTitleAlign: 'left' | 'center' | 'right';
+    contentTextFontSize: number;
+    contentTextAlign: 'left' | 'center' | 'right';
+  };
+  paddingGroup: {
+    paddingTop: number;
+    paddingBottom: number;
+  };
+  spacingGroup: {
+    mobileScaleFactor: number;
+  };
   items: AccordionItem[];
 }
 
@@ -517,9 +679,38 @@ export interface VideoCategoryBlockProps {
 }
 
 // ==================== 全屏通栏幻灯片组件 ====================
+// 专用于 FullwidthSlider 的幻灯片项（单语言）
+export interface FullwidthSlideItem {
+  imageUrl: string;
+  title: string;                     // 单语言
+  subtitle: string;
+  buttonText: string;
+  buttonLink: string;
+  contentPosition:
+    | 'top-left' | 'top-center' | 'top-right'
+    | 'center-left' | 'center-center' | 'center-right'
+    | 'bottom-left' | 'bottom-center' | 'bottom-right';
+  desktopAlign: 'left' | 'center' | 'right';
+  mobileAlign: 'left' | 'center' | 'right';
+  titleFontSize: number;
+  titleColor: string;
+  subtitleFontSize: number;
+  subtitleColor: string;
+}
+
+export interface FullwidthSliderProps {
+  bannerType: 'standard' | 'fullwidth';   // 新增
+  backgroundColor?: string;      // 新增
+  paddingTop?: number;           // 新增
+  paddingBottom?: number;        // 新增
+  height: number;                         // 改为 number
+  autoplay: 'none' | '5s' | '10s';
+  images: FullwidthSlideItem[];
+}
+
+// 保留原有 SlideItem 用于 WidthSlider（多语言）
 export interface SlideItem {
   imageUrl: string;
-   // 多语言文本字段存储为对象，包含 textId 和各语言文本
   title: { zh: string; en: string; textId: string };
   subtitle: { zh: string; en: string; textId: string };
   buttonText: { zh: string; en: string; textId: string };
@@ -536,10 +727,10 @@ export interface SlideItem {
   subtitleColor: string;
 }
 
-export interface FullwidthSliderProps {
+export interface WidthSliderProps {
   height: '550' | '650';
   autoplay: 'none' | '5s' | '10s';
-  images: SlideItem[];
+  images: SlideItem[];   // 保持原有多语言 SlideItem
 }
 
 // ==================== 非全屏幻灯片组件 ====================
@@ -553,7 +744,7 @@ export interface WidthSliderProps {
 export type Components = {
   Heading: HeadingProps;
   Paragraph: ParagraphProps;
-  Table: TableProps;
+
   BlankBlock: BlankBlockProps;
   Section: SectionProps;
   ProductLineBlock: ProductLineBlockProps;   // 新增
@@ -573,4 +764,7 @@ export type Components = {
   Video: VideoProps;
   Multicolumn: MulticolumnProps;
   Accordion: AccordionProps;
+  PicwithText: PicwithTextProps;
+  Collapsible: CollapsibleProps;
+  Multirow: MultirowProps;
 };
