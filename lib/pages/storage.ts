@@ -1,11 +1,15 @@
-// lib/pages/storage.ts
 import matter from 'gray-matter';
+import NodeCache from 'node-cache';
 import { PageData, PageFrontMatter, PageIndexEntry, LocalePagesIndex } from '@/types/page';
 import { getPrivateStorage } from '@/lib/storage/factory';
 import { supabase } from '@/lib/supabase/client';
 
 const STORAGE_PREFIX = 'pages';
 const SITE_ID = '000001';
+
+// ========== 缓存实例（TTL 5 分钟） ==========
+const cache = new NodeCache({ stdTTL: 300, checkperiod: 60 });
+// ===========================================
 
 function getPageFileKey(locale: string, pageId: string): string {
   return `${STORAGE_PREFIX}/${locale}/${pageId}.md`;
@@ -113,7 +117,7 @@ async function upsertPageMetaInDb(page: PageData, locale: string): Promise<void>
       preset: page.preset || false,
       visible: page.visible || 'visible',
       template: page.template || '',
-      template_hash: page.templateHash || null,   // 新增
+      template_hash: page.templateHash || null,
       slug: page.slug,
       seo_keywords: page.seo_keywords || '',
       seo_title: page.seo_title || '',
@@ -170,6 +174,12 @@ async function readPagesIndex(locale: string): Promise<LocalePagesIndex> {
 // ---------- 核心 API ----------
 
 export async function readPage(locale: string, pageId: string): Promise<PageData | null> {
+  const cacheKey = `page:${locale}:${pageId}`;
+  const cached = cache.get(cacheKey) as PageData | undefined;
+  if (cached) {
+    return cached;
+  }
+
   const storage = getPrivateStorage();
   const key = getPageFileKey(locale, pageId);
 
@@ -195,6 +205,8 @@ export async function readPage(locale: string, pageId: string): Promise<PageData
       locale: locale,
     };
 
+    cache.set(cacheKey, pageData);
+
     upsertPageMetaInDb(pageData, locale).catch(err => {
       console.warn(`[readPage] Failed to upsert meta for ${locale}/${pageId}:`, err);
     });
@@ -204,13 +216,15 @@ export async function readPage(locale: string, pageId: string): Promise<PageData
     if (isNotFoundError(err)) {
       const meta = await getPageMetaFromDb(pageId, locale);
       if (meta) {
-        return {
+        const pageData = {
           ...meta,
           content: '',
           templateData: null,
           locale: locale,
           templateHash: meta.templateHash || null,
         } as PageData;
+        cache.set(cacheKey, pageData);
+        return pageData;
       }
       return null;
     }
@@ -220,6 +234,10 @@ export async function readPage(locale: string, pageId: string): Promise<PageData
 }
 
 export async function writePage(locale: string, page: PageData): Promise<void> {
+  // 使缓存失效
+  const cacheKey = `page:${locale}:${page.id}`;
+  cache.del(cacheKey);
+
   const storage = getPrivateStorage();
   const key = getPageFileKey(locale, page.id);
   const frontMatter: PageFrontMatter = {
@@ -245,6 +263,10 @@ export async function writePage(locale: string, page: PageData): Promise<void> {
 }
 
 export async function deletePageFile(locale: string, pageId: string): Promise<void> {
+  // 使缓存失效
+  const cacheKey = `page:${locale}:${pageId}`;
+  cache.del(cacheKey);
+
   const storage = getPrivateStorage();
   const key = getPageFileKey(locale, pageId);
   try {
