@@ -114,51 +114,66 @@ export default function LiteChatAdminPage() {
     }
   };
 
-  // ===== 加载消息（支持分页） =====
-  const loadMessages = async (conversationId: string, before?: string, append: boolean = false) => {
-    try {
-      const params = new URLSearchParams();
-      params.set('limit', '30');
+ // ===== 加载消息（支持分页和自动重试/刷新） =====
+const loadMessages = async (
+  conversationId: string,
+  before?: string,
+  append: boolean = false,
+  retries: number = 2
+) => {
+  try {
+    const params = new URLSearchParams();
+    params.set('limit', '30');
 
-      if (before) {
-        params.set('before', before);
-      } else {
-        // 初始加载：只取最近 7 天
-        const sevenDaysAgo = new Date();
-        sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
-        params.set('after', sevenDaysAgo.toISOString());
-      }
-
-      const res = await fetch(
-        `/api/litechat/conversations/${conversationId}/messages?${params.toString()}`
-      );
-      if (!res.ok) throw new Error('加载消息失败');
-      const data = await res.json();
-
-      if (append) {
-        // 加载更多：将旧消息添加到列表前面
-        setMessages(prev => [...data.messages, ...prev]);
-      } else {
-        // 初始加载：直接设置
-        setMessages(data.messages || []);
-      }
-      setHasMore(data.hasMore || false);
-      setIsConnected(true);
-      if (!append) {
-        markAsRead(conversationId);
-      }
-      return data;
-    } catch (err) {
-      console.error('加载消息失败:', err);
-      setIsConnected(false);
-      if (!append) {
-        // 初始加载失败时重置状态
-        setMessages([]);
-        setHasMore(false);
-      }
-      throw err;
+    if (before) {
+      params.set('before', before);
+    } else {
+      const sevenDaysAgo = new Date();
+      sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
+      params.set('after', sevenDaysAgo.toISOString());
     }
-  };
+
+    const res = await fetch(
+      `/api/litechat/conversations/${conversationId}/messages?${params.toString()}`
+    );
+
+    if (!res.ok) {
+      // 如果是 401 或 403，直接刷新页面（认证失效）
+      if (res.status === 401 || res.status === 403) {
+        console.warn('[loadMessages] 认证失效，刷新页面');
+        window.location.reload();
+        return;
+      }
+      throw new Error(`加载消息失败 (${res.status})`);
+    }
+
+    const data = await res.json();
+
+    if (append) {
+      setMessages(prev => [...data.messages, ...prev]);
+    } else {
+      setMessages(data.messages || []);
+    }
+    setHasMore(data.hasMore || false);
+    setIsConnected(true);
+    if (!append) {
+      markAsRead(conversationId);
+    }
+  } catch (err) {
+    console.error('[loadMessages] 错误:', err);
+
+    // 网络错误或 SSL 错误时，尝试重试
+    if (retries > 0 && (err instanceof TypeError || err.message?.includes('fetch'))) {
+      console.warn(`[loadMessages] 网络错误，剩余重试次数: ${retries}`);
+      await new Promise(resolve => setTimeout(resolve, 1000));
+      return loadMessages(conversationId, before, append, retries - 1);
+    }
+
+    // 重试耗尽或非网络错误，刷新页面（兜底）
+    console.warn('[loadMessages] 无法恢复，刷新页面');
+    window.location.reload();
+  }
+};
 
   // ===== 加载更多历史消息 =====
   const loadMoreMessages = async () => {

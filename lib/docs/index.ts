@@ -12,6 +12,7 @@ export {
 export {
   getDocsByLib,
   getDocument,
+  getDocBySlug,          // 新增导出
   saveDocument,
   deleteDocument,
   copyDocument,

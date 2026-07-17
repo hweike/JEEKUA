@@ -62,6 +62,20 @@ export async function getCustomerByEmail(email: string): Promise<Customer | null
   return data ? toCustomer(data) : null;
 }
 
+// ---------- 新增：根据邮箱和来源查询客户 ----------
+export async function getCustomerByEmailAndSource(email: string, source: 'manual' | 'register'): Promise<Customer | null> {
+  const { data, error } = await supabase
+    .from('customers')
+    .select('*')
+    .eq('site_id', DEFAULT_SITE_ID)
+    .eq('email', email)
+    .eq('source', source)
+    .maybeSingle();
+  if (error) throw new Error(`getCustomerByEmailAndSource failed: ${error.message}`);
+  return data ? toCustomer(data) : null;
+}
+// --------------------------------------------------
+
 export async function createCustomer(customer: Customer): Promise<void> {
   const { error } = await supabase
     .from('customers')
@@ -182,7 +196,6 @@ export async function createInquiryWithCustomer(data: {
 
     if (customer) {
       console.log('[createInquiry] 找到客户:', customer);
-      // 组合全名（优先 first_name + last_name，否则用 name 字段，最后用 email）
       const fullName = getFullName(customer.first_name, customer.last_name, customer.name, customer.email);
       customerName = data.name || fullName || '';
       customerEmail = data.email || customer.email || '';

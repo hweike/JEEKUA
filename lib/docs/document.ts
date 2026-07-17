@@ -1,4 +1,3 @@
-// lib/docs/document.ts
 import { supabase } from '@/lib/supabase/client';
 import { getPrivateStorage } from '@/lib/storage/factory';
 import type { Doc } from './types';
@@ -177,6 +176,25 @@ export async function getDocument(locale: string, libId: string, docId: string) 
   const doc = mapRowToDoc(data);
   const content = await readMarkdown(locale, libId, doc.file);
   return { ...doc, content };
+}
+
+/**
+ * 根据文档库 ID 和文档 slug 获取完整文档（含内容）
+ */
+export async function getDocBySlug(locale: string, libId: string, slug: string) {
+  const { data, error } = await supabase
+    .from('documents')
+    .select('*')
+    .eq('site_id', DEFAULT_SITE_ID)
+    .eq('lib_id', libId)
+    .eq('locale', locale)
+    .eq('slug', slug)
+    .maybeSingle();
+
+  if (error || !data) return null;
+  const doc = mapRowToDoc(data);
+  const content = await readMarkdown(locale, libId, doc.file);
+  return { doc, content };
 }
 
 export async function saveDocument(

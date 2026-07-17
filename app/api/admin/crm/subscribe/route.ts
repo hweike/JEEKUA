@@ -37,8 +37,12 @@ export async function POST(request: Request) {
     const now = new Date().toISOString().slice(0, 19).replace('T', ' ');
     const newCustomer: Customer = {
       id: generateId(),
+      site_id: process.env.NEXT_PUBLIC_SITE_ID || '000001',
+      first_name: '',
+      last_name: '',
       name: '',
       country: country,
+      country_code: '',
       email: email,
       phone: '',
       whatsapp: '',
@@ -51,8 +55,13 @@ export async function POST(request: Request) {
       website: '',
       flag: '',
       emailSubscribed: '已订阅',
+      emailVerified: false,
+      lastLogin: undefined,
+      passwordHash: '',
+      role: 'customer',
+      source: 'register',
       createdAt: now,
-      source: 'register', // 注册用户
+      updatedAt: now,
     };
     await createCustomer(newCustomer);
     return NextResponse.json({ success: true, customerId: newCustomer.id });

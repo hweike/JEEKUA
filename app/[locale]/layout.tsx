@@ -1,8 +1,11 @@
+// app/[locale]/layout.tsx
+
 import { NextIntlClientProvider } from 'next-intl';
 import { getMessages, setRequestLocale } from 'next-intl/server';
 import { notFound } from 'next/navigation';
 import { headers } from 'next/headers';
 import { locales } from '@/i18n/config';
+import Script from 'next/script'; // ✅ 导入 Script 组件
 import Navbar from '@/components/Navbar';
 import Footer from '@/components/Footer';
 import { getHeaderConfig, getMenuBySourceId, getFooterConfig, getMultipleMenus } from '@/lib/config-loader';
@@ -133,6 +136,14 @@ export default async function LocaleLayout({
         {/* 聊天挂件 - 仅在客户端渲染 */}
         <ChatWidgetWrapper />
       </div>
+
+      {/* ✅ Umami 追踪脚本 - 使用 next/script 优化加载 */}
+      <Script
+        defer
+        src="https://umami-jeekuadata.vercel.app/script.js"
+        data-website-id="76f2e442-8655-4492-8891-2fa7df2f59f4"
+        strategy="afterInteractive"
+      />
     </NextIntlClientProvider>
   );
 }

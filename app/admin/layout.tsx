@@ -29,7 +29,12 @@ import {
   History,
   Sliders,
   Scan,
-  MessageCircle,  // ✅ 新增导入
+  MessageCircle,
+  // ✅ 新增图标
+  Activity,
+  Gauge,
+  PieChart,
+  LayoutDashboard,
 } from 'lucide-react';
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
@@ -68,7 +73,15 @@ function getMenuNameByPath(path: string): string {
     '/admin/account': '修改密码',
     '/admin/discovery/search': '全站搜索',
     '/admin/discovery/scan': '页面索引',
-    '/admin/litechat': 'Chat Online',  // ✅ 新增
+    '/admin/litechat': 'Chat Online',
+    // ✅ 新增流量分析日志映射
+    '/admin/analytics': '流量分析-概览',
+    '/admin/analytics/realtime': '流量分析-实时',
+    '/admin/analytics/behavior': '流量分析-行为类别',
+    '/admin/analytics/sessions': '流量分析-会话',
+    '/admin/analytics/performance': '流量分析-性能',
+    '/admin/analytics/compare': '流量分析-比较',
+    '/admin/analytics/audience': '流量分析-受众细分',
   };
   return mapping[path] || path;
 }
@@ -85,6 +98,7 @@ function getMenuKeyByName(menuName: string): string {
     '网站设置': 'website',
     '站点同步与翻译': 'translate',
     '智能SEO': 'smartSEO',
+    '流量分析': 'analytics',   // ✅ 新增
   };
   return mapping[menuName] || menuName;
 }
@@ -184,7 +198,10 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
       '/admin/videosys/categories', '/admin/videosys/videos', '/admin/crm', '/admin/inquiries',
       '/admin/pages', '/admin/themes', '/admin/menus', '/admin/settings/header',
       '/admin/settings/footer', '/admin/settings/admins', '/admin/logs',
-      '/admin/discovery/search', '/admin/discovery/scan', '/admin/litechat'  // ✅ 新增
+      '/admin/discovery/search', '/admin/discovery/scan', '/admin/litechat',
+      '/admin/analytics', '/admin/analytics/realtime', '/admin/analytics/behavior',
+      '/admin/analytics/sessions', '/admin/analytics/performance', '/admin/analytics/compare',
+      '/admin/analytics/audience'
     ].some(p => pathname === p || pathname.startsWith(p + '/'));
     if (!shouldLog) return;
 
@@ -274,7 +291,7 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
       children: [
         { name: '客户列表', href: '/admin/crm', icon: <Users className="w-4 h-4" /> },
         { name: '客户询盘', href: '/admin/inquiries', icon: <Mail className="w-4 h-4" /> },
-        { name: 'Chat Online', href: '/admin/litechat', icon: <MessageCircle className="w-4 h-4" /> },  // ✅ 新增
+        { name: 'Chat Online', href: '/admin/litechat', icon: <MessageCircle className="w-4 h-4" /> },
       ],
     },
     {
@@ -325,6 +342,20 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
           { name: '同步日志', href: '/admin/discovery/sync-logs', icon: <History className="w-4 h-4" /> },
         ],
       },
+      // ✅ 新增：流量分析模块（放在智能SEO后面）
+      {
+        name: '流量分析',
+        icon: <Activity className="w-4 h-4" />,
+        children: [
+          { name: '概览', href: '/admin/analytics', icon: <LayoutDashboard className="w-4 h-4" /> },
+          { name: '实时', href: '/admin/analytics/realtime', icon: <Activity className="w-4 h-4" /> },
+          { name: '行为类别', href: '/admin/analytics/behavior', icon: <Users className="w-4 h-4" /> },
+          { name: '会话', href: '/admin/analytics/sessions', icon: <History className="w-4 h-4" /> },
+          { name: '性能', href: '/admin/analytics/performance', icon: <Gauge className="w-4 h-4" /> },
+          { name: '比较', href: '/admin/analytics/compare', icon: <RefreshCw className="w-4 h-4" /> },
+          { name: '受众-细分', href: '/admin/analytics/audience', icon: <PieChart className="w-4 h-4" /> },
+        ],
+      },
       {
         name: '网站设置',
         icon: <Settings className="w-4 h-4" />,
@@ -359,14 +390,20 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
     }
   }, [pathname, menuConfig]);
 
-  // 激活判断函数
+  // ✅ 修改激活判断函数：精确匹配，避免同级菜单误激活
   const isActive = (href: string) => {
+    // 首页特殊处理
     if (href === '/admin') return pathname === href;
+    // 文档管理：避免匹配到文档库管理
     if (href === '/admin/docs' && pathname === '/admin/docs/docs-libs') return false;
+    // Blog文章：避免匹配到Blog分类
     if (href === '/admin/blog' && pathname?.startsWith('/admin/blog/categories')) return false;
+    // Blog分类：避免匹配到Blog文章
     if (href === '/admin/blog/categories' && pathname?.startsWith('/admin/blog/') && !pathname?.startsWith('/admin/blog/categories')) return false;
+    // SEO优化：避免匹配到其他子路径
     if (href === '/admin/discovery/seo' && pathname !== '/admin/discovery/seo') return false;
-    return pathname?.startsWith(href);
+    // 其他所有情况：精确匹配
+    return pathname === href;
   };
 
   const renderMenuItem = (item: MenuItem) => {
