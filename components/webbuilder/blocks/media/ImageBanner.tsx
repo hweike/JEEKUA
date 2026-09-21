@@ -1,9 +1,14 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { getImageUrl } from '@/lib/files/url';
 import { DEFAULT_IMAGE_BANNER } from '@/lib/webbuilder/defaults/ImageBanner';
 import { getAltSuffix } from '@/lib/webbuilder/alt-suffix-config';
+
+// ✅ 入场动画参数（硬编码）
+const ANIMATION_DURATION_MS = 800;
+const IMAGE_DELAY_MS = 0;
+const CONTENT_DELAY_MS = 200;
 
 function getString(field: any): string {
   if (typeof field === 'string') return field;
@@ -49,7 +54,6 @@ export function ImageBanner({
 
   const cs = contentSettings || {};
 
-  // 读取 mobileScaleFactor（默认 0.7）
   const mobileScaleFactor = DEFAULT_IMAGE_BANNER.mobileScaleFactor ?? 0.7;
 
   const {
@@ -77,7 +81,6 @@ export function ImageBanner({
     buttonBorderRadius = DEFAULT_IMAGE_BANNER.contentSettings.buttonBorderRadius,
   } = cs;
 
-  // 旧数据兼容
   const finalTitle = getString(title);
   const finalText = getString(text);
   const finalButton1Text = getString(button1Text);
@@ -143,6 +146,38 @@ export function ImageBanner({
 
   const primaryImageUrl = img1Url || img2Url;
   const [dynamicHeight, setDynamicHeight] = useState<number | null>(null);
+
+  // ✅ 入场动画状态
+  const containerRef = useRef<HTMLDivElement>(null);
+  const [hasEntered, setHasEntered] = useState(false);
+
+  useEffect(() => {
+    if (isEditMode) {
+      setHasEntered(true);
+      return;
+    }
+
+    const el = containerRef.current;
+    if (!el) {
+      setHasEntered(true);
+      return;
+    }
+
+    const observer = new IntersectionObserver(
+      (entries) => {
+        entries.forEach((entry) => {
+          if (entry.isIntersecting) {
+            setHasEntered(true);
+            observer.unobserve(entry.target);
+          }
+        });
+      },
+      { threshold: 0.15 }
+    );
+
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [isEditMode]);
 
   useEffect(() => {
     if (heightPreset !== 'auto' || !primaryImageUrl) {
@@ -229,7 +264,7 @@ export function ImageBanner({
     );
   }
 
-  // 自适应字体（引入 mobileScaleFactor）
+  // 自适应字体
   const titleSizeStyle = {
     fontSize: `clamp(${titleFontSize * mobileScaleFactor}px, 4.5vw, ${titleFontSize}px)`,
   };
@@ -237,12 +272,18 @@ export function ImageBanner({
     fontSize: `clamp(${textFontSize * mobileScaleFactor}px, 2.2vw, ${textFontSize}px)`,
   };
 
-  // 按钮尺寸响应式（也应用 mobileScaleFactor）
   const buttonPaddingXFinal = isMobile ? Math.min(buttonPaddingX, 16) : buttonPaddingX;
   const buttonPaddingYFinal = isMobile ? Math.min(buttonPaddingY, 8) : buttonPaddingY;
   const buttonBorderRadiusFinal = isMobile ? Math.min(buttonBorderRadius, 4) : buttonBorderRadius;
-  // 按钮字体自适应（使用 clamp，最小值基于 mobileScaleFactor）
   const buttonFontSizeClamp = `clamp(${16 * mobileScaleFactor}px, 1.2vw, 16px)`;
+
+  // ✅ 内容入场动画（单独延迟，在图片之后出现）
+  const contentEnterStyle: React.CSSProperties = {
+    opacity: hasEntered ? 1 : 0,
+    transform: hasEntered ? 'translateY(0)' : 'translateY(24px)',
+    transition: `opacity ${ANIMATION_DURATION_MS}ms ease-out ${CONTENT_DELAY_MS}ms, transform ${ANIMATION_DURATION_MS}ms ease-out ${CONTENT_DELAY_MS}ms`,
+    willChange: 'opacity, transform',
+  };
 
   const renderContent = () => (
     <div style={boxStyle}>
@@ -333,11 +374,10 @@ export function ImageBanner({
     </div>
   );
 
-  // 双图时：网格两列（桌面）或单列（移动端）
   const gridTemplateColumns = hasTwoImages ? (isDesktop ? '1fr 1fr' : '1fr') : '1fr';
 
-  // 构建图片元素（复用）
-  const renderImage = (src: string, alt: string, minHeight: string) => (
+  // ✅ 图片入场动画（从轻微放大 + 透明 → 原位 + 不透明）
+  const renderImage = (src: string, alt: string, minHeight: string, delayMs: number = IMAGE_DELAY_MS) => (
     <div
       style={{
         position: 'relative',
@@ -351,6 +391,7 @@ export function ImageBanner({
         src={src}
         alt={alt}
         loading="lazy"
+        decoding="async"
         style={{
           position: 'absolute',
           top: 0,
@@ -359,6 +400,11 @@ export function ImageBanner({
           height: '100%',
           objectFit: 'cover',
           display: 'block',
+          // ✅ 入场动画：缩放 + 淡入
+          opacity: hasEntered ? 1 : 0,
+          transform: hasEntered ? 'scale(1)' : 'scale(1.08)',
+          transition: `opacity ${ANIMATION_DURATION_MS}ms ease-out ${delayMs}ms, transform ${ANIMATION_DURATION_MS}ms ease-out ${delayMs}ms`,
+          willChange: 'opacity, transform',
         }}
       />
       <div
@@ -375,7 +421,11 @@ export function ImageBanner({
 
   return (
     <div ref={puck?.dragRef} className={containerClasses} style={containerMargin}>
-      <div className="relative w-full" style={heightStyle}>
+      <div
+        ref={containerRef}
+        className="relative w-full"
+        style={heightStyle}
+      >
         <div
           className="grid"
           style={{
@@ -388,7 +438,7 @@ export function ImageBanner({
         >
           {hasTwoImages ? (
             <>
-              {/* 图1 */}
+              {/* 图1（延迟 0ms） */}
               <div
                 style={{
                   gridColumn: isDesktop ? '1 / 2' : '1 / -1',
@@ -396,9 +446,9 @@ export function ImageBanner({
                   position: 'relative',
                 }}
               >
-                {renderImage(img1Url, alt1, 'clamp(200px, 40vh, 400px)')}
+                {renderImage(img1Url, alt1, 'clamp(200px, 40vh, 400px)', 0)}
               </div>
-              {/* 图2 */}
+              {/* 图2（延迟 150ms） */}
               <div
                 style={{
                   gridColumn: isDesktop ? '2 / 3' : '1 / -1',
@@ -406,11 +456,11 @@ export function ImageBanner({
                   position: 'relative',
                 }}
               >
-                {renderImage(img2Url, alt2, 'clamp(200px, 40vh, 400px)')}
+                {renderImage(img2Url, alt2, 'clamp(200px, 40vh, 400px)', 150)}
               </div>
             </>
           ) : (
-            /* 单图（全宽） */
+            /* 单图（延迟 0ms） */
             <div
               style={{
                 gridColumn: '1 / -1',
@@ -418,11 +468,11 @@ export function ImageBanner({
                 position: 'relative',
               }}
             >
-              {renderImage(img1Url || img2Url, alt1, 'auto')}
+              {renderImage(img1Url || img2Url, alt1, 'auto', 0)}
             </div>
           )}
 
-          {/* 内容层 */}
+          {/* 内容层（延迟 200ms，在图片之后出现） */}
           <div
             style={{
               gridColumn: '1 / -1',
@@ -435,6 +485,8 @@ export function ImageBanner({
               margin: 'clamp(1rem, 4vw, 3rem)',
               position: 'relative',
               zIndex: 10,
+              // ✅ 内容层入场动画
+              ...contentEnterStyle,
             }}
           >
             {isFullwidth ? <div className="max-w-7xl mx-auto w-full">{renderContent()}</div> : renderContent()}

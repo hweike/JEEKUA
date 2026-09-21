@@ -4,8 +4,8 @@ import { supabase } from '@/lib/supabase/client';
 export interface BasicSettings {
   siteName: string;
   websiteUrl: string;
-  defaultLocale: string;        // 新增
-  targetAudience: string;        // 新增
+  defaultLocale: string;
+  targetAudience: string;
   contactEmail: string;
   contactPhone: string;
   companyName: string;
@@ -15,15 +15,17 @@ export interface BasicSettings {
   province: string;
   postalCode: string;
   brand: string[];
+  socialShareImage: string;
+  logo: string; // 新增：企业 Logo
 }
 
 const DEFAULT_SITE_ID = '000001';
 
-// 默认设置（注意新增字段默认值）
+// 默认设置（包含新增字段默认值）
 const defaultSettings: BasicSettings = {
   siteName: '',
   websiteUrl: '',
-  defaultLocale: 'en',           // 默认英文
+  defaultLocale: 'en',
   targetAudience: '',
   contactEmail: '',
   contactPhone: '',
@@ -34,6 +36,8 @@ const defaultSettings: BasicSettings = {
   province: '',
   postalCode: '',
   brand: [],
+  socialShareImage: '',
+  logo: '', // 新增
 };
 
 // 获取设置
@@ -46,7 +50,7 @@ export async function getSettings(): Promise<BasicSettings> {
 
   if (error) {
     // 如果记录不存在，创建默认记录并返回
-    if (error.code === 'PGRST116') { // 没有找到记录
+    if (error.code === 'PGRST116') {
       const { data: newData, error: insertError } = await supabase
         .from('sites_settings')
         .insert({
@@ -64,6 +68,8 @@ export async function getSettings(): Promise<BasicSettings> {
           province: defaultSettings.province,
           postal_code: defaultSettings.postalCode,
           brand: defaultSettings.brand,
+          social_share_image: defaultSettings.socialShareImage,
+          logo: defaultSettings.logo, // 新增
         })
         .select()
         .single();
@@ -95,6 +101,8 @@ export async function updateSettings(settings: BasicSettings): Promise<void> {
       province: settings.province,
       postal_code: settings.postalCode,
       brand: settings.brand,
+      social_share_image: settings.socialShareImage,
+      logo: settings.logo, // 新增
       updated_at: new Date().toISOString(),
     })
     .eq('site_id', DEFAULT_SITE_ID);
@@ -118,5 +126,7 @@ function mapDbToSettings(dbRow: any): BasicSettings {
     province: dbRow.province || '',
     postalCode: dbRow.postal_code || '',
     brand: Array.isArray(dbRow.brand) ? dbRow.brand : [],
+    socialShareImage: dbRow.social_share_image || '',
+    logo: dbRow.logo || '', // 新增
   };
 }

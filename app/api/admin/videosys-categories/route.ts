@@ -1,5 +1,6 @@
 // app/api/admin/videosys-categories/route.ts
 import { NextRequest, NextResponse } from 'next/server';
+import { revalidateTag } from 'next/cache';
 import {
   getCategories,
   saveCategories,
@@ -9,10 +10,11 @@ import {
   ensureSystemCategory,
   getCategoriesBatch,
   copyCategory,
-  createCategoryWithKey, // 新增导入
+  createCategoryWithKey,
 } from '@/lib/videosys/services/category.service';
 import { getAllVideos } from '@/lib/videosys/videos';
 
+// ========== GET ==========
 export async function GET(req: NextRequest) {
   const searchParams = req.nextUrl.searchParams;
   const locale = searchParams.get('locale') || 'zh';
@@ -52,6 +54,7 @@ export async function GET(req: NextRequest) {
   }
 }
 
+// ========== POST ==========
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
@@ -66,6 +69,11 @@ export async function POST(req: NextRequest) {
         return NextResponse.json({ error: '源语言和目标语言不能相同' }, { status: 400 });
       }
       await copyCategory(sourceLocale, targetLocale, key);
+
+      // 写入成功后清 Next.js 缓存
+      (revalidateTag as any)('video-categories');
+      (revalidateTag as any)('video-config');
+
       return NextResponse.json({ success: true });
     }
 
@@ -109,6 +117,10 @@ export async function POST(req: NextRequest) {
       });
     }
 
+    // 写入成功后清 Next.js 缓存
+    (revalidateTag as any)('video-categories');
+    (revalidateTag as any)('video-config');
+
     return NextResponse.json({ success: true });
   } catch (error: any) {
     console.error('POST /api/admin/videosys-categories error:', error);
@@ -116,6 +128,7 @@ export async function POST(req: NextRequest) {
   }
 }
 
+// ========== PUT ==========
 export async function PUT(req: NextRequest) {
   // 保留 PUT 兼容（与 POST 逻辑相同，但只处理更新，不处理新建）
   try {
@@ -148,6 +161,10 @@ export async function PUT(req: NextRequest) {
       isSystem: category.isSystem,
     });
 
+    // 写入成功后清 Next.js 缓存
+    (revalidateTag as any)('video-categories');
+    (revalidateTag as any)('video-config');
+
     return NextResponse.json({ success: true });
   } catch (error: any) {
     console.error('PUT /api/admin/videosys-categories error:', error);
@@ -155,6 +172,7 @@ export async function PUT(req: NextRequest) {
   }
 }
 
+// ========== DELETE ==========
 export async function DELETE(req: NextRequest) {
   try {
     const searchParams = req.nextUrl.searchParams;
@@ -171,6 +189,11 @@ export async function DELETE(req: NextRequest) {
     }
 
     await deleteCategory(locale, key);
+
+    // 写入成功后清 Next.js 缓存
+    (revalidateTag as any)('video-categories');
+    (revalidateTag as any)('video-config');
+
     return NextResponse.json({ success: true });
   } catch (error: any) {
     console.error('DELETE /api/admin/videosys-categories error:', error);

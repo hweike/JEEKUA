@@ -1,3 +1,4 @@
+// app/admin/settings/header-footer/components/HeaderFooterCategory.tsx
 'use client';
 
 import { useState } from 'react';
@@ -16,6 +17,8 @@ interface HeaderFooterCategoryProps {
   availableLocales: string[];
   onRefresh: () => void;
   onInit: (locale: string) => Promise<void>;
+  // 新增：AI 翻译回调
+  onAiTranslate?: (locale: string, type: 'header' | 'footer') => void;
 }
 
 export default function HeaderFooterCategory({
@@ -25,6 +28,7 @@ export default function HeaderFooterCategory({
   availableLocales,
   onRefresh,
   onInit,
+  onAiTranslate,
 }: HeaderFooterCategoryProps) {
   const [collapsed, setCollapsed] = useState(false);
 
@@ -65,6 +69,7 @@ export default function HeaderFooterCategory({
                   availableLocales={availableLocales}
                   onRefresh={onRefresh}
                   onInit={onInit}
+                  onAiTranslate={onAiTranslate}
                 />
               ))}
             </div>

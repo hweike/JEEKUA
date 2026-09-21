@@ -1,9 +1,14 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { getImageUrl } from '@/lib/files/url';
 import { DEFAULT_PICWITH_TEXT } from '@/lib/webbuilder/defaults/PicwithText';
 import { getAltSuffix } from '@/lib/webbuilder/alt-suffix-config';
+
+// ✅ 入场动画参数（硬编码）
+const ANIMATION_DURATION_MS = 700;
+const IMAGE_DELAY_MS = 0;
+const CONTENT_DELAY_MS = 150;
 
 function getDisplayImageUrl(url: string, isEditMode: boolean): string {
   if (!url) return '';
@@ -95,7 +100,7 @@ export function PicwithText(props: any) {
   } = mergedPaddingGroup;
 
   const {
-    mobileScaleFactor = 0.7,  // 默认 0.7
+    mobileScaleFactor = 0.7,
   } = mergedSpacingGroup;
 
   // Alt 自动生成
@@ -106,6 +111,38 @@ export function PicwithText(props: any) {
   const alt = seoTitle ? `${seoTitle} - ${suffix}` : suffix;
 
   const displayImageUrl = getDisplayImageUrl(imageUrl, isEditMode);
+
+  // ✅ 入场动画状态
+  const containerRef = useRef<HTMLDivElement>(null);
+  const [hasEntered, setHasEntered] = useState(false);
+
+  useEffect(() => {
+    if (isEditMode) {
+      setHasEntered(true);
+      return;
+    }
+
+    const el = containerRef.current;
+    if (!el) {
+      setHasEntered(true);
+      return;
+    }
+
+    const observer = new IntersectionObserver(
+      (entries) => {
+        entries.forEach((entry) => {
+          if (entry.isIntersecting) {
+            setHasEntered(true);
+            observer.unobserve(entry.target);
+          }
+        });
+      },
+      { threshold: 0.15 }
+    );
+
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [isEditMode]);
 
   const outerStyle: React.CSSProperties = {
     backgroundColor: mergedBackgroundColor,
@@ -172,9 +209,25 @@ export function PicwithText(props: any) {
     );
   }
 
+  // ✅ 图片入场：从下方 + 缩放（横滑方向由 imageFirst 决定）
+  const imageEnterStyle: React.CSSProperties = {
+    opacity: hasEntered ? 1 : 0,
+    transform: hasEntered ? 'translateX(0) scale(1)' : `translateX(${imageFirst ? '-40px' : '40px'}) scale(0.95)`,
+    transition: `opacity ${ANIMATION_DURATION_MS}ms ease-out ${IMAGE_DELAY_MS}ms, transform ${ANIMATION_DURATION_MS}ms ease-out ${IMAGE_DELAY_MS}ms`,
+    willChange: 'opacity, transform',
+  };
+
+  // ✅ 文字入场：从相反方向 + 淡入
+  const contentEnterStyle: React.CSSProperties = {
+    opacity: hasEntered ? 1 : 0,
+    transform: hasEntered ? 'translateX(0)' : `translateX(${imageFirst ? '40px' : '-40px'})`,
+    transition: `opacity ${ANIMATION_DURATION_MS}ms ease-out ${CONTENT_DELAY_MS}ms, transform ${ANIMATION_DURATION_MS}ms ease-out ${CONTENT_DELAY_MS}ms`,
+    willChange: 'opacity, transform',
+  };
+
   return (
     <div ref={props.puck?.dragRef} className={outerClasses} style={outerStyle}>
-      <div className="relative w-full">
+      <div className="relative w-full" ref={containerRef}>
         <div style={contentStyle}>
           <div
             style={{
@@ -190,7 +243,8 @@ export function PicwithText(props: any) {
                 imageFirst ? '' : 'md:flex-row-reverse'
               }`}
             >
-              <div className={`w-full md:${imageWidthClass} flex-shrink-0`}>
+              {/* ✅ 图片入场 */}
+              <div className={`w-full md:${imageWidthClass} flex-shrink-0`} style={imageEnterStyle}>
                 <div className={`relative overflow-hidden rounded-lg ${animationClass}`} style={{ height: imageHeightStyle }}>
                   {displayImageUrl ? (
                     <img
@@ -198,6 +252,7 @@ export function PicwithText(props: any) {
                       alt={alt}
                       className="w-full h-full object-cover"
                       loading="lazy"
+                      decoding="async"
                     />
                   ) : (
                     <div className="w-full h-full bg-gray-200 flex items-center justify-center text-gray-400">
@@ -207,7 +262,8 @@ export function PicwithText(props: any) {
                 </div>
               </div>
 
-              <div className={`flex-1 text-${textAlign}`}>
+              {/* ✅ 文字入场 */}
+              <div className={`flex-1 text-${textAlign}`} style={contentEnterStyle}>
                 <div style={textAreaStyle}>
                   {title && (
                     <div

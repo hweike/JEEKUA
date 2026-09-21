@@ -8,8 +8,18 @@ import { blogPostAdapter } from '../services/blog-post.service';
 import { videoCategoryAdapter } from '../services/video-category.service';
 import { videoAdapter } from '../services/video.service';
 import { pageAdapter } from '../services/page.service';
+import { menuAdapter } from '../services/menu.service';
+import { headerFooterAdapter } from '../services/header-footer.service';
+import { productLineAdapter } from '../services/product-line.service';
 
 export const registry: RegisteredType[] = [
+  {
+    type: 'product-line',
+    label: '产品线',
+    service: productLineAdapter,
+    supportedLanguages: [],
+    exportLimit: null, // 无限制
+  },
   {
     type: 'product-category',
     label: '产品分类',
@@ -68,7 +78,22 @@ export const registry: RegisteredType[] = [
   service: pageAdapter,
   supportedLanguages: [],
   exportLimit: 1,  // 每次一篇
-}
+  },
+  {
+    type: 'menu',
+    label: '菜单',
+    service: menuAdapter,
+    supportedLanguages: [],
+    exportLimit: 1, // 每次一个菜单类型
+  },
+
+  {
+    type: 'header-footer',
+    label: '页头/页脚',
+    service: headerFooterAdapter,
+    supportedLanguages: [],
+    exportLimit: 1, // 每次一个（header 或 footer）
+  },
 ];
 
 export function getRegisteredType(type: string): RegisteredType | undefined {

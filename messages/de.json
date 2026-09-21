@@ -1,5 +1,5 @@
 {
- "Common": {
+  "Common": {
     "search_placeholder": "搜索...",
     "subscribe_success": "订阅成功！",
     "subscribe_error": "订阅失败，请重试。",
@@ -27,6 +27,14 @@
     "success": "提交成功！",
     "thanks": "感谢您的询盘，我们会尽快回复您。",
     "error": "提交失败，请稍后重试。"
+  },
+  "Search": {
+    "meta_title": "搜索 - 您的网站",
+    "meta_description": "在网站中搜索您需要的内容",
+    "title": "搜索",
+    "subtitle": "输入关键词，查找产品、页面或文章",
+    "result_count": "找到 {count} 条关于 “{term}” 的结果",
+    "no_results": "未找到相关结果",
+    "no_results_hint": "请尝试其他关键词或检查拼写"
   }
 }
-

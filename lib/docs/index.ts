@@ -26,3 +26,12 @@ export { getDocsTree } from './tree';
 
 // ========== 类型定义 ==========
 export type { DocsLib, Doc, DocIndex, TreeNode } from './types';
+
+// ========== 新增：SEO 缓存版本 ==========
+export {
+  getCachedDocsLibBySlug,
+  getCachedDocBySlug,
+  getCachedDocsTree,
+  getCachedDocCount,
+  getCachedFirstDoc,
+} from './seo-cache';

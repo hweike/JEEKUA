@@ -1,32 +1,478 @@
 {
- "Common": {
-    "search_placeholder": "搜索...",
-    "subscribe_success": "订阅成功！",
-    "subscribe_error": "订阅失败，请重试。",
-    "subscribe_loading": "提交中...",
-    "close": "关闭",
-    "submit": "提交"
+  "Shared": {
+    "submit": "Submit",
+    "cancel": "Cancel",
+    "save": "Save",
+    "saving": "Saving...",
+    "loading": "Loading...",
+    "back": "Back",
+    "refresh": "Refresh",
+    "noData": "No data",
+    "email": "Email",
+    "name": "Name",
+    "phone": "Phone",
+    "company": "Company",
+    "updateFailed": "Update failed, please try again",
+    "search": "Search",
+    "close": "Close",
+    "searchPlaceholder": "Search..."
   },
-  "Home": {
-    "title": "MORNSUN 电源解决方案",
-    "subtitle": "一站式工业电源解决方案提供商",
-    "description": "作为 MORNSUN 官方授权分销商，我们提供 100% 原装正品、专业技术支持和有竞争力的价格。",
-    "cta": "查看产品目录"
+  "common": {
+    "home": "Home",
+    "products": "Products",
+    "collections": "Product Collections",
+    "docs": "Docs"
+  },
+  "Login": {
+    "title": "Sign in",
+    "subtitle": "Sign in or create an account",
+    "emailLabel": "Email address",
+    "emailPlaceholder": "your@email.com",
+    "continueButton": "Continue with email",
+    "sending": "Sending...",
+    "codeSent": "We sent a verification code to {email}",
+    "codeLabel": "Verification code",
+    "codePlaceholder": "6-digit code",
+    "back": "Back",
+    "resendIn": "Resend in {seconds}s",
+    "resendButton": "Resend code",
+    "verifying": "Verifying...",
+    "verifyButton": "Sign in / Create account",
+    "terms": "By continuing, you agree to our Terms of Service and Privacy Policy.",
+    "error": {
+      "emailInvalid": "Please enter a valid email address",
+      "sendFailed": "Failed to send, please try again",
+      "network": "Network error, please try again",
+      "codeInvalid": "Please enter a 6-digit code",
+      "verifyFailed": "Verification failed, please try again"
+    }
+  },
+  "Search": {
+    "meta_title": "Search",
+    "meta_title_with_query": "{query} - Search",
+    "meta_description": "Search products, articles and more",
+    "meta_description_with_query": "Search results for \"{query}\"",
+    "title": "Search",
+    "subtitle": "Enter keywords to find what you need",
+    "result_count": "Found {count} results for \"{term}\"",
+    "no_results": "No results found",
+    "no_results_hint": "Please try different keywords or adjust your filters",
+    "breadcrumb_home": "Home",
+    "breadcrumb_search": "Search",
+    "placeholder": "Search for products, pages, blogs...",
+    "submit": "Search",
+    "types": {
+    "product": "Product",
+    "page": "Page",
+    "blogPost": "Blog",
+    "doc": "Document",
+    "video": "Video"
+      },
+      "pagination": {
+        "prev": "Previous",
+        "next": "Next",
+        "pageInfo": "Page {current} of {total}"
+      }
   },
   "Inquiry": {
-    "title": "询盘",
-    "subtitle": "请填写以下信息，我们将尽快与您联系",
-    "name": "姓名",
-    "email": "邮箱",
-    "company": "公司",
-    "phone": "电话",
-    "message": "询盘内容",
-    "relatedProduct": "关联产品",
-    "submit": "提交询盘",
-    "submitting": "提交中...",
-    "success": "提交成功！",
-    "thanks": "感谢您的询盘，我们会尽快回复您。",
-    "error": "提交失败，请稍后重试。"
+    "title": "Send Inquiry",
+    "fields": {
+      "name": "Enter your name",
+      "email": "Enter your email",
+      "phone": "Enter your whatsapp, wechat...",
+      "message": "Enter model number or product details..."
+    },
+    "brandLabel": "Brand",
+    "relatedProduct": "Related product",
+    "send": "Send",
+    "sending": "Sending...",
+    "success": "Thank you! Your inquiry has been sent.",
+    "thanks": "We'll get back to you soon.",
+    "error": "Something went wrong. Please try again."
+  },
+  "Blog": {
+    "authorPrefix": "Author: ",
+    "tags": "Tags",
+    "breadcrumb": {
+      "home": "Home",
+      "blog": "Blog"
+    },
+    "fallback": {
+      "home": {
+        "name": "Blog",
+        "description": "latest insights and trends"
+      },
+      "category": {
+        "suffix": "Category"
+      },
+      "post": {
+        "suffix": "Post"
+      }
+    }
+  },
+  "Docs": {
+    "noContent": "No content"
+  },
+  "Video": {
+    "updatedOn": "Updated on",
+    "categoryLabel": "Category: ",
+    "introduction": "Introduction",
+    "details": "Details",
+    "breadcrumb": { "home": "Home", "video": "Video" },
+    "fallback": {
+      "home": {
+        "description": "latest videos"
+      },
+      "category": {
+        "description": "related videos"
+      }
+    }
+  },
+  "Components": {
+    "BlogBlock": {
+      "placeholder": "〖Blog Display Area〗",
+      "categories": "Categories",
+      "all": "All",
+      "title": "Blog",
+      "loading": "Loading...",
+      "noPosts": "No posts yet",
+      "prev": "Previous",
+      "page": "Page",
+      "of": "of",
+      "next": "Next"
+    },
+    "DocumentLibrary": {
+      "placeholder": "〖Document Library Display Area〗",
+      "loading": "Loading...",
+      "noContent": "No content",
+      "selectPrompt": "Please select a document from the left",
+      "relatedProducts": "Related Products",
+      "loadingProducts": "Loading related products..."
+    },
+    "VideoCategory": {
+      "placeholder": "〖Video Category Display Area〗",
+      "title": "Video Channel",
+      "all": "All",
+      "loading": "Loading...",
+      "noVideos": "No videos yet",
+      "noCover": "No cover",
+      "prev": "Previous",
+      "page": "Page",
+      "of": "of",
+      "next": "Next"
+    },
+    "ProductLine": {
+      "placeholder": "〖Product Line Display Area〗",
+      "noProducts": "No products",
+      "productCount": "{count} products total",
+      "pageInfo": "Page {current} of {total}",
+      "prev": "Previous",
+      "next": "Next",
+      "expand": "Show more",
+      "collapse": "Collapse"
+    },
+    "IndustrialProductLine": {
+      "placeholder": "〖Industrial Product Line Display Area〗",
+      "editModeTitle": "🏭 Industrial Product Line (Collapsible Table)",
+      "editModeHint": "In preview or publish mode, the category tree and product collapsible table will be displayed",
+      "sidebarEnabled": "Sidebar enabled",
+      "noProducts": "No products in this category",
+      "expand": "Show more",
+      "collapse": "Collapse",
+      "prev": "Previous",
+      "next": "Next",
+      "pageInfo": "Page {current} of {total}"
+    },
+    "ProductCollections": {
+      "placeholder": "〖Product Collection Display Area〗",
+      "noProducts": "No products",
+      "inStock": "In stock",
+      "outOfStock": "Out of stock",
+      "minPrice": "Min",
+      "maxPrice": "Max",
+      "clearFilters": "Clear filters",
+      "sortLabel": "Sort by:",
+      "productCount": "{count} items on this page, {total} total",
+      "prev": "Previous",
+      "next": "Next",
+      "pageInfo": "Page {current} of {total} ({totalItems} items)",
+      "expand": "Show more",
+      "collapse": "Collapse",
+      "sortOptions": {
+        "titleAsc": "Alphabetically, A-Z",
+        "titleDesc": "Alphabetically, Z-A",
+        "priceAsc": "Price, low to high",
+        "priceDesc": "Price, high to low",
+        "createdAsc": "Date, old to new",
+        "createdDesc": "Date, new to old"
+      }
+    },
+    "ProductDetails": {
+      "placeholder": "〖Product Details Display Area〗",
+      "loading": "Loading...",
+      "brand": "Brand",
+      "inquiry": "Send Inquiry",
+      "chat": "Live Chat",
+      "variants": "Product Variants",
+      "variantDetail": "View Details",
+      "specTitle": "Specifications",
+      "stockLogistics": "Stock & Logistics",
+      "stockStatus": "Stock Status",
+      "inStock": "In Stock",
+      "outOfStock": "Out of Stock",
+      "preOrder": "Pre-order",
+      "shipping": "Shipping",
+      "freeShipping": "Free Shipping",
+      "returnDays": "Return Days",
+      "days": "days",
+      "params": "Product Parameters",
+      "description": "Description",
+      "prev": "Previous",
+      "next": "Next",
+      "close": "Close Inquiry Window",
+      "variantAttributes": {
+        "expand": "▼",
+        "collapse": "▶"
+      },
+      "priceTiers": {
+        "unit": "units",
+        "range": "{min} - {max} units",
+        "min": "≥ {min} units"
+      }
+    },
+    "ChatForm": {
+      "title": "Live Chat",
+      "emailPlaceholder": "Please enter your email *",
+      "namePlaceholder": "Your name (optional)",
+      "temporaryNameHint": "Will use \"{visitorId}\" as your temporary name",
+      "connecting": "Connecting...",
+      "startChat": "Start Chat",
+      "footerNote": "We will reply to you via the email you provided"
+    },
+    "ChatWidget": {
+      "title": "Live Chat",
+      "openChatAriaLabel": "Open chat",
+      "visitorFallback": "Visitor",
+      "imagePlaceholder": "📷 Image",
+      "loadingMessagesFailed": "Failed to load messages",
+      "createConversationFailed": "Failed to create conversation",
+      "sessionExpired": "Session expired, please start a new chat",
+      "welcome": "Hello, welcome! Please leave your email and we will get back to you soon.",
+      "sendFailed": "Failed to send, please try again"
+    },
+    "ChatWindow": {
+      "adminTeam": "Support Team",
+      "online": "Online",
+      "busy": "Busy",
+      "disconnected": "Disconnected, reconnecting...",
+      "inputPlaceholder": "Type a message...",
+      "inputConnecting": "Connecting...",
+      "imageUploadError": "Please select an image file",
+      "imageSizeError": "Image size cannot exceed 5MB",
+      "uploadFailed": "Failed to upload image, please try again",
+      "imagePlaceholder": "📷 Image",
+      "defaultAvatar": "S"
+    }
+  },
+  "Account": {
+    "title": "My Account",
+    "profile": "Profile",
+    "orders": "Orders",
+    "inquiry": "Inquiry",
+    "logout": "Logout",
+    "Dashboard": {
+      "profileTitle": "Profile Information",
+      "emailLabel": "Email",
+      "nameLabel": "Name",
+      "countryLabel": "Country",
+      "editButton": "Edit",
+      "marketingTitle": "Marketing preferences",
+      "subscriptionLabel": "Email subscription",
+      "subscribedDesc": "You're subscribed! You'll receive email marketing from our website.",
+      "unsubscribedDesc": "Unsubscribe from emails? You'll no longer receive email marketing from our website.",
+      "saving": "Saving...",
+      "addressesTitle": "Addresses",
+      "noAddresses": "No addresses yet. Add one now.",
+      "addAddress": "Add address",
+      "defaultBadge": "Default",
+      "deleteConfirm": "Delete this address?",
+      "setDefault": "Set default",
+      "delete": "Delete",
+      "saveFailed": "Failed to save address",
+      "updateFailed": "Failed to update preference",
+      "addTitle": "Add Address",
+      "editTitle": "Edit Address"
+    },
+    "AddressForm": {
+      "country": "Country/region",
+      "countryRequired": "Country/region *",
+      "firstName": "First name",
+      "firstNameRequired": "First name *",
+      "lastName": "Last name",
+      "lastNameRequired": "Last name *",
+      "company": "Company",
+      "fullAddress": "Full address",
+      "fullAddressRequired": "Full address *",
+      "apartment": "Apartment, suite, etc (optional)",
+      "city": "City",
+      "cityRequired": "City *",
+      "province": "Province",
+      "provinceRequired": "Province *",
+      "postalCode": "Postal code",
+      "phone": "Phone",
+      "phoneRequired": "Phone *",
+      "phonePlaceholder": "Enter local number",
+      "defaultAddress": "This is my default address",
+      "cancel": "Cancel",
+      "save": "Save",
+      "editTitle": "Edit Address",
+      "addTitle": "Add Address",
+      "fillAllFields": "Please fill in all required fields"
+    },
+    "Profile": {
+      "title": "Edit Profile",
+      "firstName": "First Name",
+      "lastName": "Last Name",
+      "emailNote": "This email is used for sign-in and order updates.",
+      "country": "Country",
+      "selectCountry": "Select Country"
+    },
+    "Inquiry": {
+      "title": "My Inquiries",
+      "history": "Inquiry History",
+      "newInquiry": "New Inquiry",
+      "noInquiries": "No inquiries yet",
+      "status": {
+        "pending": "Pending",
+        "processing": "Processing",
+        "replied": "Replied",
+        "closed": "Closed"
+      },
+      "noReplies": "No replies yet",
+      "replyPlaceholder": "Type your reply...",
+      "sendReply": "Send Reply",
+      "sending": "Sending...",
+      "createTitle": "Create New Inquiry",
+      "createMessage": "Inquiry Message",
+      "createMessagePlaceholder": "Please describe your needs or questions in detail...",
+      "productId": "Related Product (Optional)",
+      "productIdPlaceholder": "Product ID or name",
+      "productIdNote": "If you have a specific product, fill it in so we can locate it quickly",
+      "submit": "Submit Inquiry",
+      "submitting": "Submitting...",
+      "emptyDetail": "Click an inquiry on the left to view details, or click 'New Inquiry' to start one.",
+      "refresh": "Refresh",
+      "noContent": "No content",
+      "nameLabel": "Name",
+      "emailLabel": "Email",
+      "companyLabel": "Company",
+      "phoneLabel": "Phone",
+      "productLabel": "Related Product",
+      "errorFetchList": "Failed to fetch inquiry list",
+      "errorFetchDetail": "Failed to fetch details",
+      "errorReply": "Failed to send reply",
+      "errorCreate": "Failed to submit inquiry"
+    },
+    "Orders": {
+      "title": "My Orders",
+      "noOrders": "No Orders",
+      "noOrdersDesc": "You don't have any orders yet",
+      "totalLabel": "Total {count} orders",
+      "orderNo": "Order No.",
+      "contractNo": "Contract No.",
+      "buyer": "Buyer",
+      "product": "Product",
+      "amount": "Amount",
+      "status": "Status",
+      "shipping": "Shipping",
+      "createdAt": "Created At",
+      "viewDetail": "View Details",
+      "payment": "Payment",
+      "paid": "Paid",
+      "pending": "Pending Payment",
+      "completed": "Completed",
+      "cancelled": "Cancelled",
+      "expired": "Expired",
+      "draft": "Draft",
+      "formal": "Formal Order",
+      "sent": "Sent",
+      "deposit": "Deposit",
+      "balance": "Balance",
+      "paymentStatus": {
+        "unpaid": "Unpaid",
+        "partial_paid": "Partial Paid",
+        "fully_paid": "Fully Paid"
+      },
+      "shippingInfo": "Shipping Information",
+      "productInfo": "Product Information",
+      "noProduct": "No Product",
+      "unknownProduct": "Unnamed Product",
+      "plusItems": "+{count} more items",
+      "loading": "Loading orders...",
+      "errorLoading": "Failed to load orders"
+    }
+  },
+  "email": {
+    "login": {
+      "subject": "Login Verification Code",
+      "title": "Login Verification Code",
+      "enterCode": "You are logging in, please enter the verification code below",
+      "validity": "⏱ Verification code valid for 10 minutes",
+      "doNotShare": "🔒 Please do not share this code with others",
+      "autoGenerated": "This email is auto-generated, please do not reply",
+      "ignoreIfNotRequested": "If you did not request this, please ignore this email"
+    },
+    "subscription": {
+      "confirmSubject": "Subscription Confirmed - {siteName}",
+      "thankYou": "Thank You for Subscribing!",
+      "confirmSuccess": "You have successfully subscribed to {siteName}",
+      "confirmBadge": "Subscription Confirmed",
+      "greeting": "Dear Subscriber,",
+      "welcome": "Thank you for subscribing to our newsletter! You will receive:",
+      "benefit1": "Latest product updates and news",
+      "benefit2": "Tips and industry insights",
+      "benefit3": "Exclusive offers and event notifications",
+      "unsubscribeHint": "You can unsubscribe anytime by clicking the link at the bottom of this email.",
+      "autoGenerated": "This email is auto-generated, please do not reply",
+      "unsubscribeLink": "Unsubscribe"
+    },
+    "order": {
+      "subject": "Order #{orderId} - {siteName}",
+      "title": "Order Generated",
+      "orderId": "Order ID",
+      "amount": "Amount",
+      "dueDate": "Due Date",
+      "viewButton": "View Full Order",
+      "downloadPdf": "Download PDF",
+      "autoGenerated": "This email is auto-generated, please do not reply"
+    }
+  },
+  "Addresses": {
+    "title": "Addresses",
+    "addButton": "Add Address",
+    "noAddresses": "No addresses yet. Add one now.",
+    "defaultBadge": "Default",
+    "setDefault": "Set default",
+    "deleteConfirm": "Delete this address?",
+    "saveFailed": "Failed to save address",
+    "addTitle": "Add Address",
+    "editTitle": "Edit Address",
+    "form": {
+      "country": "Country/region *",
+      "firstName": "First name *",
+      "lastName": "Last name *",
+      "fullName": "Full Name",
+      "company": "Company",
+      "fullAddress": "Full address *",
+      "apartment": "Apartment, suite, etc (optional)",
+      "city": "City *",
+      "province": "Province *",
+      "postalCode": "Postal code",
+      "phone": "Phone *",
+      "phonePlaceholder": "Phone number",
+      "defaultCheckbox": "Set as default address",
+      "setDefault": "Set as default address",
+      "fillAllFields": "Please fill in all required fields"
+    }
   }
 }
-

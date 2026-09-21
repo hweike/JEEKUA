@@ -14,6 +14,8 @@ import { config as DocumentLibraryBlockConfig } from './registry/DocumentLibrary
 import { config as FullwidthSliderConfig } from './registry/FullwidthSlider.config';
 import { config as HeadingConfig } from './registry/Heading.config';
 import { config as ImageBannerConfig } from './registry/ImageBanner.config';
+import { config as IndustrialProductLineBlockConfig } from './registry/IndustrialProductLineBlock.config';
+import { config as InquiryBlockConfig } from './registry/InquiryBlock.config';
 import { config as ListConfig } from './registry/List.config';
 import { config as MulticolumnConfig } from './registry/Multicolumn.config';
 import { config as MultirowConfig } from './registry/Multirow.config';
@@ -24,9 +26,16 @@ import { config as ProductDetailsBlockConfig } from './registry/ProductDetailsBl
 import { config as ProductLineBlockConfig } from './registry/ProductLineBlock.config';
 import { config as RichtextConfig } from './registry/Richtext.config';
 import { config as SectionConfig } from './registry/Section.config';
-import { config as TableConfig } from './registry/Table.config';
 import { config as VideoConfig } from './registry/Video.config';
 import { config as VideoCategoryBlockConfig } from './registry/VideoCategoryBlock.config';
+import { config as PricingBlockConfig } from './registry/PricingBlock.config';
+import { config as ComparisonTableBlockConfig } from './registry/ComparisonTableBlock.config';
+import { config as TabbedContentBlockConfig } from './registry/TabbedContentBlock.config';
+import { config as ProductShowcaseBlockConfig } from './registry/ProductShowcaseBlock.config';
+import { config as ProductCarouselBlockConfig } from './registry/ProductCarouselBlock.config';
+import { config as ProductRankingBlockConfig } from './registry/ProductRankingBlock.config';
+import { config as ProductCategoriesBlockConfig } from './registry/ProductCategoriesBlock.config';
+import { config as BlogPostsBlockConfig } from './registry/BlogPostsBlock.config';
 
 
 // 🔥 直接导出组件配置对象，符合 Puck Config 的 components 字段格式
@@ -42,6 +51,8 @@ export default {
   FullwidthSlider: FullwidthSliderConfig,
   Heading: HeadingConfig,
   ImageBanner: ImageBannerConfig,
+  IndustrialProductLineBlock: IndustrialProductLineBlockConfig,
+  InquiryBlock: InquiryBlockConfig,
   List: ListConfig,
   Multicolumn: MulticolumnConfig,
   Multirow: MultirowConfig,
@@ -52,8 +63,14 @@ export default {
   ProductLineBlock: ProductLineBlockConfig,
   Richtext: RichtextConfig,
   Section: SectionConfig,
-  // Table: TableConfig,
   Video: VideoConfig,
   VideoCategoryBlock: VideoCategoryBlockConfig,
-  
+  PricingBlock: PricingBlockConfig,
+  ComparisonTableBlock: ComparisonTableBlockConfig,
+  TabbedContentBlock: TabbedContentBlockConfig,
+  ProductShowcaseBlock: ProductShowcaseBlockConfig,
+  ProductCarouselBlock: ProductCarouselBlockConfig,
+  ProductRankingBlock: ProductRankingBlockConfig, 
+  ProductCategoriesBlock: ProductCategoriesBlockConfig, 
+   BlogPostsBlock: BlogPostsBlockConfig,
 };

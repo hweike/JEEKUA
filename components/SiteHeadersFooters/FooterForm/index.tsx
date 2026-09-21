@@ -19,7 +19,7 @@ import {
   FaTwitter,
   FaSnapchat,
   FaPinterest,
-  FaTumblr,
+  FaLinkedin,
   FaVimeo,
 } from 'react-icons/fa';
 
@@ -31,11 +31,25 @@ const platformIcons: Record<string, React.ComponentType<{ className?: string }>>
   twitter: FaTwitter,
   snapchat: FaSnapchat,
   pinterest: FaPinterest,
-  tumblr: FaTumblr,
+  linkedin: FaLinkedin,
   vimeo: FaVimeo,
 };
 
-const footerSchema = z.object({
+// 硬编码平台值，确保 z.enum 推导出字面量联合类型，与 SocialLink['platform'] 完全匹配
+const platformEnum = z.enum([
+  'facebook',
+  'instagram',
+  'youtube',
+  'tiktok',
+  'twitter',
+  'snapchat',
+  'pinterest',
+  'linkedin',
+  'vimeo',
+] as const);
+
+// 声明 schema 类型为 FooterConfig，确保 useForm<FooterConfig> 兼容
+const footerSchema: z.ZodType<FooterConfig> = z.object({
   style: z.enum(['simple', 'classic', 'luxury']),
   emailSubscription: z.object({
     enabled: z.boolean(),
@@ -68,8 +82,8 @@ const footerSchema = z.object({
   social: z.object({
     visible: z.boolean(),
     links: z.array(z.object({
-      platform: z.enum(['facebook', 'instagram', 'youtube', 'tiktok', 'twitter', 'snapchat', 'pinterest', 'tumblr', 'vimeo']),
-      url: z.string(),
+      platform: platformEnum,
+      url: z.string().url('请输入有效的URL地址'),
     })),
   }),
   utilities: z.object({
@@ -88,12 +102,17 @@ interface FooterFormProps {
   initialConfig: FooterConfig;
   locale: string;
   onSave?: (success: boolean, message?: string) => void;
+  styleReadonly?: boolean;
+  showSubmitButton?: boolean;
 }
 
-// 构建完整默认值的函数（确保所有字段存在）
 function buildDefaultValues(config: FooterConfig): FooterConfig {
-  console.log('[FooterForm] 原始 config:', config);
-  const result = {
+  const validPlatforms = SOCIAL_PLATFORMS.map(p => p.value);
+  const filteredLinks = (config.social?.links || []).filter(
+    link => validPlatforms.includes(link.platform)
+  );
+
+  return {
     style: config.style || 'simple',
     emailSubscription: {
       enabled: config.emailSubscription?.enabled ?? false,
@@ -125,7 +144,7 @@ function buildDefaultValues(config: FooterConfig): FooterConfig {
     },
     social: {
       visible: config.social?.visible ?? false,
-      links: config.social?.links || [],
+      links: filteredLinks,
     },
     utilities: {
       showPolicyLinks: config.utilities?.showPolicyLinks ?? false,
@@ -138,23 +157,36 @@ function buildDefaultValues(config: FooterConfig): FooterConfig {
       content: config.textInfo?.content || '',
     },
   };
-  console.log('[FooterForm] 构建的默认值:', result);
-  return result;
 }
 
-export default function FooterForm({ initialConfig, locale, onSave }: FooterFormProps) {
+export default function FooterForm({
+  initialConfig,
+  locale,
+  onSave,
+  styleReadonly = false,
+  showSubmitButton = true,
+}: FooterFormProps) {
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
-
-  // 生成默认值（仅在 initialConfig 变化时重新生成）
   const [defaultValues] = useState(() => buildDefaultValues(initialConfig));
 
-  const { register, control, handleSubmit, watch, setValue } = useForm({
+  // 显式指定泛型为 FooterConfig，schema 已声明为 ZodType<FooterConfig>，所以完全兼容
+  const { register, control, handleSubmit, watch, setValue, reset } = useForm<FooterConfig>({
     resolver: zodResolver(footerSchema),
     defaultValues,
-    shouldUnregister: false, // 保持字段注册，避免丢失
+    shouldUnregister: false,
   });
 
-  // 调试：打印当前表单值变化（可选）
+  useEffect(() => {
+    const newDefaultValues = buildDefaultValues(initialConfig);
+    reset(newDefaultValues);
+  }, [initialConfig, reset]);
+
+  useEffect(() => {
+    if (styleReadonly) {
+      setValue('style', 'simple');
+    }
+  }, [styleReadonly, setValue]);
+
   useEffect(() => {
     const subscription = watch((value) => {
       console.log('[FooterForm] 表单值变化:', value);
@@ -170,7 +202,6 @@ export default function FooterForm({ initialConfig, locale, onSave }: FooterForm
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ type: 'footer', locale, config: data }),
       });
-      console.log('[FooterForm] 响应状态:', res.status);
       if (res.ok) {
         const msg = '保存成功';
         setToast({ message: msg, type: 'success' });
@@ -190,11 +221,10 @@ export default function FooterForm({ initialConfig, locale, onSave }: FooterForm
   };
 
   const onError = (errors: any) => {
-    console.error('[FooterForm] 表单验证错误:', errors);
+    console.error('[FooterForm] 表单验证错误详情:', JSON.stringify(errors, null, 2));
     setToast({ message: '表单数据有误，请检查红色字段', type: 'error' });
   };
 
-  // 社交链接更新（保持不变）
   const updateSocialLink = (platform: SocialLink['platform'], url: string) => {
     const currentLinks = watch('social.links') || [];
     const existingIndex = currentLinks.findIndex(link => link.platform === platform);
@@ -221,24 +251,39 @@ export default function FooterForm({ initialConfig, locale, onSave }: FooterForm
     return link?.url || '';
   };
 
+  // 过滤函数：排除 menuType === 'navigation' 的菜单
+  const filterMenus = (menu: any) => {
+    const isNavigation =
+      menu.id === 'navigation' ||
+      menu.type === 'navigation' ||
+      menu.menuType === 'navigation';
+    return !isNavigation;
+  };
+
   return (
     <>
       <form onSubmit={handleSubmit(onSubmit, onError)} className="space-y-8">
-        {/* ========== 页脚风格卡片 ========== */}
+        {/* 页脚风格卡片 */}
         <div className="border rounded-lg p-6 space-y-4">
           <h2 className="text-lg font-semibold">页脚风格</h2>
           <div>
             <label className="block text-sm font-medium mb-2">选择风格</label>
-            <select {...register('style')} className="w-full border rounded px-3 py-2">
+            <select
+              {...register('style')}
+              disabled={styleReadonly}
+              className={`w-full border rounded px-3 py-2 ${styleReadonly ? 'bg-gray-100 cursor-not-allowed' : ''}`}
+            >
               <option value="simple">简洁风格</option>
               <option value="classic">经典风格</option>
               <option value="luxury">轻奢展示</option>
             </select>
-            <p className="text-xs text-gray-500 mt-1">不同风格影响前台页脚的布局和视觉效果</p>
+            {styleReadonly && (
+              <p className="text-xs text-gray-500 mt-1">当前仅支持“简洁风格”，其他风格开发中</p>
+            )}
           </div>
         </div>
 
-        {/* ========== 电子邮件注册 ========== */}
+        {/* 电子邮件注册 */}
         <div className="border rounded-lg p-6 space-y-4">
           <div className="flex justify-between items-center">
             <h2 className="text-lg font-semibold">电子邮件注册</h2>
@@ -264,10 +309,10 @@ export default function FooterForm({ initialConfig, locale, onSave }: FooterForm
           )}
         </div>
 
-        {/* ========== 标识与菜单 ========== */}
+        {/* 标识与菜单 */}
         <div className="border rounded-lg p-6 space-y-6">
           <h2 className="text-lg font-semibold">标识与菜单</h2>
-          
+
           <div className="border-b pb-4">
             <div className="flex justify-between items-center">
               <span className="text-md font-medium">网站标识</span>
@@ -306,6 +351,7 @@ export default function FooterForm({ initialConfig, locale, onSave }: FooterForm
             )}
           </div>
 
+          {/* 菜单-1 */}
           <div className="border-b pb-4">
             <div className="flex justify-between items-center">
               <span className="text-md font-medium">菜单-1</span>
@@ -327,11 +373,13 @@ export default function FooterForm({ initialConfig, locale, onSave }: FooterForm
                   onChange={(id) => setValue('brandMenu.column1.menuId', id)}
                   locale={locale}
                   label="菜单"
+                  filter={filterMenus}
                 />
               </div>
             )}
           </div>
 
+          {/* 菜单-2 */}
           <div className="border-b pb-4">
             <div className="flex justify-between items-center">
               <span className="text-md font-medium">菜单-2</span>
@@ -353,11 +401,13 @@ export default function FooterForm({ initialConfig, locale, onSave }: FooterForm
                   onChange={(id) => setValue('brandMenu.column2.menuId', id)}
                   locale={locale}
                   label="菜单"
+                  filter={filterMenus}
                 />
               </div>
             )}
           </div>
 
+          {/* 菜单-3 */}
           <div className="border-b pb-4">
             <div className="flex justify-between items-center">
               <span className="text-md font-medium">菜单-3</span>
@@ -379,11 +429,13 @@ export default function FooterForm({ initialConfig, locale, onSave }: FooterForm
                   onChange={(id) => setValue('brandMenu.column3.menuId', id)}
                   locale={locale}
                   label="菜单"
+                  filter={filterMenus}
                 />
               </div>
             )}
           </div>
 
+          {/* 文本信息 */}
           <div className="border-b pb-4">
             <div className="flex justify-between items-center">
               <span className="text-md font-medium">文本信息</span>
@@ -411,7 +463,7 @@ export default function FooterForm({ initialConfig, locale, onSave }: FooterForm
           </div>
         </div>
 
-        {/* ========== 社交媒体 ========== */}
+        {/* 社交媒体 */}
         <div className="border rounded-lg p-6 space-y-4">
           <h2 className="text-lg font-semibold">社交媒体</h2>
           <ToggleSwitch
@@ -445,7 +497,7 @@ export default function FooterForm({ initialConfig, locale, onSave }: FooterForm
           )}
         </div>
 
-        {/* ========== 公共设施 ========== */}
+        {/* 公共设施 */}
         <div className="border rounded-lg p-6 space-y-4">
           <h2 className="text-lg font-semibold">公共设施</h2>
           <ToggleSwitch
@@ -467,11 +519,14 @@ export default function FooterForm({ initialConfig, locale, onSave }: FooterForm
           />
         </div>
 
-        <div className="flex justify-end">
-          <button type="submit" className="bg-blue-600 text-white px-6 py-2 rounded hover:bg-blue-700">
-            保存所有设置
-          </button>
-        </div>
+        {/* 内部提交按钮 */}
+        {showSubmitButton && (
+          <div className="flex justify-end">
+            <button type="submit" className="bg-blue-600 text-white px-6 py-2 rounded hover:bg-blue-700">
+              保存所有设置
+            </button>
+          </div>
+        )}
       </form>
       {toast && <Toast message={toast.message} type={toast.type} onClose={() => setToast(null)} />}
     </>

@@ -24,15 +24,10 @@ export interface Template {
   isSystem?: boolean;
   version?: 'draft' | 'published';
   hash?: string;
-  syncStatus?: 'idle' | 'processing' | 'done' | 'error'; // 同步状态
+  syncStatus?: 'idle' | 'processing' | 'done' | 'error';
   createdAt: string;
   updatedAt: string;
-}
-
-interface I18nRecord {
-  textId: string;
-  locale: string;
-  text: string;
+  targetLayoutId?: string;
 }
 
 const STORAGE_BASE = 'webbuilder/templates';
@@ -88,70 +83,6 @@ async function listTemplateFiles(category: TemplateCategory): Promise<{ key: str
     return result;
   } catch {
     return [];
-  }
-}
-
-function extractI18nData(data: any): I18nRecord[] {
-  const records: I18nRecord[] = [];
-  if (!data || typeof data !== 'object') return records;
-
-  if (Array.isArray(data)) {
-    for (const item of data) {
-      records.push(...extractI18nData(item));
-    }
-    return records;
-  }
-
-  if (data.textId && typeof data.textId === 'string') {
-    for (const [key, value] of Object.entries(data)) {
-      if (key !== 'textId' && typeof value === 'string') {
-        records.push({ textId: data.textId, locale: key, text: value });
-      }
-    }
-  }
-
-  for (const key in data) {
-    if (data[key] && typeof data[key] === 'object') {
-      records.push(...extractI18nData(data[key]));
-    }
-  }
-  return records;
-}
-
-async function upsertI18nRecords(templateId: string, data: any): Promise<void> {
-  try {
-    const { error: deleteError } = await supabase
-      .from('component_texts')
-      .delete()
-      .eq('site_id', SITE_ID)
-      .eq('template_id', templateId);
-    if (deleteError) {
-      console.error('Failed to delete old i18n records:', deleteError);
-      throw deleteError;
-    }
-
-    const records = extractI18nData(data);
-    if (records.length > 0) {
-      const now = new Date().toISOString();
-      const insertData = records.map(rec => ({
-        site_id: SITE_ID,
-        template_id: templateId,
-        text_id: rec.textId,
-        locale: rec.locale,
-        text: rec.text,
-        created_at: now,
-        updated_at: now,
-      }));
-      const { error: insertError } = await supabase
-        .from('component_texts')
-        .insert(insertData);
-      if (insertError) {
-        console.error('Failed to insert i18n records:', insertError);
-        throw insertError;
-      }
-    }
-  } catch (err) {
-    console.error('Failed to update i18n data:', err);
   }
 }
 
@@ -226,6 +157,18 @@ export async function getTemplateById(id: string): Promise<Template | null> {
         continue;
       }
     }
+    // ✅ draft 不存在时回退到 published
+    if (version === 'draft') {
+      for (const cat of ALL_CATEGORIES) {
+        const key = getTemplateKey(cat, baseId, 'published');
+        try {
+          const content = await storage.read(key, 'utf8');
+          return JSON.parse(content as string);
+        } catch {
+          continue;
+        }
+      }
+    }
     return null;
   }
 
@@ -284,6 +227,7 @@ export async function saveDraft(
     syncStatus: existingTemplate?.syncStatus || 'idle',
     createdAt: existingTemplate?.createdAt || now,
     updatedAt: now,
+    targetLayoutId: existingTemplate?.targetLayoutId,
   };
 
   const storage = getPrivateStorage();
@@ -294,6 +238,14 @@ export async function saveDraft(
   return { id: draftTemplate.id, baseId: finalBaseId, version: 'draft' };
 }
 
+/**
+ * 发布模板
+ * 
+ * 说明：
+ * - 模板 JSON 写入私有对象存储
+ * - 多语言文案已包含在 template_data 中，不需要 component_texts 表
+ * - 异步同步到 site_pages 表
+ */
 export async function publishTemplate(
   baseId: string,
   name: string,
@@ -313,9 +265,10 @@ export async function publishTemplate(
     isSystem: existingTemplate?.isSystem || false,
     version: 'published',
     hash: newHash,
-    syncStatus: 'processing', // ✅ 发布时立即标记为同步中
+    syncStatus: 'processing',
     createdAt: existingTemplate?.createdAt || now,
     updatedAt: now,
+    targetLayoutId: existingTemplate?.targetLayoutId,
   };
 
   const storage = getPrivateStorage();
@@ -328,23 +281,40 @@ export async function publishTemplate(
     await storage.delete(draftKey);
   } catch {}
 
-  // 更新多语言数据
-  await upsertI18nRecords(publishedTemplate.id, puckData);
-
   clearCache();
 
-  // ✅ 异步执行同步（不阻塞响应），不再传递 taskId
-  syncTemplateToPages(publishedTemplate.id, puckData, newHash).catch(err => {
-    console.error(`[publish] 同步模板 ${baseId} 到页面失败:`, err);
-    // 同步失败时更新模板状态为 error
-    updateTemplateSyncStatus(publishedTemplate.id, 'error').catch(e => {
-      console.error('更新同步状态失败:', e);
+  // 异步同步到 site_pages（不再操作 component_texts）
+  syncTemplateToPages(
+    publishedTemplate.id,
+    puckData,
+    newHash,
+    category,
+    publishedTemplate.targetLayoutId
+  )
+    .then(result => {
+      console.log(`[publish] 同步完成:`, result);
+      return updateTemplateSyncStatus(
+        publishedTemplate.id,
+        result.failed === 0 ? 'done' : 'error'
+      );
+    })
+    .catch(err => {
+      console.error(`[publish] 同步模板 ${baseId} 到页面失败:`, err);
+      return updateTemplateSyncStatus(publishedTemplate.id, 'error').catch(e => {
+        console.error('更新同步状态失败:', e);
+      });
     });
-  });
 
   return { id: publishedTemplate.id, baseId, version: 'published' };
 }
 
+/**
+ * 删除模板
+ * 
+ * 说明：
+ * - 删除对象存储中的 JSON 文件
+ * - 不再需要删除 component_texts 记录
+ */
 export async function deleteTemplate(baseId: string): Promise<void> {
   const template = await getTemplateById(baseId);
   if (template?.isSystem) {
@@ -370,20 +340,6 @@ export async function deleteTemplate(baseId: string): Promise<void> {
 
   if (!deleted) {
     throw new Error('模板不存在');
-  }
-
-  try {
-    const templateIds = [`${baseId}_published`, `${baseId}_draft`];
-    const { error } = await supabase
-      .from('component_texts')
-      .delete()
-      .eq('site_id', SITE_ID)
-      .in('template_id', templateIds);
-    if (error) {
-      console.warn('Failed to delete i18n records:', error);
-    }
-  } catch (err) {
-    console.warn('Failed to delete i18n records:', err);
   }
 
   clearCache();

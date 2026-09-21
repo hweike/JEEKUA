@@ -233,6 +233,11 @@ export default function CategoriesPage() {
     }
   };
 
+  // 将语言代码转为 "XX站" 格式
+  const getLocaleStationLabel = (loc: string) => {
+    return `${getLanguageDisplayName(loc, 'zh')}站`;
+  };
+
   if (loading) return <div className="p-6 text-center">加载中...</div>;
 
   return (
@@ -262,17 +267,17 @@ export default function CategoriesPage() {
         </div>
       </div>
 
-      {/* 搜索区域 */}
-      <div className="mb-6">
-        <div className="flex gap-3">
+      {/* 搜索区域（全宽） */}
+      <div className="mb-6 w-full">
+        <div className="flex gap-3 w-full">
           <input
             type="text"
             placeholder="搜索当前语言分类标题或 URL..."
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
-            className="border rounded-lg px-3 py-2 w-64 focus:outline-none focus:ring-2 focus:ring-blue-500"
+            className="border rounded-lg px-3 py-2 flex-1 focus:outline-none focus:ring-2 focus:ring-blue-500"
           />
-          <button className="bg-gray-100 hover:bg-gray-200 px-4 py-2 rounded-lg flex items-center gap-1">
+          <button className="bg-gray-100 hover:bg-gray-200 px-4 py-2 rounded-lg flex items-center gap-1 flex-shrink-0">
             <Search size={16} /> 搜索
           </button>
         </div>
@@ -315,8 +320,14 @@ export default function CategoriesPage() {
                               {isExpanded ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
                             </button>
                           )}
-                          <span className="font-medium text-gray-900">
-                            {current?.title || `${getLanguageDisplayName(locale, 'zh')}（未设置）`}
+                          <span className="text-sm">
+                            <span className="font-bold text-gray-900">
+                              {getLocaleStationLabel(locale)}
+                            </span>
+                            {' '}
+                            <span className="text-gray-900">
+                              {current?.title || '（未设置）'}
+                            </span>
                           </span>
                         </div>
                       </td>
@@ -365,8 +376,8 @@ export default function CategoriesPage() {
                           <tr key={`${group.id}-${loc}`} className="bg-gray-50 hover:bg-gray-100">
                             <td className="px-6 py-3 pl-12">
                               <div className="flex items-center gap-2">
-                                <span className="text-sm font-medium text-gray-500 w-16">
-                                  {getLanguageDisplayName(loc, 'zh')}
+                                <span className="text-sm font-bold text-gray-700 w-20">
+                                  {getLocaleStationLabel(loc)}
                                 </span>
                                 <span className={`text-sm ${exists ? 'text-gray-900' : 'text-gray-400'}`}>
                                   {exists ? cat.title : '（未设置）'}

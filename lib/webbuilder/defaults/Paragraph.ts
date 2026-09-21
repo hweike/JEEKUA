@@ -1,13 +1,9 @@
 // lib/webbuilder/defaults/Paragraph.ts
 export const DEFAULT_PARAGRAPH = {
-  text: 'Paragraph',
+   content: '<p>段落文本</p>',
   fontSize: 16,
-  textAlign: 'left' as const,
-  bold: false,
-  italic: false,
-  underline: false,
   color: '#333333',
-  link: '',
+  textAlign: 'left' as const,
   spacingGroup: {
     mobileScaleFactor: 0.7,
   },

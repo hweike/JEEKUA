@@ -4,13 +4,14 @@ import {
   upsertProductIndex,
   deleteProductIndex,
   getProductIndex,
+  getProductIndexesBatch,   // ✅ 新增
   getProductStatusCount,
   searchProducts,
   getChildrenProducts,
   getProductLineIdFromCategory,
   searchAllProducts,
   getAllProductIds as getAllProductIdsFromIndex,
-  statusCountCache, // 新增：用于清除状态计数缓存
+  statusCountCache,
 } from '@/lib/products/indexDb';
 import { getProductSettings } from '@/lib/products/productSettings';
 import { generateSlug, generateSeoTitle, generateSeoDescription } from '@/lib/products/seoGenerator';
@@ -100,14 +101,113 @@ async function processImages(productId: string, mainUrl?: string, additionalUrls
   return { mainImageUrl: newMain, additionalImages: newAdditional };
 }
 
+/**
+ * 清理文件名，去除查询参数并确保只有一个扩展名
+ */
+function cleanFilename(filename: string): string {
+  // 去除查询参数
+  let name = filename.split('?')[0];
+  // 如果文件名包含多个 .，只保留最后一个作为扩展名
+  const parts = name.split('.');
+  if (parts.length > 2) {
+    const ext = parts.pop();
+    const baseName = parts.join('.');
+    name = `${baseName}.${ext}`;
+  }
+  return name;
+}
+
+// ============================================================
+// 🔥 修改：从 URL 提取扩展名（辅助函数）
+// ============================================================
+
+/**
+ * 从 URL 提取文件扩展名（保留完整格式，如 .jpg_.webp）
+ */
+function getExtensionFromUrl(url: string): string {
+  if (!url) return '.jpg';
+  
+  // 移除查询参数
+  const cleanUrl = url.split('?')[0];
+  
+  // 从 URL 路径提取扩展名
+  const match = cleanUrl.match(/\.([^.]+)$/);
+  if (match) {
+    const ext = match[1].toLowerCase();
+    // 验证是否是有效的图片扩展名
+    const validExtensions = ['jpg', 'jpeg', 'png', 'gif', 'webp', 'svg', 'bmp', 'ico', 'tiff', 'tif'];
+    // 检查扩展名是否以常见格式结尾（处理 .jpg_.webp 这种特殊情况）
+    for (const validExt of validExtensions) {
+      if (ext.endsWith(validExt)) {
+        // 返回完整的扩展名（包括所有部分）
+        const extMatch = cleanUrl.match(/\.[^.]+$/);
+        return extMatch ? extMatch[0] : `.${ext}`;
+      }
+    }
+    // 如果直接匹配到常见扩展名
+    if (validExtensions.includes(ext)) {
+      return `.${ext}`;
+    }
+  }
+  
+  return '.jpg';
+}
+
+/**
+ * 下载并保存产品图片
+ * 如果图片已存在（通过文件哈希判断），直接返回已有 URL
+ * 否则下载图片并保存到存储系统
+ * 🔥 修复：优先使用 URL 中的扩展名，而不是强制使用 .jpg
+ */
 async function downloadAndSaveProductImage(url: string, productId: string): Promise<string> {
   if (!url.startsWith('http://') && !url.startsWith('https://')) return url;
+  
   try {
     const res = await fetch(url, { signal: AbortSignal.timeout(10000) });
     if (!res.ok) throw new Error(`下载失败: ${res.status}`);
     const buffer = Buffer.from(await res.arrayBuffer());
     const contentType = res.headers.get('content-type') || 'image/jpeg';
-    const originalFileName = url.split('/').pop() || 'product-image.jpg';
+    
+    // 🔥 从 URL 提取文件名
+    let rawFileName = url.split('/').pop()?.split('?')[0] || 'product-image.jpg';
+    
+    // 🔥 从 URL 提取扩展名（优先使用 URL 中的扩展名）
+    const urlExtension = getExtensionFromUrl(url);
+    
+    // 🔥 如果 URL 中有有效的扩展名，使用 URL 的扩展名；否则从 content-type 推断
+    let finalExtension = urlExtension;
+    
+    // 检查当前文件名是否有扩展名
+    const currentExt = rawFileName.includes('.') ? rawFileName.substring(rawFileName.lastIndexOf('.')) : '';
+    
+    // 如果 URL 扩展名不是默认的 .jpg，或者文件名没有扩展名，使用推断的扩展名
+    if (urlExtension !== '.jpg' || !currentExt) {
+      // 使用 URL 扩展名
+      finalExtension = urlExtension;
+    } else if (currentExt && currentExt !== urlExtension) {
+      // 如果文件名有扩展名但与 URL 扩展名不一致，使用 URL 扩展名
+      finalExtension = urlExtension;
+    } else {
+      // 从 content-type 推断（作为最后手段）
+      if (contentType.includes('png')) finalExtension = '.png';
+      else if (contentType.includes('gif')) finalExtension = '.gif';
+      else if (contentType.includes('webp')) finalExtension = '.webp';
+      else if (contentType.includes('svg')) finalExtension = '.svg';
+      else if (contentType.includes('bmp')) finalExtension = '.bmp';
+      else if (contentType.includes('tiff') || contentType.includes('tif')) finalExtension = '.tiff';
+      else finalExtension = '.jpg';
+    }
+    
+    // 🔥 确保文件名使用正确的扩展名
+    let originalFileName = rawFileName;
+    if (currentExt && currentExt !== finalExtension) {
+      // 替换扩展名
+      const baseName = rawFileName.substring(0, rawFileName.lastIndexOf('.'));
+      originalFileName = `${baseName}${finalExtension}`;
+    } else if (!currentExt) {
+      // 添加扩展名
+      originalFileName = `${rawFileName}${finalExtension}`;
+    }
 
     const fileHash = await computeFileHash(buffer);
     const existingFile = await findMediaFileByHash(fileHash);
@@ -119,6 +219,7 @@ async function downloadAndSaveProductImage(url: string, productId: string): Prom
       const storage = getPublicStorage();
       publicUrl = storage.getPublicUrl(existingFile.storage_key);
     } else {
+      // 🔥 使用处理后的文件名
       const displayName = originalFileName;
       const storageKey = generateStorageKey(displayName, fileHash);
       const storage = getPublicStorage();
@@ -152,10 +253,13 @@ async function downloadAndSaveProductImage(url: string, productId: string): Prom
       alt_text: '',
       sort_order: 0,
     }).catch((err) => {
-      if (!err.message.includes('unique constraint')) console.warn('创建产品图片引用失败:', err);
+      if (!err.message.includes('unique constraint')) {
+        console.warn('创建产品图片引用失败:', err);
+      }
     });
 
     return publicUrl;
+    
   } catch (err) {
     console.error(`产品图片下载失败: ${url}`, err);
     return url;
@@ -910,6 +1014,7 @@ export async function getProductsByIds(locale: string, productIds: string[]): Pr
   return results;
 }
 
+// ====== 修改：在 TranslationFields 中添加 attributes ======
 export interface TranslationFields {
   product_name?: string;
   short_description?: string;
@@ -918,6 +1023,7 @@ export interface TranslationFields {
   seo_title?: string;
   seo_description?: string;
   seo_keywords?: string;
+  attributes?: Record<string, string>; // 新增支持 attributes 对象翻译
 }
 
 export interface VariantTranslation {
@@ -975,10 +1081,22 @@ export async function updateProductTranslations(
     }
 
     let updated = false;
-    // 更新字段
-    const fieldKeys: (keyof TranslationFields)[] = ['product_name', 'short_description', 'description', 'spec_text', 'seo_title', 'seo_description', 'seo_keywords'];
+
+    // 可翻译字段（包含 attributes）
+    const fieldKeys: (keyof TranslationFields)[] = [
+      'product_name',
+      'short_description',
+      'description',
+      'spec_text',
+      'seo_title',
+      'seo_description',
+      'seo_keywords',
+      'attributes',
+    ];
+
     for (const key of fieldKeys) {
       if (fields[key] !== undefined) {
+        // attributes 是对象，直接赋值；其他字段是字符串
         existingMd[key] = fields[key];
         updated = true;
       }
@@ -1000,8 +1118,18 @@ export async function updateProductTranslations(
             if (sourceVariant) {
               const newVariant = JSON.parse(JSON.stringify(sourceVariant));
               newVariant.id = vTrans.id;
-              for (const key of fieldKeys) {
-                if (vTrans.fields[key] !== undefined) newVariant[key] = vTrans.fields[key];
+              const variantFieldKeys: (keyof TranslationFields)[] = [
+                'product_name',
+                'short_description',
+                'seo_title',
+                'seo_description',
+                'seo_keywords',
+                'attributes',
+              ];
+              for (const key of variantFieldKeys) {
+                if (vTrans.fields[key] !== undefined) {
+                  newVariant[key] = vTrans.fields[key];
+                }
               }
               currentVariants.push(newVariant);
               updated = true;
@@ -1014,7 +1142,15 @@ export async function updateProductTranslations(
         } else {
           // 更新已有变体
           const v = currentVariants[vIdx];
-          for (const key of fieldKeys) {
+          const variantFieldKeys: (keyof TranslationFields)[] = [
+            'product_name',
+            'short_description',
+            'seo_title',
+            'seo_description',
+            'seo_keywords',
+            'attributes',
+          ];
+          for (const key of variantFieldKeys) {
             if (vTrans.fields[key] !== undefined) {
               v[key] = vTrans.fields[key];
               updated = true;
@@ -1033,17 +1169,50 @@ export async function updateProductTranslations(
     // 写回 MD
     await writeProduct(locale, productId, existingMd, existingMd.content || '');
 
-    // 更新索引
+    // ====== 修复：从数据库获取或继承 productLineId 等分类字段 ======
     const now = new Date().toISOString();
-    // 父产品索引
     const existingIndex = await getProductIndex(productId, locale);
+
+    // 1. 从目标数据库记录获取（如果已存在）
+    let effectiveProductLineId = existingIndex?.productLineId || '';
+    let effectiveCategoryId = existingIndex?.categoryId || existingMd.categoryId || '';
+    let effectiveSeriesId = existingIndex?.seriesId || existingMd.seriesId || '';
+
+    // 2. 如果目标没有 productLineId，且 sourceLocale 存在，从源语言继承
+    if (!effectiveProductLineId && sourceLocale) {
+      const { data: sourceRecord, error: sourceError } = await supabase
+        .from('products')
+        .select('productLineId, categoryId, seriesId')
+        .eq('site_id', DEFAULT_SITE_ID)
+        .eq('productId', productId)
+        .eq('locale', sourceLocale)
+        .maybeSingle();
+      if (!sourceError && sourceRecord) {
+        effectiveProductLineId = sourceRecord.productLineId || effectiveProductLineId;
+        effectiveCategoryId = sourceRecord.categoryId || effectiveCategoryId;
+        effectiveSeriesId = sourceRecord.seriesId || effectiveSeriesId;
+      }
+    }
+
+    // 3. 最终 fallback（如果仍为空，从分类获取）
+    if (!effectiveProductLineId && effectiveCategoryId) {
+      try {
+        // 只有当 effectiveCategoryId 是有效字符串时才调用
+        if (typeof effectiveCategoryId === 'string' && effectiveCategoryId) {
+          const lineId = await getProductLineIdFromCategory(locale, effectiveCategoryId);
+          if (lineId) effectiveProductLineId = lineId;
+        }
+      } catch (ignore) {}
+    }
+
+    // 父产品索引
     if (existingIndex || isNew) {
       const indexData = {
         productId,
         locale,
-        productLineId: existingIndex?.productLineId || existingMd.productLineId || '',
-        categoryId: existingIndex?.categoryId || existingMd.categoryId,
-        seriesId: existingIndex?.seriesId || existingMd.seriesId || '',
+        productLineId: effectiveProductLineId,
+        categoryId: effectiveCategoryId,
+        seriesId: effectiveSeriesId,
         parent_product_id: existingIndex?.parent_product_id || null,
         sku: existingMd.sku,
         product_name: existingMd.product_name,
@@ -1072,9 +1241,9 @@ export async function updateProductTranslations(
         const varData = {
           productId: vid,
           locale,
-          productLineId: existingMd.productLineId || '',
-          categoryId: existingMd.categoryId || '',
-          seriesId: existingMd.seriesId || '',
+          productLineId: effectiveProductLineId,
+          categoryId: effectiveCategoryId,
+          seriesId: effectiveSeriesId,
           parent_product_id: productId,
           sku: variant.sku || '',
           product_name: variant.product_name || '',
@@ -1101,3 +1270,72 @@ export async function updateProductTranslations(
     statusCountCache.delete(`statusCount_${locale}`);
   }
 }
+
+// ============================================================
+// 轻量级批量查询（用于 ProductShowcaseBlock 等列表展示场景）
+// 只查索引表，不读 MD 文件 —— 速度极快（一次 Supabase 查询）
+// ============================================================
+
+export interface ShowcaseProductLite {
+  productId: string;
+  productName: string;
+  sku: string;
+  mainImage: string;
+  price?: number;
+  slug?: string;
+  categoryId?: string;
+  brand?: string;
+  parentProductId?: string | null;
+}
+
+export async function getProductsForShowcase(
+  locale: string,
+  productIds: string[]
+): Promise<ShowcaseProductLite[]> {
+  if (!productIds || productIds.length === 0) return [];
+
+  // ✅ 1. 一次批量查询索引表
+  const indexes = await getProductIndexesBatch(productIds, locale);
+  const indexMap = new Map(indexes.map((i) => [i.productId, i]));
+
+  // ✅ 2. 直接映射（保持传入顺序）
+  const result: ShowcaseProductLite[] = [];
+
+  for (const id of productIds) {
+    const row = indexMap.get(id);
+    if (!row) continue;
+
+    // price_tiers 是 JSON 字符串，取第一个阶梯的价格
+    let price: number | undefined;
+    try {
+      const tiers = typeof row.price_tiers === 'string'
+        ? JSON.parse(row.price_tiers)
+        : row.price_tiers;
+      if (Array.isArray(tiers) && tiers.length > 0) {
+        price = tiers[0].price;
+      }
+    } catch {
+      // ignore
+    }
+
+    result.push({
+      productId: row.productId,
+      productName: row.product_name || '',
+      sku: row.sku || '',
+      mainImage: row.main_image_url || '',
+      price,
+      slug: row.slug || '',
+      categoryId: row.categoryId || '',
+      brand: row.brand || '',
+      parentProductId: row.parent_product_id || null,
+    });
+  }
+
+  return result;
+}
+
+// ============================================================
+// 导出内部函数（供导入路由使用）
+// ============================================================
+
+export { processVariant, processImages };

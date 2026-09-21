@@ -29,8 +29,8 @@ export async function POST(request: NextRequest) {
   const {
     siteName,
     websiteUrl,
-    defaultLocale,       // 新增
-    targetAudience,      // 新增
+    defaultLocale,
+    targetAudience,
     contactEmail,
     contactPhone,
     companyName,
@@ -40,6 +40,8 @@ export async function POST(request: NextRequest) {
     province,
     postalCode,
     brand,
+    socialShareImage,
+    logo, // 新增
   } = body;
 
   const brandList = Array.isArray(brand) ? brand : [];
@@ -66,11 +68,11 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: '电话格式不正确' }, { status: 400 });
   }
 
-  // 组装新设置（所有字段必填字符串，空值转为空字符串）
+  // 组装新设置
   const newSettings: BasicSettings = {
     siteName: siteName.trim(),
     websiteUrl: websiteUrl.trim(),
-    defaultLocale: defaultLocale?.trim() || 'en',   // 默认英文
+    defaultLocale: defaultLocale?.trim() || 'en',
     targetAudience: targetAudience?.trim() || '',
     contactEmail: contactEmail?.trim() || '',
     contactPhone: contactPhone?.trim() || '',
@@ -81,6 +83,8 @@ export async function POST(request: NextRequest) {
     province: province?.trim() || '',
     postalCode: postalCode?.trim() || '',
     brand: brandList,
+    socialShareImage: socialShareImage?.trim() || '',
+    logo: logo?.trim() || '', // 新增
   };
 
   await updateSettings(newSettings);

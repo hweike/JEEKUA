@@ -2,6 +2,7 @@
 export const DEFAULT_ACCORDION = {
   bannerType: 'standard' as const,
   backgroundColor: '#ffffff',
+  borderColor: '#e5e7eb', // ✅ 新增边框色默认值
   rowGroup: {
     rowTitleColor: '#000000',
     rowTitleFontSize: 24,
@@ -23,7 +24,6 @@ export const DEFAULT_ACCORDION = {
   spacingGroup: {
     mobileScaleFactor: 0.7,
   },
-  // 默认内容模板（id 仅作占位，实际使用时会重新生成）
   items: [
     {
       id: 'placeholder-accordion',

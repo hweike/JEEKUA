@@ -5,7 +5,7 @@ import { Edit, Trash2, Plus } from 'lucide-react';
 import ImageUpload from '@/components/ImageUpload';
 import SeoFields from '@/components/common/SeoFields';
 import { getFieldHint, getFieldPlaceholder, HINT_PATHS, InfoTooltip } from '@/config/fieldHints';
-import { getImageUrl } from '@/lib/files/url'; // 新增导入
+import { getImageUrl } from '@/lib/files/url';
 
 interface Series {
   id: string;
@@ -50,7 +50,7 @@ export default function SeriesManager({ category, attributeTemplates, onUpdate }
   const [newSeries, setNewSeries] = useState<Series>(emptySeries);
 
   const startAddSeries = () => {
-    setEditingSeries(null);          // 关闭编辑表单
+    setEditingSeries(null);
     setNewSeries({ ...emptySeries, order: category.series.length });
     setAddingSeries(true);
   };
@@ -133,7 +133,6 @@ export default function SeriesManager({ category, attributeTemplates, onUpdate }
               <div className="flex justify-between items-center">
                 <div className="flex gap-3 items-center">
                   {series.image && (
-                    // 使用 getImageUrl 转换图片地址
                     <img src={getImageUrl(series.image)} className="w-12 h-12 object-cover rounded flex-shrink-0" alt="" />
                   )}
                   <div>
@@ -176,7 +175,7 @@ export default function SeriesManager({ category, attributeTemplates, onUpdate }
   );
 }
 
-// SeriesForm 组件 Props 类型定义
+// SeriesForm 组件
 interface SeriesFormProps {
   series: Series;
   attributeTemplates: Array<{ id: string; name: string }>;
@@ -193,12 +192,17 @@ interface SeriesFormProps {
   isNew?: boolean;
 }
 
-// 二级分类表单（使用公共 SEO 组件，继承字段只读）
 function SeriesForm({ series, attributeTemplates, category, onSave, onCancel, isNew }: SeriesFormProps) {
   const [form, setForm] = useState<Series>(() => ({ ...series }));
 
   const inheritedAttributeTemplate = attributeTemplates.find((t) => t.id === category.attributeTemplateId);
   const inheritedPageTemplate = category.pageTemplate === 'default' ? '默认模板' : '全宽模板';
+
+  // ★ 新增：标准化换行符，将 \\n 转为 \n
+  const normalizeLineBreaks = (text: string) => {
+    if (!text) return '';
+    return text.replace(/\\n/g, '\n');
+  };
 
   const handleSubmit = () => {
     if (!form.name || !form.slug) {
@@ -211,7 +215,6 @@ function SeriesForm({ series, attributeTemplates, category, onSave, onCancel, is
   return (
     <div>
       <div className="grid grid-cols-2 gap-6">
-        {/* 左侧区域 */}
         <div className="space-y-6">
           <div className="border rounded-lg p-4 shadow-sm">
             <h3 className="font-medium text-lg mb-3">基本信息</h3>
@@ -232,10 +235,20 @@ function SeriesForm({ series, attributeTemplates, category, onSave, onCancel, is
                 <textarea
                   value={form.description}
                   onChange={e => setForm({ ...form, description: e.target.value })}
-                  rows={3}
+                  rows={6}
                   className="border rounded p-2 w-full"
                   placeholder={getFieldPlaceholder('productCategory.basic.description')}
                 />
+                {/* ★ 预览区 - 使用 normalizeLineBreaks 转换 */}
+                <div className="mt-2">
+                  <div className="text-xs text-gray-500 mb-1">预览效果：</div>
+                  <div
+                    className="border rounded p-2 bg-gray-50 text-sm min-h-[60px]"
+                    style={{ whiteSpace: 'pre-wrap' }}
+                  >
+                    {normalizeLineBreaks(form.description) || '（空）'}
+                  </div>
+                </div>
               </div>
               <div>
                 <label className="block font-medium mb-1">产品自定义属性模板</label>
@@ -250,7 +263,6 @@ function SeriesForm({ series, attributeTemplates, category, onSave, onCancel, is
             </div>
           </div>
 
-          {/* SEO 区块 - 使用公共组件 */}
           <div className="border rounded-lg p-4 shadow-sm">
             <h3 className="font-medium text-lg mb-3">搜索引擎优化</h3>
             <SeoFields
@@ -268,7 +280,6 @@ function SeriesForm({ series, attributeTemplates, category, onSave, onCancel, is
           </div>
         </div>
 
-        {/* 右侧区域 */}
         <div className="border rounded-lg p-4 shadow-sm">
           <h3 className="font-medium text-lg mb-3">显示设置</h3>
           <div className="space-y-4">

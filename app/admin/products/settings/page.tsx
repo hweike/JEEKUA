@@ -8,7 +8,7 @@ import Toast from '@/components/Toast';
 import BasicSettings from './components/BasicSettings';
 import AttributeTemplates from './components/AttributeTemplates';
 
-// 类型定义（保持不变）
+// 类型定义（新增 storeLinks）
 export interface AttributePreset {
   name: string;
   rule: string;
@@ -20,6 +20,11 @@ export interface AttributeTemplate {
   attributes: AttributePreset[];
 }
 
+export interface StoreLink {
+  name: string;
+  url: string;
+}
+
 export interface DefaultSettings {
   default_min_order_qty: number;
   default_availability: string;
@@ -29,6 +34,7 @@ export interface DefaultSettings {
   default_shipping_cost: number;
   default_return_days: number;
   default_mpn: string;
+  storeLinks?: StoreLink[]; // 新增：交易店铺链接（最多两个）
 }
 
 export interface ProductSettings {
@@ -36,6 +42,7 @@ export interface ProductSettings {
   attributeTemplates: AttributeTemplate[];
 }
 
+// 默认设置（含空店铺链接）
 export const DEFAULT_SETTINGS: DefaultSettings = {
   default_min_order_qty: 1,
   default_availability: 'in_stock',
@@ -45,6 +52,10 @@ export const DEFAULT_SETTINGS: DefaultSettings = {
   default_shipping_cost: 0,
   default_return_days: 30,
   default_mpn: '',
+  storeLinks: [
+    { name: '', url: '' },
+    { name: '', url: '' },
+  ],
 };
 
 export default function ProductSettingsPage() {
@@ -64,7 +75,6 @@ export default function ProductSettingsPage() {
     return 'zh';
   };
 
-  // 🔥 修正：使用 getInitialLocale 初始化，而不是直接从 URL 读取
   const [locale, setLocale] = useState(getInitialLocale);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -98,7 +108,7 @@ export default function ProductSettingsPage() {
       .catch(() => setAvailableLocales(['zh', 'en']));
   }, []);
 
-  // 加载设置函数（添加日志）
+  // 加载设置
   const loadSettings = async (lang: string) => {
     console.log('🔄 loadSettings called for:', lang);
     setLoading(true);
@@ -122,18 +132,13 @@ export default function ProductSettingsPage() {
     }
   };
 
-  // 监听 locale 变化加载对应数据
   useEffect(() => {
     loadSettings(locale);
   }, [locale]);
 
-  // ---------- 新增：处理语言切换 ----------
   const handleLocaleChange = (newLocale: string) => {
     console.log('🔁 Language switch to:', newLocale);
-    if (newLocale === locale) {
-      console.log('⚠️ Same locale, skipping load');
-      return;
-    }
+    if (newLocale === locale) return;
     setLocale(newLocale);
   };
 
@@ -162,12 +167,12 @@ export default function ProductSettingsPage() {
     }
   };
 
-  // 保存当前设置并同步到所有其他站点
+  // 保存并同步到所有站点
   const saveAndSyncAll = async () => {
     if (!settings.defaultSettings) return;
     setSyncAllLoading(true);
     try {
-      // 1. 先保存当前站点的设置
+      // 1. 先保存当前站点
       const saveRes = await fetch(`/api/admin/products/settings?locale=${locale}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
@@ -181,13 +186,11 @@ export default function ProductSettingsPage() {
       }
       setToast({ message: '当前站点保存成功，正在同步至其他站点...', type: 'success' });
 
-      // 2. 获取当前站点的完整设置数据（用于同步）
       const currentData = {
         defaultSettings: settings.defaultSettings,
         attributeTemplates: settings.attributeTemplates,
       };
 
-      // 3. 同步到其他站点（排除当前语言）
       const otherLocales = availableLocales.filter(lang => lang !== locale);
       if (otherLocales.length === 0) {
         setToast({ message: '没有其他站点需要同步', type: 'success' });
@@ -222,7 +225,6 @@ export default function ProductSettingsPage() {
         console.error('同步失败详情:', results.filter(r => !r.success));
       }
 
-      // 重新加载当前站点设置（确保 UI 刷新）
       await loadSettings(locale);
     } catch (err: any) {
       console.error(err);
@@ -232,6 +234,7 @@ export default function ProductSettingsPage() {
     }
   };
 
+  // 重置默认设置（保留模板）
   const resetDefaultSettings = async () => {
     if (!settings.defaultSettings) return;
     setSaving(true);
@@ -257,6 +260,7 @@ export default function ProductSettingsPage() {
     }
   };
 
+  // 初始化所有站点（保留模板）
   const initAllLocales = async () => {
     console.log('开始初始化所有站点，语言列表:', availableLocales);
     setInitAllLoading(true);
@@ -338,15 +342,12 @@ export default function ProductSettingsPage() {
     setSettings(prev => ({ ...prev, attributeTemplates: templates }));
   };
 
-  // ---------- 渲染主内容（根据状态返回不同内容） ----------
   const renderContent = () => {
-    // 空状态（无默认设置）
     if (!settings.defaultSettings) {
       return (
         <div className="bg-white rounded-lg shadow p-6">
           <div className="flex justify-between items-center mb-6">
             <h1 className="text-2xl font-bold">基本设置 - {locale.toUpperCase()}</h1>
-            {/* 使用 handleLocaleChange */}
             <LanguageSelector currentLocale={locale} onLocaleChange={handleLocaleChange} displayMode="zh" />
           </div>
           <div className="text-center py-12">
@@ -364,14 +365,12 @@ export default function ProductSettingsPage() {
       );
     }
 
-    // 正常主内容
     return (
       <>
         <div className="bg-white rounded-lg shadow p-6">
           <div className="flex justify-between items-center">
             <h1 className="text-2xl font-bold">基本设置 - {locale.toUpperCase()}</h1>
             <div className="flex items-center gap-4">
-              {/* 使用 handleLocaleChange */}
               <LanguageSelector currentLocale={locale} onLocaleChange={handleLocaleChange} displayMode="zh" />
               <button
                 onClick={resetDefaultSettings}
@@ -386,7 +385,6 @@ export default function ProductSettingsPage() {
         </div>
 
         <BasicSettings settings={settings.defaultSettings} onUpdate={updateDefaultSettings} locale={locale} />
-        {/* 🔑 关键：添加 key={locale} 强制重挂载，确保显示新语言的数据 */}
         <AttributeTemplates
           key={locale}
           templates={settings.attributeTemplates}
@@ -413,18 +411,14 @@ export default function ProductSettingsPage() {
     );
   };
 
-  // ---------- 主渲染 ----------
   return (
     <div className="min-h-screen bg-gray-100 py-8">
       <div className="w-4/5 mx-auto relative">
-        {/* 加载指示器（覆盖层） */}
         {loading && (
           <div className="absolute inset-0 flex justify-center items-center bg-white/75 z-10 rounded-lg">
             <div className="text-gray-600 text-lg">加载中...</div>
           </div>
         )}
-
-        {/* 主内容容器：透明度过渡，加载时透明，加载完成后淡入 */}
         <div
           className="space-y-8"
           style={{
@@ -435,8 +429,6 @@ export default function ProductSettingsPage() {
           {renderContent()}
         </div>
       </div>
-
-      {/* Toast 提示 */}
       {toast && <Toast message={toast.message} type={toast.type} onClose={() => setToast(null)} />}
     </div>
   );

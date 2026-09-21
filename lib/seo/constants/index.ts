@@ -76,7 +76,8 @@ export const BATCH_JOB_STATUS = {
 } as const;
 
 /**
- * 默认长度限制（符合 Google SEO 最佳实践）
+ * 默认 SEO 长度限制（符合 Google SEO 最佳实践）
+ * ✅ 直接在常量文件中定义，无需内部导入
  */
 export const DEFAULT_SEO_LIMITS = {
   seo_title: {
@@ -102,3 +103,36 @@ export const BATCH_CONCURRENCY = 5;
  * 内存进度保留时间（毫秒）
  */
 export const PROGRESS_TTL = 10 * 60 * 1000; // 10 分钟
+
+// =====================================================
+// 工具函数
+// =====================================================
+
+/**
+ * 获取 SEO 长度限制
+ * 优先使用传入的配置，否则使用默认值
+ */
+export function getSeoLimits(config?: {
+  titleMinLength?: number;
+  titleMaxLength?: number;
+  descMinLength?: number;
+  descMaxLength?: number;
+  keywordMinCount?: number;
+  keywordMaxCount?: number;
+}): {
+  titleMinLength: number;
+  titleMaxLength: number;
+  descMinLength: number;
+  descMaxLength: number;
+  keywordMinCount: number;
+  keywordMaxCount: number;
+} {
+  return {
+    titleMinLength: config?.titleMinLength ?? DEFAULT_SEO_LIMITS.seo_title.min,
+    titleMaxLength: config?.titleMaxLength ?? DEFAULT_SEO_LIMITS.seo_title.max,
+    descMinLength: config?.descMinLength ?? DEFAULT_SEO_LIMITS.seo_description.min,
+    descMaxLength: config?.descMaxLength ?? DEFAULT_SEO_LIMITS.seo_description.max,
+    keywordMinCount: config?.keywordMinCount ?? DEFAULT_SEO_LIMITS.seo_keywords.minCount,
+    keywordMaxCount: config?.keywordMaxCount ?? DEFAULT_SEO_LIMITS.seo_keywords.maxCount,
+  };
+}

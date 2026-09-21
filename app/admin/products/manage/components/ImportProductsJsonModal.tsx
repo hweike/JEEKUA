@@ -21,6 +21,7 @@ export default function ImportProductsJsonModal({ locale, onClose, onSuccess }: 
   const [results, setResults] = useState<ImportResult[]>([]);
   const [totalItems, setTotalItems] = useState(0);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const [overwrite, setOverwrite] = useState(false); // 新增状态
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -45,6 +46,7 @@ export default function ImportProductsJsonModal({ locale, onClose, onSuccess }: 
     const formData = new FormData();
     formData.append('file', file);
     formData.append('locale', locale);
+    formData.append('ifoverwrite', overwrite ? 'true' : 'false'); // 新增
 
     try {
       const res = await fetch('/api/admin/products/importProducts-json', {
@@ -115,6 +117,21 @@ export default function ImportProductsJsonModal({ locale, onClose, onSuccess }: 
             )}
           </div>
 
+          {/* 覆盖选项 */}
+          <div className="flex items-center gap-3">
+            <input
+              type="checkbox"
+              id="overwrite"
+              checked={overwrite}
+              onChange={(e) => setOverwrite(e.target.checked)}
+              disabled={importing}
+              className="w-4 h-4 text-blue-600"
+            />
+            <label htmlFor="overwrite" className="text-sm text-gray-700">
+              如果产品已存在，覆盖更新（不勾选则跳过已存在的产品）
+            </label>
+          </div>
+
           {/* 导入按钮 & 进度条区域 */}
           <div className="space-y-3">
             <div className="flex gap-3 items-center">
@@ -137,7 +154,7 @@ export default function ImportProductsJsonModal({ locale, onClose, onSuccess }: 
               )}
             </div>
 
-            {/* 模拟进度条：导入时显示动画条 */}
+            {/* 模拟进度条 */}
             {importing && (
               <div className="w-full bg-gray-200 rounded-full h-2 overflow-hidden">
                 <div

@@ -12,6 +12,12 @@ interface CategoryNode {
   children?: CategoryNode[];
 }
 
+// ✅ 模块级缓存（组件卸载后仍保留）
+let cachedTree: CategoryNode[] | null = null;
+let cachedLocale: string | null = null;
+let cachedAt = 0;
+const TREE_TTL = 5 * 60 * 1000; // 5 分钟
+
 interface ProductCategoryTreeProps {
   locale?: string;
   onSelect: (categoryId: string, seriesId: string) => void;
@@ -25,13 +31,28 @@ export default function ProductCategoryTree({
   selectedCategoryId = '',
   selectedSeriesId = '',
 }: ProductCategoryTreeProps) {
-  const [categoryTree, setCategoryTree] = useState<CategoryNode[]>([]);
+  const hasValidCache =
+    !!cachedTree && cachedLocale === locale && Date.now() - cachedAt < TREE_TTL;
+
+  const [categoryTree, setCategoryTree] = useState<CategoryNode[]>(
+    hasValidCache ? cachedTree! : []
+  );
   const [expandedNodes, setExpandedNodes] = useState<Set<string>>(new Set());
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(!hasValidCache);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
+    // ✅ 命中模块级缓存，直接用
+    if (cachedTree && cachedLocale === locale && Date.now() - cachedAt < TREE_TTL) {
+      setCategoryTree(cachedTree);
+      setExpandedNodes(new Set(cachedTree.map(node => node.id)));
+      setLoading(false);
+      setError(null);
+      return;
+    }
+
     const fetchTree = async () => {
+      setLoading(true);
       try {
         const res = await fetch(`/api/admin/products/categories?locale=${locale}`);
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -68,8 +89,13 @@ export default function ProductCategoryTree({
           }
         });
 
+        // ✅ 写入模块级缓存
+        cachedTree = tree;
+        cachedLocale = locale;
+        cachedAt = Date.now();
+
         setCategoryTree(tree);
-        setExpandedNodes(new Set(lines.map(line => line.id)));
+        setExpandedNodes(new Set(lines.map((line: any) => line.id)));
         setError(null);
       } catch (err) {
         console.error('加载分类树失败', err);

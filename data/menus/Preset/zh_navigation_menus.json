@@ -16,7 +16,7 @@
       "parentId": null,
       "label": "产品",
       "linkType": "internal",
-      "linkValue": "/products/power",
+      "linkValue": "/products",
       "order": 1
     },
     {
@@ -40,7 +40,7 @@
       "parentId": null,
       "label": "视频",
       "linkType": "internal",
-      "linkValue": "/videos",
+      "linkValue": "/video",
       "order": 4
     },
     {

@@ -4,15 +4,21 @@ import Link from 'next/link';
 import { useState, useEffect } from 'react';
 import { ChevronRight, ChevronDown } from 'lucide-react';
 
-// 定义组件 Props 类型
 interface CategoryTreeProps {
   productLineNameEncoded: string;
-  categories: any[]; // 可根据实际业务定义更具体的类型
-  seriesMap: Record<string, any[]>; // key: 一级分类 slug, value: 二级分类数组
+  categories: any[];
+  seriesMap: Record<string, any[]>;
   currentSlug?: string;
   locale: string;
   basePath?: string;
 }
+
+// ============================================================
+// 公共样式常量
+// ============================================================
+const COLOR_TRANSITION = `color var(--transition-duration-150, 150ms) var(--transition-timing-ease, ease)`;
+const BG_COLOR_TRANSITION = `background-color var(--transition-duration-150, 150ms) var(--transition-timing-ease, ease)`;
+const COLOR_BG_TRANSITION = `${COLOR_TRANSITION}, ${BG_COLOR_TRANSITION}`;
 
 export default function CategoryTree({
   productLineNameEncoded,
@@ -25,43 +31,67 @@ export default function CategoryTree({
   const [expandedCatSlug, setExpandedCatSlug] = useState<string | null>(null);
   const baseHref = `/${locale}/${basePath}/${productLineNameEncoded}`;
 
+  // 规范化 slug
+  const normalizeSlug = (slug: string) => {
+    try {
+      return decodeURIComponent(slug).toLowerCase();
+    } catch {
+      return slug.toLowerCase();
+    }
+  };
+
   useEffect(() => {
     if (currentSlug) {
-      // 先检查 currentSlug 是否是二级分类，找到父级
+      const normalizedCurrent = normalizeSlug(currentSlug);
       let parentSlug: string | null = null;
+
       for (const cat of categories) {
-        if (seriesMap[cat.slug]?.some((s: any) => s.slug === currentSlug)) {
+        const seriesList = seriesMap[cat.slug] || [];
+        if (seriesList.some((s: any) => normalizeSlug(s.slug) === normalizedCurrent)) {
           parentSlug = cat.slug;
           break;
         }
       }
-      // 如果没找到父级，再检查是否是某个一级分类的 slug
+
       if (!parentSlug) {
-        const matchedCategory = categories.find((cat: any) => cat.slug === currentSlug);
+        const matchedCategory = categories.find(
+          (cat: any) => normalizeSlug(cat.slug) === normalizedCurrent
+        );
         if (matchedCategory) parentSlug = matchedCategory.slug;
       }
-      setExpandedCatSlug(parentSlug);
+
+      if (parentSlug) {
+        setExpandedCatSlug(parentSlug);
+      }
     } else if (categories.length > 0 && !expandedCatSlug) {
-      // 如果是产品线首页（无选中分类），默认展开第一个一级分类
       setExpandedCatSlug(categories[0].slug);
     }
-  }, [currentSlug, categories, seriesMap, expandedCatSlug]);
+  }, [currentSlug, JSON.stringify(categories), JSON.stringify(seriesMap)]);
 
   const toggleCategory = (slug: string) => setExpandedCatSlug(prev => (prev === slug ? null : slug));
   const isCategoryActive = (slug: string) => currentSlug === slug;
   const isSeriesActive = (slug: string) => currentSlug === slug;
 
-  // 纯 CSS 变量，无硬编码颜色值
-  const textColor = 'var(--navbar-text, var(--foreground))';
-  const hoverTextColor = 'var(--navbar-hover-text, var(--primary))';
-  const hoverBgColor = 'var(--navbar-hover-bg, transparent)';
-  const activeTextColor = 'var(--navbar-active-text, var(--primary))';
-  const activeBgColor = 'var(--navbar-active-bg, color-mix(in oklch, var(--primary) 10%, transparent))';
+  // ============================================================
+  // ✅ 分类树专属变量（带最终 fallback）
+  // ============================================================
+  const textColor = 'var(--category-tree-text, var(--foreground, #0f172a))';
+  const hoverTextColor = 'var(--category-tree-hover-text, var(--primary, #1e293b))';
+  const hoverBgColor = 'var(--category-tree-hover-bg, var(--muted, #f1f5f9))';
+  const activeTextColor = 'var(--category-tree-active-text, var(--primary, #1e293b))';
+  const activeBgColor = 'var(--category-tree-active-bg, var(--accent, #f1f5f9))';
+  const borderColor = 'var(--category-tree-border, var(--border, #e2e8f0))';
 
   return (
     <aside className="w-full md:w-64 flex-shrink-0">
-      <div className="sticky top-16 pb-8">
-        <div className="space-y-1">
+      <div className="sticky top-16" style={{ paddingBottom: 'var(--spacing-8, 2rem)' }}>
+        <div
+          style={{
+            display: 'flex',
+            flexDirection: 'column',
+            gap: 'var(--spacing-1, 0.25rem)',
+          }}
+        >
           {categories.map((cat: any) => {
             const series = seriesMap[cat.slug] || [];
             const hasSeries = series.length > 0;
@@ -70,19 +100,27 @@ export default function CategoryTree({
 
             return (
               <div key={cat.slug} className="relative">
-                {/* 一级分类：整行点击可跳转，同时右侧箭头控制折叠 */}
+                {/* 一级分类 */}
                 <div
-                  className="flex items-center justify-between w-full rounded-md transition-all"
+                  className="flex items-center justify-between w-full"
                   style={{
+                    borderRadius: 'var(--radius-md, 0.625rem)',
                     backgroundColor: isActive ? activeBgColor : 'transparent',
+                    transition: BG_COLOR_TRANSITION,
                   }}
                 >
                   <Link
                     href={`${baseHref}/${cat.slug}`}
-                    className="flex-1 py-1.5 px-2 text-sm font-medium"
+                    className="flex-1"
                     style={{
+                      paddingTop: 'var(--spacing-2, 0.5rem)',
+                      paddingBottom: 'var(--spacing-2, 0.5rem)',
+                      paddingLeft: 'var(--spacing-2, 0.5rem)',
+                      paddingRight: 'var(--spacing-2, 0.5rem)',
+                      fontSize: 'var(--font-size-sm, 0.875rem)',
+                      fontWeight: 'var(--font-weight-medium, 500)',
                       color: isActive ? activeTextColor : textColor,
-                      transition: 'color 150ms ease',
+                      transition: COLOR_TRANSITION,
                     }}
                     onMouseEnter={(e) => {
                       if (!isActive) e.currentTarget.style.color = hoverTextColor;
@@ -96,14 +134,15 @@ export default function CategoryTree({
                   {hasSeries && (
                     <button
                       onClick={(e) => {
-                        e.preventDefault();   // 防止触发 Link 的跳转
+                        e.preventDefault();
                         e.stopPropagation();
                         toggleCategory(cat.slug);
                       }}
-                      className="p-1 rounded-md"
                       style={{
+                        padding: 'var(--spacing-1, 0.25rem)',
+                        borderRadius: 'var(--radius-md, 0.625rem)',
                         color: textColor,
-                        transition: 'color 150ms ease',
+                        transition: COLOR_TRANSITION,
                         backgroundColor: 'transparent',
                         border: 'none',
                         cursor: 'pointer',
@@ -123,24 +162,42 @@ export default function CategoryTree({
 
                 {/* 二级分类列表 */}
                 {isExpanded && hasSeries && (
-                  <ul className="ml-4 mt-1 space-y-1 border-l border-gray-100 pl-2">
+                  <ul
+                    className="border-l"
+                    style={{
+                      marginLeft: 'var(--spacing-4, 1rem)',
+                      marginTop: 'var(--spacing-1, 0.25rem)',
+                      paddingLeft: 'var(--spacing-2, 0.5rem)',
+                      borderColor,
+                      display: 'flex',
+                      flexDirection: 'column',
+                      gap: 'var(--spacing-1, 0.25rem)',
+                    }}
+                  >
                     {series.map((s: any) => {
                       const active = isSeriesActive(s.slug);
                       return (
                         <li key={s.slug}>
                           <Link
                             href={`${baseHref}/${s.slug}`}
-                            className="block py-1.5 px-2 rounded-md text-sm"
+                            className="block"
                             style={{
-                              transition: 'background-color 150ms ease, color 150ms ease',
+                              paddingTop: 'var(--spacing-2, 0.5rem)',
+                              paddingBottom: 'var(--spacing-2, 0.5rem)',
+                              paddingLeft: 'var(--spacing-2, 0.5rem)',
+                              paddingRight: 'var(--spacing-2, 0.5rem)',
+                              borderRadius: 'var(--radius-md, 0.625rem)',
+                              fontSize: 'var(--font-size-sm, 0.875rem)',
+                              transition: COLOR_BG_TRANSITION,
                               backgroundColor: active ? activeBgColor : 'transparent',
                               color: active ? activeTextColor : textColor,
-                              fontWeight: active ? 500 : 'normal',
+                              fontWeight: active
+                                ? 'var(--font-weight-medium, 500)'
+                                : 'var(--font-weight-normal, 400)',
                             }}
                             onMouseEnter={(e) => {
                               if (active) return;
                               e.currentTarget.style.color = hoverTextColor;
-                              // 直接应用背景色，无需判断透明（CSS 变量会正确处理）
                               e.currentTarget.style.backgroundColor = hoverBgColor;
                             }}
                             onMouseLeave={(e) => {

@@ -9,6 +9,8 @@ interface TreeNode {
   url?: string;
   id?: string;
   children?: TreeNode[];
+  lineName?: string;
+  categoryName?: string;
   _loadState?: 'idle' | 'loading' | 'loaded' | 'all_loaded';
   _page?: number;
   _total?: number;
@@ -21,6 +23,22 @@ interface NavState {
   parentPath: TreeNode[];
 }
 
+// 🔥 全局缓存：跨组件实例共享
+const globalTreeCache = new Map<string, { data: TreeNode[]; timestamp: number }>();
+const GLOBAL_CACHE_TTL = 60 * 1000; // 60 秒
+
+function getGlobalCache(locale: string): TreeNode[] | null {
+  const cached = globalTreeCache.get(locale);
+  if (cached && Date.now() - cached.timestamp < GLOBAL_CACHE_TTL) {
+    return cached.data;
+  }
+  return null;
+}
+
+function setGlobalCache(locale: string, data: TreeNode[]): void {
+  globalTreeCache.set(locale, { data, timestamp: Date.now() });
+}
+
 export default function LinkInput({
   value,
   onChange,
@@ -28,7 +46,7 @@ export default function LinkInput({
   locale = 'zh',
 }: {
   value: string;
-  onChange: (val: string) => void;
+  onChange: (val: string, label?: string) => void;
   placeholder?: string;
   locale?: string;
 }) {
@@ -45,18 +63,14 @@ export default function LinkInput({
   const [loading, setLoading] = useState(false);
   const [cachedLocale, setCachedLocale] = useState<string | null>(null);
 
-  // 跟踪哪个父节点正在加载更多（用于显示加载状态）
   const [loadingMoreId, setLoadingMoreId] = useState<string | null>(null);
 
   const processTreeData = (data: TreeNode[]): TreeNode[] => {
     if (!Array.isArray(data)) return [];
-
     const cloned = JSON.parse(JSON.stringify(data)) as TreeNode[];
-
     const filtered = cloned.filter(
       (node) => node.type !== 'home' && node.type !== 'inquiry'
     );
-
     const homeNode: TreeNode = {
       label: '主页',
       type: 'home',
@@ -69,7 +83,6 @@ export default function LinkInput({
       url: '/inquiry',
       id: 'page:inquiry',
     };
-
     const result: TreeNode[] = [homeNode, ...filtered];
     const videoIndex = filtered.findIndex((node) => node.type === 'video');
     if (videoIndex !== -1) {
@@ -78,45 +91,12 @@ export default function LinkInput({
     } else {
       result.push(inquiryNode);
     }
-
-    // productCollection 层级构建
-    const existingProductGroup = result.find(n => n.type === 'productCollection');
-    if (existingProductGroup && existingProductGroup.children) {
-      const items = existingProductGroup.children;
-      const nodeMap = new Map<string, TreeNode>();
-      items.forEach(item => {
-        if (item.id) nodeMap.set(item.id, { ...item, children: [] });
-      });
-      const rootNodes: TreeNode[] = [];
-      nodeMap.forEach((node, id) => {
-        if (id && id.includes('/')) {
-          const [parentId] = id.split('/');
-          const parent = nodeMap.get(parentId);
-          if (parent) {
-            if (!parent.children) parent.children = [];
-            if (!parent.children.some(c => c.id === id)) {
-              parent.children.push(node);
-            }
-          } else {
-            rootNodes.push(node);
-          }
-        } else {
-          rootNodes.push(node);
-        }
-      });
-      if (rootNodes.length > 0) {
-        existingProductGroup.children = rootNodes;
-      }
-    }
-
-    // 标记 product 分组需要按需加载
     const productGroup = result.find(n => n.type === 'product');
     if (productGroup) {
       productGroup.children = [];
       productGroup._loadState = 'idle';
       productGroup._page = 0;
     }
-
     return result;
   };
 
@@ -139,14 +119,12 @@ export default function LinkInput({
     const spaceBelow = viewportHeight - rect.bottom;
     const spaceAbove = rect.top;
     const DROPDOWN_HEIGHT = 400;
-
     let top: number;
     if (spaceBelow >= DROPDOWN_HEIGHT || spaceBelow >= spaceAbove) {
       top = rect.bottom + 4;
     } else {
       top = rect.top - DROPDOWN_HEIGHT;
     }
-
     setDropdownStyle({
       position: 'fixed',
       top,
@@ -162,8 +140,7 @@ export default function LinkInput({
   const loadProducts = async (node: TreeNode, page: number = 1) => {
     if (node._loadState === 'loading') return;
     node._loadState = 'loading';
-    setTreeData([...treeData]); // 触发重新渲染
-
+    setTreeData([...treeData]);
     try {
       const res = await fetch(`/api/discovery/link-tree?locale=${locale}&type=product&page=${page}`);
       const data = await res.json();
@@ -175,12 +152,9 @@ export default function LinkInput({
         type: 'product',
         children: [],
       }));
-
-      // 合并数据
       if (page === 1) {
         node.children = newItems;
       } else {
-        // 移除已有的 __loadMore 占位
         const existingChildren = node.children || [];
         const filtered = existingChildren.filter(c => c.type !== '__loadMore');
         node.children = [...filtered, ...newItems];
@@ -189,9 +163,8 @@ export default function LinkInput({
       node._total = data.total;
       node._hasMore = data.hasMore;
       node._loadState = data.hasMore ? 'loaded' : 'all_loaded';
-
-      // 如果还有更多，添加“加载更多”占位节点
       if (data.hasMore) {
+        if (!node.children) node.children = [];
         node.children.push({
           label: '加载更多',
           type: '__loadMore',
@@ -199,10 +172,7 @@ export default function LinkInput({
           id: `__loadMore_${page}`,
         });
       }
-
       setTreeData([...treeData]);
-
-      // 如果当前导航的父节点是当前加载的节点，更新 currentNav
       if (currentNav && currentNav.parentPath.length > 0) {
         const parent = currentNav.parentPath[currentNav.parentPath.length - 1];
         if (parent === node) {
@@ -215,16 +185,14 @@ export default function LinkInput({
     } catch (error) {
       node._loadState = 'idle';
     } finally {
-      // 清除加载更多状态
       setLoadingMoreId(null);
     }
   };
 
   const loadMore = (node: TreeNode) => {
-    // 如果正在加载更多，忽略点击
+    if (!node.id) return;
     if (loadingMoreId === node.id) return;
     if (!node._hasMore) return;
-    // 设置加载状态
     setLoadingMoreId(node.id);
     const nextPage = (node._page || 0) + 1;
     loadProducts(node, nextPage);
@@ -265,9 +233,29 @@ export default function LinkInput({
     });
   };
 
+  // 🔥 修改 loadData：优先使用全局缓存
   const loadData = useCallback(async () => {
     if (loaded && cachedLocale === locale) return;
     if (loading) return;
+
+    // 🔥 先检查全局缓存
+    const cached = getGlobalCache(locale);
+    if (cached) {
+      const processed = processTreeData(cached);
+      setTreeData(processed);
+      setCurrentNav({
+        title: '选择链接',
+        nodes: processed,
+        parentPath: [],
+      });
+      if (value) {
+        const title = findTitleByUrl(value, processed);
+        setDisplayValue(title || value);
+      }
+      setLoaded(true);
+      setCachedLocale(locale);
+      return;
+    }
 
     setLoading(true);
     try {
@@ -275,6 +263,8 @@ export default function LinkInput({
       const data = await res.json();
       const tree = data.tree || data;
       if (Array.isArray(tree)) {
+        // 🔥 设置全局缓存
+        setGlobalCache(locale, tree);
         const processed = processTreeData(tree);
         setTreeData(processed);
         setCurrentNav({
@@ -381,7 +371,7 @@ export default function LinkInput({
   const handleSelect = (node: TreeNode) => {
     if (node.url) {
       setDisplayValue(node.label);
-      onChange(node.url);
+      onChange(node.url, node.label);
       setIsOpen(false);
       setSearch('');
     }
@@ -390,6 +380,18 @@ export default function LinkInput({
   const handleManualChange = (newValue: string) => {
     setDisplayValue(newValue);
     onChange(newValue);
+  };
+
+  const renderNodeLabel = (node: TreeNode) => {
+    if (node.lineName && node.categoryName) {
+      return (
+        <>
+          <strong className="font-semibold">[{node.lineName}]</strong>
+          <span>-{node.categoryName}</span>
+        </>
+      );
+    }
+    return node.label;
   };
 
   const renderNodes = () => {
@@ -408,7 +410,6 @@ export default function LinkInput({
           {Array.isArray(nodes) && nodes.map((node) => {
             const isLoadMore = node.type === '__loadMore';
             if (isLoadMore) {
-              // 获取父节点（产品分组）
               const parentNode = currentNav.parentPath[currentNav.parentPath.length - 1];
               const isLoading = loadingMoreId === parentNode?.id;
               return (
@@ -461,7 +462,7 @@ export default function LinkInput({
                     }
                   }}
                 >
-                  {node.label}
+                  {renderNodeLabel(node)}
                 </span>
                 {showChevron && (
                   <button

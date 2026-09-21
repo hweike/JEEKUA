@@ -5,7 +5,7 @@ import { useState, useEffect, useRef } from 'react';
 import { X, ArrowLeft } from 'lucide-react';
 
 interface LogEntry {
-  pageId: string;
+  productId: string;
   message: string;
   status: 'processing' | 'success' | 'failed';
   timestamp: number;
@@ -14,10 +14,10 @@ interface LogEntry {
 interface Cn2enSyncDialogProps {
   isOpen: boolean;
   onClose: () => void;
-  onComplete?: () => void;          // 同步完成后回调（刷新列表）
+  onComplete?: () => void;
   selectedCount: number;
   title?: string;
-  pageIds: string[];               // 要同步的页面 ID 列表
+  pageIds: string[]; // 实际为产品 ID 列表
 }
 
 export default function Cn2enSyncDialog({
@@ -26,7 +26,7 @@ export default function Cn2enSyncDialog({
   onComplete,
   selectedCount,
   title = '同步中文到英文站',
-  pageIds,
+  pageIds: productIds,
 }: Cn2enSyncDialogProps) {
   const [view, setView] = useState<'config' | 'logs'>('config');
   const [mode, setMode] = useState<'repair' | 'copy' | 'copy_translate'>('repair');
@@ -39,7 +39,6 @@ export default function Cn2enSyncDialog({
   const logsEndRef = useRef<HTMLDivElement>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
 
-  // 检查英文站是否已开通
   useEffect(() => {
     if (isOpen) {
       fetch('/api/languages/enabled')
@@ -52,7 +51,6 @@ export default function Cn2enSyncDialog({
     }
   }, [isOpen]);
 
-  // 每次打开对话框重置状态
   useEffect(() => {
     if (isOpen) {
       setView('config');
@@ -65,7 +63,6 @@ export default function Cn2enSyncDialog({
     }
   }, [isOpen]);
 
-  // 组件卸载时取消请求
   useEffect(() => {
     return () => {
       if (abortControllerRef.current) {
@@ -74,7 +71,6 @@ export default function Cn2enSyncDialog({
     };
   }, []);
 
-  // 日志滚动到底部
   useEffect(() => {
     if (logsEndRef.current) {
       logsEndRef.current.scrollIntoView({ behavior: 'smooth' });
@@ -86,8 +82,8 @@ export default function Cn2enSyncDialog({
       setError('英文站未开通，无法同步');
       return;
     }
-    if (pageIds.length === 0) {
-      setError('没有选择任何页面');
+    if (productIds.length === 0) {
+      setError('没有选择任何产品');
       return;
     }
 
@@ -102,7 +98,8 @@ export default function Cn2enSyncDialog({
     abortControllerRef.current = controller;
 
     try {
-      const response = await fetch('/api/discovery/sync-batch', {
+      // ✅ 调用产品同步路由
+      const response = await fetch('/api/discovery/product-sync/batch', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -111,8 +108,9 @@ export default function Cn2enSyncDialog({
         body: JSON.stringify({
           sourceLocale: 'zh',
           targetLocales: ['en'],
-          pageIds: pageIds,
+          productIds: productIds,
           mode: mode,
+          syncStrategy: 'full',
         }),
         signal: controller.signal,
       });
@@ -141,7 +139,7 @@ export default function Cn2enSyncDialog({
               setLogs(prev => [
                 ...prev,
                 {
-                  pageId: log.pageId,
+                  productId: log.productId || log.pageId,
                   message: log.message || log.status,
                   status: log.status,
                   timestamp: Date.now(),
@@ -152,7 +150,7 @@ export default function Cn2enSyncDialog({
             } else if (data.type === 'complete') {
               setSyncing(false);
               setError(null);
-              if (onComplete) onComplete(); // 刷新列表
+              if (onComplete) onComplete();
             } else if (data.type === 'error') {
               setSyncing(false);
               setError(data.error);
@@ -161,10 +159,7 @@ export default function Cn2enSyncDialog({
         }
       }
     } catch (err: any) {
-      if (err.name === 'AbortError') {
-        // 用户取消，忽略
-        return;
-      }
+      if (err.name === 'AbortError') return;
       setSyncing(false);
       setError(err.message || '同步失败');
     } finally {
@@ -185,16 +180,14 @@ export default function Cn2enSyncDialog({
 
   const renderConfigView = () => (
     <div className="p-6 space-y-6">
-      {/* 源站点 */}
       <div>
         <label className="block text-sm font-medium mb-2">源站点</label>
         <div className="px-3 py-2 bg-gray-100 rounded border text-gray-700">
           中文站 (zh)
         </div>
-        <p className="text-xs text-gray-500 mt-1">已选择 {selectedCount} 个页面进行同步</p>
+        <p className="text-xs text-gray-500 mt-1">已选择 {selectedCount} 个产品进行同步</p>
       </div>
 
-      {/* 目标站点 */}
       <div>
         <label className="block text-sm font-medium mb-2">目标站点</label>
         <div className="px-3 py-2 bg-gray-100 rounded border text-gray-700">
@@ -204,7 +197,6 @@ export default function Cn2enSyncDialog({
         {!enEnabled && <p className="text-xs text-red-500 mt-1">英文站未开通，无法同步</p>}
       </div>
 
-      {/* 同步模式 */}
       <div className="space-y-3 border-t pt-4">
         <div className="flex items-start gap-2">
           <input
@@ -221,7 +213,7 @@ export default function Cn2enSyncDialog({
               只修复中文站与英文站同步关联关系
             </label>
             <p className="text-xs text-gray-500">
-              仅设置同步字段，不覆盖目标站点内容。
+              仅设置同步字段，不覆盖目标站点产品内容。
             </p>
           </div>
         </div>
@@ -238,10 +230,10 @@ export default function Cn2enSyncDialog({
           />
           <div>
             <label htmlFor="mode-copy" className="text-sm font-medium">
-              同步复制中文站内容（只复制不翻译）
+              同步复制中文产品内容（只复制不翻译）
             </label>
             <p className="text-xs text-gray-500">
-              完整复制页面信息到英文站，建立同步关联。
+              完整复制产品信息到英文站，建立同步关联。
             </p>
           </div>
         </div>
@@ -258,17 +250,17 @@ export default function Cn2enSyncDialog({
           />
           <div>
             <label htmlFor="mode-copy-translate" className="text-sm font-medium">
-              同步复制并翻译中文站内容（Deepseek翻译）
+              同步复制并翻译中文产品内容（Deepseek翻译）
             </label>
             <p className="text-xs text-gray-500">
-              复制并翻译页面信息到英文站，建立同步关联。
+              复制并翻译产品信息到英文站，建立同步关联。
             </p>
           </div>
         </div>
 
         {(mode === 'copy' || mode === 'copy_translate') && (
           <div className="mt-2 p-2 border border-red-300 bg-red-50 rounded text-red-700 text-sm">
-            <p className="font-semibold">温馨提示：此操作将覆盖英文站相同ID的内容，不可撤回。</p>
+            <p className="font-semibold">温馨提示：此操作将覆盖英文站相同ID的产品内容，不可撤回。</p>
           </div>
         )}
 
@@ -281,7 +273,7 @@ export default function Cn2enSyncDialog({
         </button>
         <button
           onClick={handleSyncClick}
-          disabled={syncing || !enEnabled || pageIds.length === 0}
+          disabled={syncing || !enEnabled || productIds.length === 0}
           className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 disabled:opacity-50"
         >
           {syncing ? '同步中...' : '确认同步'}
@@ -328,7 +320,7 @@ export default function Cn2enSyncDialog({
                 <span className="font-mono text-xs text-gray-400">
                   {new Date(log.timestamp).toLocaleTimeString()}
                 </span>
-                <span className="font-mono">{log.pageId}</span>
+                <span className="font-mono">{log.productId}</span>
                 <span>→ {log.message}</span>
               </div>
             ))}

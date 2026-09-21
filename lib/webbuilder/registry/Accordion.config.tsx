@@ -36,6 +36,7 @@ export const config: ComponentConfig<AccordionProps> = {
   defaultProps: {
     bannerType: DEFAULT_ACCORDION.bannerType,
     backgroundColor: DEFAULT_ACCORDION.backgroundColor,
+    borderColor: DEFAULT_ACCORDION.borderColor || '#e5e7eb', // 新增
     rowGroup: { ...DEFAULT_ACCORDION.rowGroup },
     contentGroup: { ...DEFAULT_ACCORDION.contentGroup },
     paddingGroup: { ...DEFAULT_ACCORDION.paddingGroup },
@@ -57,6 +58,15 @@ export const config: ComponentConfig<AccordionProps> = {
       type: 'custom',
       render: ({ value, onChange }: { value?: string; onChange: (val: string) => void }) => (
         <ColorPickerField field={{}} value={value || '#ffffff'} onChange={onChange} />
+      ),
+    },
+
+    // ✅ 边框色（顶层配置）
+    borderColor: {
+      label: '边框色',
+      type: 'custom',
+      render: ({ value, onChange }: { value?: string; onChange: (val: string) => void }) => (
+        <ColorPickerField field={{}} value={value || '#e5e7eb'} onChange={onChange} />
       ),
     },
 
@@ -132,11 +142,25 @@ export const config: ComponentConfig<AccordionProps> = {
       } as any,
     },
 
+    // ===== 间距设置 =====
+    spacingGroup: {
+      type: 'object',
+      label: '间距设置',
+      objectFields: {
+        mobileScaleFactor: {
+          label: '移动端缩放比例',
+          type: 'number',
+          min: 0.1,
+          max: 1,
+          step: 0.05,
+        },
+      },
+    },
+
     // ===== 手风琴项目列表 =====
     items: {
       label: '手风琴项目列表',
       type: 'array',
-      // 尝试禁用拖拽（如果版本不支持，可能不生效，但不影响功能）
       sortable: false,
       itemLabel: 'List #{index}',
       arrayFields: {
@@ -149,7 +173,6 @@ export const config: ComponentConfig<AccordionProps> = {
         contents: {
           label: '内容列表',
           type: 'array',
-          // 尝试禁用拖拽
           sortable: false,
           itemLabel: 'Content #{index}',
           arrayFields: {
@@ -177,8 +200,8 @@ export const config: ComponentConfig<AccordionProps> = {
             link: { label: '链接 (可选)', type: 'text' },
           } as any,
         },
-      } as any, // 绕过 arrayFields 类型检查
-    } as any, // 绕过 items 的 ArrayField 类型检查
+      } as any,
+    } as any,
 
     // ===== 填充设置 =====
     paddingGroup: {
@@ -191,7 +214,6 @@ export const config: ComponentConfig<AccordionProps> = {
     },
   },
 
-  // ✅ render 直接传递 props，组件内部从 DEFAULT_ACCORDION 读取 mobileScaleFactor
   render: ({ puck, ...props }) => {
     return <Accordion puck={puck} {...props} />;
   },

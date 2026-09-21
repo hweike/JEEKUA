@@ -272,17 +272,17 @@ export default function DocsListPage() {
         </div>
       </div>
 
-      {/* 搜索 */}
+      {/* 搜索栏 - 全宽 */}
       <div className="mb-6">
-        <div className="flex gap-3">
+        <div className="flex gap-3 w-full">
           <input
             type="text"
             placeholder="搜索当前语言文档标题或 URL..."
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
-            className="border rounded-lg px-3 py-2 w-64 focus:outline-none focus:ring-2 focus:ring-blue-500"
+            className="border rounded-lg px-3 py-2 flex-1 focus:outline-none focus:ring-2 focus:ring-blue-500"
           />
-          <button className="bg-gray-100 hover:bg-gray-200 px-4 py-2 rounded-lg flex items-center gap-1">
+          <button className="bg-gray-100 hover:bg-gray-200 px-4 py-2 rounded-lg flex items-center gap-1 flex-shrink-0">
             <Search size={16} /> 搜索
           </button>
         </div>
@@ -331,6 +331,8 @@ export default function DocsListPage() {
                             className="font-medium text-gray-900 truncate"
                             title={current?.title || ''}
                           >
+                            <span className="font-bold">{getLanguageDisplayName(locale, 'zh')}站</span>
+                            {' '}
                             {current?.title || `${getLanguageDisplayName(locale, 'zh')}（未设置）`}
                           </span>
                         </div>
@@ -385,13 +387,18 @@ export default function DocsListPage() {
                         const doc = group.versions[loc] || null;
                         const exists = doc !== null;
                         const isZhOrEn = loc === 'zh' || loc === 'en';
+                        const localeName = getLanguageDisplayName(loc, 'zh');
 
                         return (
                           <tr key={`${group.id}-${loc}`} className="bg-gray-50 hover:bg-gray-100">
                             <td className="px-6 py-3 pl-12">
                               <div className="flex items-center gap-2 min-w-0">
-                                <span className="text-sm font-medium text-gray-500 w-16 flex-shrink-0">
-                                  {getLanguageDisplayName(loc, 'zh')}
+                                <span
+                                  className={`text-sm flex-shrink-0 ${
+                                    exists ? 'font-bold text-gray-700' : 'text-gray-400'
+                                  }`}
+                                >
+                                  {localeName}站
                                 </span>
                                 <span
                                   className={`text-sm ${exists ? 'text-gray-900' : 'text-gray-400'} truncate`}
@@ -442,6 +449,8 @@ export default function DocsListPage() {
                 <tr key={doc.id} className="hover:bg-gray-50">
                   <td className="px-6 py-4">
                     <span className="font-medium text-gray-900 truncate block" title={doc.title}>
+                      <span className="font-bold">{getLanguageDisplayName(locale, 'zh')}站</span>
+                      {' '}
                       {doc.title}
                     </span>
                   </td>

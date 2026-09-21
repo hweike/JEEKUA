@@ -1,8 +1,31 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { supabase } from '@/lib/supabase/client';
+import { readFullData } from '@/lib/products/utils/helpers';
 
 const SITE_ID = process.env.NEXT_PUBLIC_SITE_ID || '000001';
 const PAGE_SIZE = 50;
+
+// 🔥 内存缓存
+const treeCache = new Map<string, { data: any; timestamp: number }>();
+const CACHE_TTL = 60 * 1000; // 60 秒
+
+function getCacheKey(locale: string): string {
+  return `link-tree_${locale}`;
+}
+
+function getCache(locale: string): any | undefined {
+  const key = getCacheKey(locale);
+  const cached = treeCache.get(key);
+  if (cached && Date.now() - cached.timestamp < CACHE_TTL) {
+    return cached.data;
+  }
+  return undefined;
+}
+
+function setCache(locale: string, data: any): void {
+  const key = getCacheKey(locale);
+  treeCache.set(key, { data, timestamp: Date.now() });
+}
 
 const typeConfig: Record<string, { groupLabel: string; groupKey: string }> = {
   home: { groupLabel: '主页', groupKey: 'home' },
@@ -44,7 +67,7 @@ export async function GET(req: NextRequest) {
   const type = searchParams.get('type');
   const page = parseInt(searchParams.get('page') || '1', 10);
 
-  // 分页加载产品
+  // 分页加载产品（不缓存，因为分页参数不同）
   if (type === 'product') {
     const countQuery = supabase
       .from('pages')
@@ -90,34 +113,97 @@ export async function GET(req: NextRequest) {
     });
   }
 
-  // 常规分组数据（不含产品具体数据）
-  const { data: rowsLocal, error: errorLocal } = await supabase
-    .from('pages')
-    .select('id, title, url, type')
-    .eq('site_id', SITE_ID)
-    .eq('locale', locale)
-    .order('type', { ascending: true })
-    .order('title', { ascending: true });
+  // 🔥 检查缓存
+  const cachedTree = getCache(locale);
+  if (cachedTree) {
+    return NextResponse.json(
+      { tree: cachedTree },
+      {
+        headers: {
+          'Cache-Control': 'public, max-age=60, stale-while-revalidate=300',
+        },
+      }
+    );
+  }
 
-  if (errorLocal) {
+  // 🔥 并行读取产品数据、查询本地 pages、查询 global 文档库、查询 global 文档
+  const [
+    productDataResult,
+    rowsLocalResult,
+    rowsGlobalDocLibraryResult,
+    rowsGlobalDocResult,
+  ] = await Promise.allSettled([
+    readFullData(locale).catch(() => ({ productLines: [], categories: [] })),
+    supabase
+      .from('pages')
+      .select('id, title, url, type')
+      .eq('site_id', SITE_ID)
+      .eq('locale', locale)
+      .order('type', { ascending: true })
+      .order('title', { ascending: true }),
+    // 🔥 查询 global 语言的文档库
+    supabase
+      .from('pages')
+      .select('id, title, url, type')
+      .eq('site_id', SITE_ID)
+      .eq('locale', 'global')
+      .eq('type', 'docLibrary')
+      .order('title', { ascending: true }),
+    // 🔥 查询 global 语言的文档
+    supabase
+      .from('pages')
+      .select('id, title, url, type')
+      .eq('site_id', SITE_ID)
+      .eq('locale', 'global')
+      .eq('type', 'doc')
+      .order('title', { ascending: true }),
+  ]);
+
+  const productData = productDataResult.status === 'fulfilled'
+    ? productDataResult.value
+    : { productLines: [], categories: [] };
+
+  const rowsLocal = rowsLocalResult.status === 'fulfilled'
+    ? rowsLocalResult.value.data
+    : [];
+
+  const rowsGlobalDocLibrary = rowsGlobalDocLibraryResult.status === 'fulfilled'
+    ? rowsGlobalDocLibraryResult.value.data
+    : [];
+
+  const rowsGlobalDoc = rowsGlobalDocResult.status === 'fulfilled'
+    ? rowsGlobalDocResult.value.data
+    : [];
+
+  if (rowsLocalResult.status === 'rejected') {
     return NextResponse.json({ error: 'Failed to fetch pages' }, { status: 500 });
   }
 
-  const { data: rowsGlobalDoc, error: errorGlobal } = await supabase
-    .from('pages')
-    .select('id, title, url, type')
-    .eq('site_id', SITE_ID)
-    .eq('locale', 'global')
-    .eq('type', 'doc')
-    .order('title', { ascending: true });
+  // 构建产品线映射
+  const productLineMap = new Map<string, { id: string; name: string; slug: string }>();
+  for (const line of productData.productLines || []) {
+    productLineMap.set(line.id, {
+      id: line.id,
+      name: line.name,
+      slug: line.slug,
+    });
+  }
+
+  // 构建产品分类映射
+  const categoryToProductLine = new Map<string, string>();
+  for (const cat of productData.categories || []) {
+    if (cat.id && cat.productLineId) {
+      categoryToProductLine.set(cat.id, cat.productLineId);
+    }
+  }
 
   const groups: Record<string, Array<{ id: string; label: string; url: string; type: string }>> = {};
 
+  // 处理本地语言的数据
   for (const row of rowsLocal || []) {
     const config = typeConfig[row.type];
     if (!config) continue;
     const groupKey = config.groupKey;
-    // 产品分组不填充具体数据，留待分页加载
     if (groupKey === 'product') continue;
 
     if (!groups[groupKey]) groups[groupKey] = [];
@@ -129,13 +215,45 @@ export async function GET(req: NextRequest) {
     });
   }
 
-  // 补丁：中文站强制补查 productCollection（若缺失）
-  if (locale === 'zh' && !groups['productCollection']) {
+  // 🔥 合并 global 文档库到 docLibrary 分组
+  if (rowsGlobalDocLibrary && rowsGlobalDocLibrary.length > 0) {
+    if (!groups['docLibrary']) groups['docLibrary'] = [];
+    for (const row of rowsGlobalDocLibrary) {
+      const exists = groups['docLibrary'].some(item => item.id === row.id);
+      if (!exists) {
+        groups['docLibrary'].push({
+          id: row.id,
+          label: row.title,
+          url: row.url,
+          type: row.type,
+        });
+      }
+    }
+  }
+
+  // 🔥 合并 global 文档到 doc 分组
+  if (rowsGlobalDoc && rowsGlobalDoc.length > 0) {
+    if (!groups['doc']) groups['doc'] = [];
+    for (const row of rowsGlobalDoc) {
+      const exists = groups['doc'].some(item => item.id === row.id);
+      if (!exists) {
+        groups['doc'].push({
+          id: row.id,
+          label: row.title,
+          url: row.url,
+          type: row.type,
+        });
+      }
+    }
+  }
+
+  // 补丁：任何语言下，如果 productCollection 缺失或为空，都尝试补查
+  if (!groups['productCollection'] || groups['productCollection'].length === 0) {
     const { data: patchData, error: patchError } = await supabase
       .from('pages')
       .select('id, title, url, type')
       .eq('site_id', SITE_ID)
-      .eq('locale', 'zh')
+      .eq('locale', locale)
       .eq('type', 'productCollection')
       .order('title', { ascending: true });
 
@@ -149,27 +267,10 @@ export async function GET(req: NextRequest) {
     }
   }
 
-  if (rowsGlobalDoc && rowsGlobalDoc.length > 0) {
-    const libraryKey = 'docLibrary';
-    if (!groups[libraryKey]) groups[libraryKey] = [];
-    for (const row of rowsGlobalDoc) {
-      const exists = groups[libraryKey].some(item => item.id === row.id);
-      if (!exists) {
-        groups[libraryKey].push({
-          id: row.id,
-          label: row.title,
-          url: row.url,
-          type: row.type,
-        });
-      }
-    }
-  }
-
   // 构建树
   const tree: any[] = [];
 
   for (const key of groupOrder) {
-    // 对 product 特殊处理：即使无数据也添加分组
     if (key === 'product') {
       let label = '产品';
       for (const [type, cfg] of Object.entries(typeConfig)) {
@@ -181,8 +282,98 @@ export async function GET(req: NextRequest) {
       tree.push({
         label,
         type: key,
-        children: [], // 空数组，由前端加载
+        children: [],
       });
+      continue;
+    }
+
+    // 🔥 产品分类特殊处理：两级结构
+    if (key === 'productCollection') {
+      const collections = groups['productCollection'] || [];
+      if (collections.length === 0) continue;
+
+      const parentCategories = new Map<string, any>();
+      const childMap = new Map<string, any[]>();
+
+      for (const cat of collections) {
+        const rawId = cat.id.replace('productCollection:', '');
+        const parts = rawId.split('/');
+
+        if (parts.length === 1) {
+          const categoryId = parts[0];
+          const productLineId = categoryToProductLine.get(categoryId);
+          parentCategories.set(cat.id, {
+            label: cat.label,
+            url: cat.url,
+            id: cat.id,
+            type: cat.type,
+            categoryId,
+            productLineId: productLineId || null,
+            children: [],
+          });
+        } else if (parts.length === 2) {
+          const parentCategoryId = parts[0];
+          const parentPageId = `productCollection:${parentCategoryId}`;
+          if (!childMap.has(parentPageId)) childMap.set(parentPageId, []);
+          childMap.get(parentPageId)!.push({
+            label: cat.label,
+            url: cat.url,
+            id: cat.id,
+            type: cat.type,
+          });
+        }
+      }
+
+      parentCategories.forEach((parent, pageId) => {
+        parent.children = childMap.get(pageId) || [];
+      });
+
+      const collectionTree: any[] = [];
+
+      const sortedParents = Array.from(parentCategories.values()).sort((a, b) => {
+        const lineA = a.productLineId || '';
+        const lineB = b.productLineId || '';
+        if (lineA !== lineB) return lineA.localeCompare(lineB);
+        return 0;
+      });
+
+      for (const parentCat of sortedParents) {
+        const productLineId = parentCat.productLineId;
+        const lineInfo = productLineId ? productLineMap.get(productLineId) : null;
+        const lineName = lineInfo?.name || '未分类';
+
+        const children = (parentCat.children || []).map((child: any) => ({
+          label: child.label,
+          url: child.url,
+          id: child.id,
+          type: child.type,
+        }));
+
+        collectionTree.push({
+          label: `${lineName}-${parentCat.label}`,
+          lineName,
+          categoryName: parentCat.label,
+          url: parentCat.url,
+          id: parentCat.id,
+          type: parentCat.type,
+          children: children,
+        });
+      }
+
+      if (collectionTree.length > 0) {
+        let label = '产品分类';
+        for (const [type, cfg] of Object.entries(typeConfig)) {
+          if (cfg.groupKey === key) {
+            label = cfg.groupLabel;
+            break;
+          }
+        }
+        tree.push({
+          label,
+          type: key,
+          children: collectionTree,
+        });
+      }
       continue;
     }
 
@@ -243,5 +434,15 @@ export async function GET(req: NextRequest) {
     }
   }
 
-  return NextResponse.json({ tree });
+  // 🔥 设置缓存
+  setCache(locale, tree);
+
+  return NextResponse.json(
+    { tree },
+    {
+      headers: {
+        'Cache-Control': 'public, max-age=60, stale-while-revalidate=300',
+      },
+    }
+  );
 }

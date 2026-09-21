@@ -1,49 +1,56 @@
 'use client';
 
-import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
+import React, { useState, useRef, useEffect, useMemo } from 'react';
 import { useRouter, usePathname, useSearchParams } from 'next/navigation';
+import { useTranslations } from 'next-intl';
 import CategoryTree from '@/components/front/CategoryTree';
 import ProductCard from '@/components/front/ProductCard';
 
-type SortOption = 'title-asc' | 'title-desc' | 'price-asc' | 'price-desc' | 'created-asc' | 'created-desc';
+// ============================================================
+// 公共样式常量
+// ============================================================
+const COLOR_TRANSITION = `color var(--transition-duration-150, 150ms) var(--transition-timing-ease, ease)`;
+const BG_COLOR_TRANSITION = `background-color var(--transition-duration-150, 150ms) var(--transition-timing-ease, ease)`;
 
-const SORT_LABELS: Record<SortOption, string> = {
-  'title-asc': '按字母顺序，A-Z',
-  'title-desc': '按字母顺序，Z-A',
-  'price-asc': '价格，从低到高',
-  'price-desc': '价格，从高到低',
-  'created-asc': '日期，从旧到新',
-  'created-desc': '日期，从新到旧',
+const normalizeLineBreaks = (text: string) => {
+  if (!text) return '';
+  return text.replace(/\\n/g, '\n').trim();
 };
 
 export function ProductLineBlock({ showSidebar = true, productsPerRow = 3, __runtime, puck }: any) {
+  const t = useTranslations('Components.ProductLine');
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
 
-  // 防御性检查
   if (!__runtime?.productLine || !__runtime?.categoryTree) {
     return (
       <div
-        className="border-2 border-dashed border-border p-8 text-center text-muted-foreground"
+        className="border-2 border-dashed text-center"
         ref={puck?.dragRef}
+        style={{
+          padding: 'var(--spacing-8, 2rem)',
+          borderColor: 'var(--border, #e2e8f0)',
+          color: 'var(--muted-foreground, #64748b)',
+        }}
       >
-        〖产品线展示区域〗
+        {t('placeholder')}
       </div>
     );
   }
 
-  // 稳定化产品线基本数据
-  const productLine = useMemo(() => __runtime.productLine, [__runtime.productLine]);
-  const categoryTree = useMemo(() => __runtime.categoryTree, [__runtime.categoryTree]);
+  const productLine = __runtime.productLine;
+  const categoryTree = __runtime.categoryTree;
   const locale = __runtime.locale;
   const urlPattern = __runtime.urlPattern;
+  const products = __runtime.products || [];
+  const totalCount = __runtime.totalCount || 0;
+  const currentPage = __runtime.currentPage || 1;
+  const pageSize = __runtime.pageSize || 15;
 
-  const productLineId = productLine.id;
-  const productLineName = productLine.name;
   const productLineSlug = productLine.slug;
+  const productLineName = productLine.name;
 
-  // 从 URL 解析当前分类 slug
   const currentCategorySlug = useMemo(() => {
     const segments = pathname.split('/').filter(Boolean);
     if (segments.length >= 4 && segments[1] === 'products' && segments[2] === productLineSlug) {
@@ -52,193 +59,65 @@ export function ProductLineBlock({ showSidebar = true, productsPerRow = 3, __run
     return undefined;
   }, [pathname, productLineSlug]);
 
-  // 根据分类 slug 获取 ID、系列 ID 和分类信息
-  const { currentCategoryId, currentSeriesId, currentCategoryInfo } = useMemo(() => {
-    if (!currentCategorySlug)
-      return { currentCategoryId: undefined, currentSeriesId: undefined, currentCategoryInfo: null };
+  const currentCategoryInfo = useMemo(() => {
+    if (!currentCategorySlug) return null;
     for (const cat of categoryTree) {
       if (cat.slug === currentCategorySlug) {
-        return {
-          currentCategoryId: cat.id,
-          currentSeriesId: undefined,
-          currentCategoryInfo: { name: cat.name, description: cat.description },
-        };
+        return { name: cat.name, description: cat.description };
       }
       const series = cat.children?.find((s: any) => s.slug === currentCategorySlug);
       if (series) {
-        return {
-          currentCategoryId: cat.id,
-          currentSeriesId: series.id,
-          currentCategoryInfo: { name: series.name, description: series.description },
-        };
+        return { name: series.name, description: series.description };
       }
     }
-    return { currentCategoryId: undefined, currentSeriesId: undefined, currentCategoryInfo: null };
+    return null;
   }, [categoryTree, currentCategorySlug]);
 
-  // 筛选参数
-  const sortBy = (searchParams.get('sort') as SortOption) || 'title-asc';
-  const availability = searchParams.get('availability') as 'in-stock' | 'out-of-stock' | null;
-  const minPrice = searchParams.get('minPrice') ? Number(searchParams.get('minPrice')) : null;
-  const maxPrice = searchParams.get('maxPrice') ? Number(searchParams.get('maxPrice')) : null;
+  const [expanded, setExpanded] = useState(false);
+  const [showToggle, setShowToggle] = useState(false);
+  const descRef = useRef<HTMLParagraphElement>(null);
 
-  // 状态
-  const [products, setProducts] = useState<any[]>([]);
-  const [total, setTotal] = useState(0);
-  const [error, setError] = useState<string | null>(null);
-  const [isLoading, setIsLoading] = useState(true);
-  const [isRefreshing, setIsRefreshing] = useState(false);
+  const description = currentCategoryInfo?.description || '';
 
-  // 请求管理
-  const abortControllerRef = useRef<AbortController | null>(null);
-  const lastRequestKeyRef = useRef<string>('');
-  const timeoutIdRef = useRef<NodeJS.Timeout | null>(null);
+  useEffect(() => {
+    setExpanded(false);
+    setShowToggle(false);
+  }, [description]);
 
-  // 生成当前请求的唯一标识（基于所有依赖）
-  const requestKey = useMemo(() => {
-    const targetId = currentCategoryId || productLineId;
-    return JSON.stringify({
-      targetId,
-      currentSeriesId,
-      isProductLine: !currentCategoryId,
-      locale,
-      availability,
-      minPrice,
-      maxPrice,
-      sortBy,
+  useEffect(() => {
+    if (!descRef.current || expanded) return;
+    const el = descRef.current;
+    requestAnimationFrame(() => {
+      if (el.scrollHeight > el.clientHeight) {
+        setShowToggle(true);
+      } else {
+        setShowToggle(false);
+      }
     });
-  }, [currentCategoryId, productLineId, currentSeriesId, locale, availability, minPrice, maxPrice, sortBy]);
+  }, [description, expanded]);
 
-  // 构建请求 URL
-  const buildFetchUrl = useCallback(() => {
-    let targetId = currentCategoryId || productLineId;
-    const url = new URL(`/api/front/products/category/${targetId}`, window.location.origin);
-    url.searchParams.set('locale', locale);
-    if (currentSeriesId) url.searchParams.set('seriesId', currentSeriesId);
-    if (!currentCategoryId) url.searchParams.set('isProductLine', 'true');
-    if (availability) url.searchParams.set('availability', availability);
-    if (minPrice !== null) url.searchParams.set('minPrice', String(minPrice));
-    if (maxPrice !== null) url.searchParams.set('maxPrice', String(maxPrice));
-    let sortColumn = 'product_name';
-    let sortOrder = 'ASC';
-    switch (sortBy) {
-      case 'title-asc':
-        sortColumn = 'product_name';
-        sortOrder = 'ASC';
-        break;
-      case 'title-desc':
-        sortColumn = 'product_name';
-        sortOrder = 'DESC';
-        break;
-      case 'price-asc':
-        sortColumn = 'first_price';
-        sortOrder = 'ASC';
-        break;
-      case 'price-desc':
-        sortColumn = 'first_price';
-        sortOrder = 'DESC';
-        break;
-      case 'created-asc':
-        sortColumn = 'createdAt';
-        sortOrder = 'ASC';
-        break;
-      case 'created-desc':
-        sortColumn = 'createdAt';
-        sortOrder = 'DESC';
-        break;
-    }
-    url.searchParams.set('sortColumn', sortColumn);
-    url.searchParams.set('sortOrder', sortOrder);
-    return url.toString();
-  }, [currentCategoryId, productLineId, currentSeriesId, locale, availability, minPrice, maxPrice, sortBy]);
+  const handleToggle = () => setExpanded(!expanded);
 
-  // 核心请求函数
-  const fetchProducts = useCallback(async (options?: { isInitial?: boolean; skipSameKey?: boolean }) => {
-    const { isInitial = false, skipSameKey = true } = options || {};
+  const totalPages = Math.ceil(totalCount / pageSize);
+  const hasPrev = currentPage > 1;
+  const hasNext = currentPage < totalPages;
 
-    if (skipSameKey && requestKey === lastRequestKeyRef.current) {
-      return;
-    }
-    lastRequestKeyRef.current = requestKey;
-
-    if (abortControllerRef.current) {
-      abortControllerRef.current.abort();
-    }
-    const controller = new AbortController();
-    abortControllerRef.current = controller;
-
-    const timeoutId = setTimeout(() => {
-      if (!controller.signal.aborted) {
-        controller.abort();
-        setError('请求超时，请稍后重试');
-        if (isInitial) setIsLoading(false);
-        else setIsRefreshing(false);
-      }
-    }, 10000);
-    timeoutIdRef.current = timeoutId;
-
-    try {
-      if (isInitial) setIsLoading(true);
-      else setIsRefreshing(true);
-      setError(null);
-
-      const url = buildFetchUrl();
-      const res = await fetch(url, { signal: controller.signal });
-      clearTimeout(timeoutId);
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const data = await res.json();
-      if (!controller.signal.aborted) {
-        setProducts(data.items || []);
-        setTotal(data.total || 0);
-      }
-    } catch (err: any) {
-      if (err.name !== 'AbortError') {
-        console.error(err);
-        if (!controller.signal.aborted) setError('加载失败，请稍后重试');
-      }
-    } finally {
-      clearTimeout(timeoutId);
-      if (!controller.signal.aborted) {
-        if (isInitial) setIsLoading(false);
-        else setIsRefreshing(false);
-      }
-      if (abortControllerRef.current === controller) {
-        abortControllerRef.current = null;
-      }
-    }
-  }, [buildFetchUrl, requestKey]);
-
-  useEffect(() => {
-    const timer = setTimeout(() => {
-      fetchProducts({ isInitial: isLoading, skipSameKey: true });
-    }, 100);
-    return () => clearTimeout(timer);
-  }, [fetchProducts, isLoading]);
-
-  useEffect(() => {
-    return () => {
-      if (abortControllerRef.current) abortControllerRef.current.abort();
-      if (timeoutIdRef.current) clearTimeout(timeoutIdRef.current);
-    };
-  }, []);
-
-  const updateFilters = (updates: any) => {
+  const goToPage = (newPage: number) => {
+    if (newPage < 1 || newPage > totalPages) return;
     const params = new URLSearchParams(searchParams);
-    if (updates.sort !== undefined)
-      updates.sort === 'title-asc' ? params.delete('sort') : params.set('sort', updates.sort);
-    if (updates.availability !== undefined)
-      updates.availability ? params.set('availability', updates.availability) : params.delete('availability');
-    if (updates.minPrice !== undefined)
-      updates.minPrice === null ? params.delete('minPrice') : params.set('minPrice', String(updates.minPrice));
-    if (updates.maxPrice !== undefined)
-      updates.maxPrice === null ? params.delete('maxPrice') : params.set('maxPrice', String(updates.maxPrice));
-    router.push(`${pathname}${params.toString() ? `?${params.toString()}` : ''}`, { scroll: false });
+    if (newPage === 1) {
+      params.delete('page');
+    } else {
+      params.set('page', String(newPage));
+    }
+    const queryString = params.toString();
+    router.push(`${pathname}${queryString ? `?${queryString}` : ''}`, { scroll: false });
   };
 
-  const clearFilters = () =>
-    updateFilters({ sort: 'title-asc', availability: null, minPrice: null, maxPrice: null });
-
-  const categories = useMemo(() => categoryTree.map((cat: any) => ({ slug: cat.slug, name: cat.name })), [categoryTree]);
+  const categories = useMemo(
+    () => categoryTree.map((cat: any) => ({ slug: cat.slug, name: cat.name })),
+    [categoryTree]
+  );
   const seriesMap = useMemo(() => {
     const map: Record<string, any[]> = {};
     for (const cat of categoryTree) {
@@ -247,47 +126,179 @@ export function ProductLineBlock({ showSidebar = true, productsPerRow = 3, __run
     return map;
   }, [categoryTree]);
 
-  const gridCols = {
+  const validPerRow =
+    typeof productsPerRow === 'number' && [1, 2, 3, 4].includes(productsPerRow)
+      ? productsPerRow
+      : 3;
+
+  const gridColsMap: Record<number, string> = {
     1: 'grid-cols-1',
     2: 'grid-cols-1 sm:grid-cols-2',
     3: 'grid-cols-1 sm:grid-cols-2 lg:grid-cols-3',
     4: 'grid-cols-1 sm:grid-cols-2 lg:grid-cols-4',
-  }[productsPerRow] || 'grid-cols-1 sm:grid-cols-2 lg:grid-cols-3';
+  };
+  const gridCols = gridColsMap[validPerRow] || 'grid-cols-1 sm:grid-cols-2 lg:grid-cols-3';
+
+  // ============================================================
+  // ✅ 标题区域变量（带最终 fallback）
+  // ============================================================
+  const headerBgColor = 'var(--product-line-header-bg, var(--background, #ffffff))';
+  const headerTextColor = 'var(--product-line-header-text, var(--foreground, #0f172a))';
+  const descTextColor = 'var(--product-line-description-text, var(--muted-foreground, #64748b))';
+
+  // ============================================================
+  // ✅ 分页组件专属变量（带最终 fallback）
+  // ============================================================
+  const paginationBg = 'var(--pagination-bg, var(--background, #ffffff))';
+  const paginationText = 'var(--pagination-text, var(--foreground, #0f172a))';
+  const paginationActiveBg = 'var(--pagination-active-bg, var(--primary, #1e293b))';
+  const paginationActiveText = 'var(--pagination-active-text, var(--primary-foreground, #f8fafc))';
+  const paginationHoverBg = 'var(--pagination-hover-bg, var(--muted, #f1f5f9))';
+  const paginationBorder = 'var(--pagination-border, var(--border, #e2e8f0))';
 
   const renderContent = () => {
-    if (isLoading) {
+    if (products.length === 0) {
       return (
-        <div className="flex justify-center items-center py-12">
-          <div className="w-8 h-8 border-2 border-primary border-t-transparent rounded-full animate-spin" />
-          <span className="ml-2 text-muted-foreground">加载中...</span>
+        <div
+          className="text-center"
+          style={{
+            paddingTop: 'var(--spacing-12, 3rem)',
+            paddingBottom: 'var(--spacing-12, 3rem)',
+            color: 'var(--muted-foreground, #64748b)',
+          }}
+        >
+          {t('noProducts')}
         </div>
       );
     }
-    if (error) {
-      return <div className="text-center py-12 text-destructive">{error}</div>;
-    }
-    if (products.length === 0) {
-      return <div className="text-center py-12 text-muted-foreground">暂无产品</div>;
-    }
     return (
       <>
-        <div className="text-sm text-muted-foreground mb-4">共 {total} 件商品</div>
-        <div className={`grid ${gridCols} gap-6`}>
-          {products.map((product) => (
+        <div
+          style={{
+            fontSize: 'var(--font-size-sm, 0.875rem)',
+            color: 'var(--muted-foreground, #64748b)',
+            marginBottom: 'var(--spacing-4, 1rem)',
+          }}
+        >
+          {t('productCount', { count: totalCount })}，{t('pageInfo', { current: currentPage, total: totalPages })}
+        </div>
+        <div
+          className={`grid ${gridCols}`}
+          style={{ gap: 'var(--spacing-6, 1.5rem)' }}
+        >
+          {products.map((product: any) => (
             <ProductCard key={product.productId} product={product} locale={locale} urlPattern={urlPattern} />
           ))}
+        </div>
+
+        {/* 分页组件 */}
+        <div
+          className="flex justify-center items-center"
+          style={{
+            gap: 'var(--spacing-4, 1rem)',
+            marginTop: 'var(--spacing-8, 2rem)',
+          }}
+        >
+          {/* 上一页 */}
+          <button
+            onClick={() => goToPage(currentPage - 1)}
+            disabled={!hasPrev}
+            className="border"
+            style={{
+              paddingLeft: 'var(--spacing-4, 1rem)',
+              paddingRight: 'var(--spacing-4, 1rem)',
+              paddingTop: 'var(--spacing-2, 0.5rem)',
+              paddingBottom: 'var(--spacing-2, 0.5rem)',
+              borderRadius: 'var(--radius-md, 0.625rem)',
+              backgroundColor: hasPrev ? paginationActiveBg : paginationBg,
+              color: hasPrev ? paginationActiveText : paginationText,
+              borderColor: paginationBorder,
+              cursor: hasPrev ? 'pointer' : 'not-allowed',
+              opacity: hasPrev ? 1 : 0.6,
+              transition: BG_COLOR_TRANSITION,
+            }}
+            onMouseEnter={(e) => {
+              if (hasPrev) {
+                e.currentTarget.style.backgroundColor = paginationHoverBg;
+              }
+            }}
+            onMouseLeave={(e) => {
+              if (hasPrev) {
+                e.currentTarget.style.backgroundColor = paginationActiveBg;
+              }
+            }}
+          >
+            {t('prev')}
+          </button>
+
+          <span
+            style={{
+              fontSize: 'var(--font-size-sm, 0.875rem)',
+              color: paginationText,
+            }}
+          >
+            {t('pageInfo', { current: currentPage, total: totalPages })}
+          </span>
+
+          {/* 下一页 */}
+          <button
+            onClick={() => goToPage(currentPage + 1)}
+            disabled={!hasNext}
+            className="border"
+            style={{
+              paddingLeft: 'var(--spacing-4, 1rem)',
+              paddingRight: 'var(--spacing-4, 1rem)',
+              paddingTop: 'var(--spacing-2, 0.5rem)',
+              paddingBottom: 'var(--spacing-2, 0.5rem)',
+              borderRadius: 'var(--radius-md, 0.625rem)',
+              backgroundColor: hasNext ? paginationActiveBg : paginationBg,
+              color: hasNext ? paginationActiveText : paginationText,
+              borderColor: paginationBorder,
+              cursor: hasNext ? 'pointer' : 'not-allowed',
+              opacity: hasNext ? 1 : 0.6,
+              transition: BG_COLOR_TRANSITION,
+            }}
+            onMouseEnter={(e) => {
+              if (hasNext) {
+                e.currentTarget.style.backgroundColor = paginationHoverBg;
+              }
+            }}
+            onMouseLeave={(e) => {
+              if (hasNext) {
+                e.currentTarget.style.backgroundColor = paginationActiveBg;
+              }
+            }}
+          >
+            {t('next')}
+          </button>
         </div>
       </>
     );
   };
 
+  const normalizedDesc = normalizeLineBreaks(description);
+
   return (
-    <div className="container mx-auto px-4 py-8 bg-background text-foreground">
-      <div className="flex flex-col lg:flex-row gap-8">
+    <div
+      className="mx-auto"
+      style={{
+        backgroundColor: 'var(--background, #ffffff)',
+        color: 'var(--foreground, #0f172a)',
+        paddingLeft: 'var(--spacing-4, 1rem)',
+        paddingRight: 'var(--spacing-4, 1rem)',
+        paddingTop: 'var(--spacing-8, 2rem)',
+        paddingBottom: 'var(--spacing-8, 2rem)',
+        maxWidth: '80rem',
+      }}
+    >
+      <div
+        className="flex flex-col lg:flex-row"
+        style={{ gap: 'var(--spacing-8, 2rem)' }}
+      >
         {showSidebar && (
           <aside className="lg:w-1/4">
             <CategoryTree
-              productLineNameEncoded={encodeURIComponent(productLineName)}
+              productLineNameEncoded={encodeURIComponent(productLineSlug)}
               categories={categories}
               seriesMap={seriesMap}
               currentSlug={currentCategorySlug}
@@ -297,81 +308,57 @@ export function ProductLineBlock({ showSidebar = true, productsPerRow = 3, __run
           </aside>
         )}
         <main className={showSidebar ? 'flex-1' : 'w-full'}>
-          <div className="mb-6">
-            <h1 className="text-3xl font-bold mb-2 text-foreground">
+          {/* 标题区域 */}
+          <div
+            style={{
+              marginBottom: 'var(--spacing-6, 1.5rem)',
+              padding: 'var(--spacing-4, 1rem)',
+              borderRadius: 'var(--radius-lg, 0.75rem)',
+              backgroundColor: headerBgColor,
+              color: headerTextColor,
+            }}
+          >
+            <h1
+              style={{
+                fontSize: 'var(--font-size-3xl, 1.875rem)',
+                fontWeight: 'var(--font-weight-bold, 700)',
+                marginBottom: 'var(--spacing-2, 0.5rem)',
+              }}
+            >
               {currentCategoryInfo?.name || productLineName}
             </h1>
-            {currentCategoryInfo?.description && (
-              <p className="text-muted-foreground">{currentCategoryInfo.description}</p>
+            {description && (
+              <div>
+                <p
+                  ref={descRef}
+                  className={`${!expanded ? 'line-clamp-4' : ''}`}
+                  style={{
+                    color: descTextColor,
+                    whiteSpace: 'pre-wrap',
+                  }}
+                >
+                  {normalizedDesc}
+                </p>
+                {showToggle && (
+                  <button
+                    onClick={handleToggle}
+                    style={{
+                      color: 'var(--primary, #1e293b)',
+                      marginTop: 'var(--spacing-1, 0.25rem)',
+                      fontSize: 'var(--font-size-sm, 0.875rem)',
+                      fontWeight: 'var(--font-weight-medium, 500)',
+                      background: 'none',
+                      border: 'none',
+                      cursor: 'pointer',
+                      textDecoration: 'underline',
+                    }}
+                  >
+                    {expanded ? t('collapse') : t('expand')}
+                  </button>
+                )}
+              </div>
             )}
           </div>
-
-          <div className="flex flex-wrap justify-between items-center gap-4 mb-6">
-            <div className="flex flex-wrap gap-3 items-center">
-              <label className="flex items-center gap-1 text-sm text-foreground">
-                <input
-                  type="checkbox"
-                  checked={availability === 'in-stock'}
-                  onChange={(e) => updateFilters({ availability: e.target.checked ? 'in-stock' : null })}
-                />{' '}
-                有货
-              </label>
-              <label className="flex items-center gap-1 text-sm text-foreground">
-                <input
-                  type="checkbox"
-                  checked={availability === 'out-of-stock'}
-                  onChange={(e) => updateFilters({ availability: e.target.checked ? 'out-of-stock' : null })}
-                />{' '}
-                无货
-              </label>
-              <div className="flex items-center gap-1 border border-border rounded px-2 py-1 bg-background">
-                <span className="text-foreground">¥</span>
-                <input
-                  type="number"
-                  placeholder="最低"
-                  value={minPrice ?? ''}
-                  onChange={(e) => updateFilters({ minPrice: e.target.value ? Number(e.target.value) : null })}
-                  className="w-20 text-sm border-none bg-transparent text-foreground focus:outline-none"
-                />
-                <span className="text-foreground">-</span>
-                <span className="text-foreground">¥</span>
-                <input
-                  type="number"
-                  placeholder="最高"
-                  value={maxPrice ?? ''}
-                  onChange={(e) => updateFilters({ maxPrice: e.target.value ? Number(e.target.value) : null })}
-                  className="w-20 text-sm border-none bg-transparent text-foreground focus:outline-none"
-                />
-              </div>
-              {(availability || minPrice !== null || maxPrice !== null || sortBy !== 'title-asc') && (
-                <button onClick={clearFilters} className="text-sm text-primary hover:underline">
-                  清除筛选
-                </button>
-              )}
-            </div>
-            <div className="flex items-center gap-2">
-              <span className="text-sm text-muted-foreground">排序：</span>
-              <select
-                value={sortBy}
-                onChange={(e) => updateFilters({ sort: e.target.value as SortOption })}
-                className="border border-border rounded p-1 text-sm bg-background text-foreground"
-              >
-                {Object.entries(SORT_LABELS).map(([v, l]) => (
-                  <option key={v} value={v}>
-                    {l}
-                  </option>
-                ))}
-              </select>
-            </div>
-          </div>
-
-          {isRefreshing && (
-            <div className="flex justify-center items-center py-4 border-b border-border mb-4">
-              <div className="w-6 h-6 border-2 border-primary border-t-transparent rounded-full animate-spin" />
-              <span className="ml-2 text-sm text-muted-foreground">更新中...</span>
-            </div>
-          )}
-
           {renderContent()}
         </main>
       </div>

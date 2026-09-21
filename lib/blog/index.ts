@@ -1,47 +1,52 @@
-import fs from 'fs';
-import path from 'path';
+// lib/blog/index.ts
 import { supabase } from '@/lib/supabase/client';
+import { getPrivateStorage } from '@/lib/storage/factory';
+import { upsertPost, deletePost, getPost } from './services/post.service';
+import { BlogPost, BlogCategory, BlogConfig } from './types';
+import { unstable_cache } from 'next/cache';
 
 const DEFAULT_SITE_ID = process.env.NEXT_PUBLIC_SITE_ID || '000001';
 
-export interface BlogCategory {
-  slug: string;
-  name_zh: string;
-  name_en: string;
-  name_de: string;
+// ============================================================
+// 原始（无缓存）函数 – 保持向后兼容
+// ============================================================
+
+export async function getBlogCategories(locale: string): Promise<BlogCategory[]> {
+  const storage = getPrivateStorage();
+  const key = `blog/${locale}/categories.json`;
+  try {
+    const content = await storage.read(key, 'utf8');
+    const categories: any[] = JSON.parse(content as string);
+    if (!categories || !Array.isArray(categories)) {
+      console.warn(`Invalid categories data for locale: ${locale}`);
+      return [];
+    }
+    return categories.map((cat: any) => ({
+      id: cat.id || cat.slug,
+      slug: cat.slug || cat.id,
+      name: cat.name || cat.title || cat.slug || '未命名',
+      // 可扩展其他字段（如 seoTitle, image 等）
+    }));
+  } catch (error) {
+    console.warn(`Failed to load categories from storage: ${key}`, error);
+    return [];
+  }
 }
 
-export interface BlogPost {
-  id: string;
-  slug: string;
-  title: string;
-  date: string;
-  category: string;
-  author?: string;
-  excerpt?: string;
-  videoUrl?: string;
-  content: string;
-  tags?: string[];
-  seo?: any;
-  image?: string;
+export async function getBlogCategoryBySlug(
+  locale: string,
+  slug: string
+): Promise<BlogCategory | null> {
+  const categories = await getBlogCategories(locale);
+  const cat = categories.find((c) => c.slug === slug);
+  if (!cat) return null;
+  return cat;
 }
 
-// 获取所有分类（从 data/blog/{locale}/categories.json 读取）
-export function getBlogCategories(locale: string): { slug: string; name: string }[] {
-  const categoriesPath = path.join(process.cwd(), 'data', 'blog', locale, 'categories.json');
-  if (!fs.existsSync(categoriesPath)) return [];
-  const categories: any[] = JSON.parse(fs.readFileSync(categoriesPath, 'utf-8'));
-  return categories.map(cat => ({
-    slug: cat.slug,
-    name: cat.title || cat.slug,
-  }));
-}
-
-// 获取所有文章（仅元数据，用于列表页）
 export async function getBlogPosts(locale: string): Promise<BlogPost[]> {
   const { data, error } = await supabase
     .from('blog_posts')
-    .select('slug, title, excerpt, updated_at, category_id, author, featured_image')
+    .select('id, slug, title, excerpt, updated_at, category_id, author, featured_image')
     .eq('site_id', DEFAULT_SITE_ID)
     .eq('locale', locale)
     .eq('visibility', 'visible')
@@ -52,7 +57,8 @@ export async function getBlogPosts(locale: string): Promise<BlogPost[]> {
     return [];
   }
 
-  return (data || []).map(row => ({
+  return (data || []).map((row) => ({
+    id: String(row.id),
     slug: row.slug,
     title: row.title || '无标题',
     date: row.updated_at || new Date().toISOString(),
@@ -66,7 +72,39 @@ export async function getBlogPosts(locale: string): Promise<BlogPost[]> {
   }));
 }
 
-// 获取单篇文章（包含全文、标签、关联数据）
+export async function getBlogPostsByCategorySlug(locale: string, categorySlug: string): Promise<BlogPost[]> {
+  const category = await getBlogCategoryBySlug(locale, categorySlug);
+  if (!category) return [];
+
+  const { data, error } = await supabase
+    .from('blog_posts')
+    .select('id, slug, title, excerpt, updated_at, category_id, author, featured_image')
+    .eq('site_id', DEFAULT_SITE_ID)
+    .eq('locale', locale)
+    .eq('visibility', 'visible')
+    .eq('category_id', category.id)
+    .order('updated_at', { ascending: false });
+
+  if (error) {
+    console.error(`Failed to fetch blog posts for category ${categorySlug}:`, error);
+    return [];
+  }
+
+  return (data || []).map((row) => ({
+    id: String(row.id),
+    slug: row.slug,
+    title: row.title || '无标题',
+    date: row.updated_at || new Date().toISOString(),
+    category: row.category_id || '',
+    author: row.author || '',
+    excerpt: row.excerpt || '',
+    image: row.featured_image || '',
+    content: '',
+    videoUrl: '',
+    seo: null,
+  }));
+}
+
 export async function getBlogPost(locale: string, slug: string): Promise<BlogPost | null> {
   const { data: row, error } = await supabase
     .from('blog_posts')
@@ -82,7 +120,9 @@ export async function getBlogPost(locale: string, slug: string): Promise<BlogPos
     return null;
   }
 
-  // 解析 tags（兼容旧数据格式）
+  const fullPost = await getPost(locale, row.id);
+  if (!fullPost) return null;
+
   let tags: string[] = [];
   const rawTags = row.tags;
   if (rawTags) {
@@ -110,21 +150,8 @@ export async function getBlogPost(locale: string, slug: string): Promise<BlogPos
   }
   tags = tags.filter(t => t && t !== '[]');
 
-  // 读取 Markdown 正文（文件系统）
-  const filePath = path.join(process.cwd(), 'data', 'blog', locale, `${row.id}.md`);
-  let content = '';
-  try {
-    if (fs.existsSync(filePath)) {
-      content = fs.readFileSync(filePath, 'utf-8');
-    } else {
-      console.warn(`Markdown file not found: ${filePath}`);
-    }
-  } catch (e) {
-    console.error(`Failed to read ${filePath}`, e);
-  }
-
   return {
-    id: row.id.toString(),
+    id: String(row.id),
     slug: row.slug,
     title: row.title || '无标题',
     date: row.updated_at || new Date().toISOString(),
@@ -132,65 +159,107 @@ export async function getBlogPost(locale: string, slug: string): Promise<BlogPos
     author: row.author || '',
     excerpt: row.excerpt || '',
     videoUrl: '',
-    content,
+    content: fullPost.content || '',
     tags,
     seo: null,
   };
 }
 
-// 根据分类 slug 获取分类信息（含 id, slug, name）
-export function getBlogCategoryBySlug(locale: string, slug: string): { id: string; slug: string; name: string } | null {
-  const categoriesPath = path.join(process.cwd(), 'data', 'blog', locale, 'categories.json');
-  if (!fs.existsSync(categoriesPath)) return null;
-  const categories: any[] = JSON.parse(fs.readFileSync(categoriesPath, 'utf-8'));
-  const cat = categories.find(c => c.slug === slug);
-  if (!cat) return null;
-  return {
-    id: cat.id,
-    slug: cat.slug,
-    name: cat.title || cat.slug,
-  };
+/**
+ * 获取博客配置（从 settings.json 读取，若无则返回默认值）
+ */
+export async function getBlogConfig(locale: string): Promise<BlogConfig> {
+  const storage = getPrivateStorage();
+  const key = `blog/${locale}/settings.json`;
+  try {
+    const content = await storage.read(key, 'utf8');
+    const parsed = JSON.parse(content as string);
+    return {
+      name: parsed.name || '博客',
+      tagline: parsed.tagline || '',
+      image: parsed.image || '',
+      seoTitle: parsed.seoTitle || '',
+      seoDescription: parsed.seoDescription || '',
+      seoKeywords: parsed.seoKeywords || '',
+    };
+  } catch {
+    // 文件不存在，返回默认配置
+    return {
+      name: '博客',
+      tagline: '',
+      image: '',
+      seoTitle: '',
+      seoDescription: '',
+      seoKeywords: '',
+    };
+  }
 }
 
-// 根据分类 slug 获取该分类下的所有文章（仅元数据，不含正文）
-export async function getBlogPostsByCategorySlug(locale: string, categorySlug: string): Promise<BlogPost[]> {
-  const category = getBlogCategoryBySlug(locale, categorySlug);
-  if (!category) return [];
+// ============================================================
+// 缓存版本（使用 unstable_cache）
+// ============================================================
 
-  const { data, error } = await supabase
-    .from('blog_posts')
-    .select('slug, title, excerpt, updated_at, category_id, author')
-    .eq('site_id', DEFAULT_SITE_ID)
-    .eq('locale', locale)
-    .eq('visibility', 'visible')
-    .eq('category_id', category.id)
-    .order('updated_at', { ascending: false });
+export const getCachedBlogConfig = unstable_cache(
+  async (locale: string) => getBlogConfig(locale),
+  ['blog-config'],
+  { revalidate: 3600 }
+);
 
-  if (error) {
-    console.error(`Failed to fetch blog posts for category ${categorySlug}:`, error);
-    return [];
+export const getCachedBlogCategories = unstable_cache(
+  async (locale: string) => getBlogCategories(locale),
+  ['blog-categories'],
+  { revalidate: 3600 }
+);
+
+export const getCachedBlogPosts = unstable_cache(
+  async (locale: string) => getBlogPosts(locale),
+  ['blog-posts'],
+  { revalidate: 3600 }
+);
+
+export const getCachedBlogPostsByCategorySlug = unstable_cache(
+  async (locale: string, categorySlug: string) => getBlogPostsByCategorySlug(locale, categorySlug),
+  ['blog-posts-by-category'],
+  { revalidate: 3600 }
+);
+
+export const getCachedBlogPost = unstable_cache(
+  async (locale: string, slug: string) => getBlogPost(locale, slug),
+  ['blog-post'],
+  { revalidate: 3600 }
+);
+
+// ============================================================
+// 保存与删除（复用 post.service）
+// ============================================================
+
+export async function saveBlogPost(locale: string, data: any, content: string): Promise<void> {
+  let excerpt = data.excerpt || '';
+  if (!excerpt && content) {
+    const plainText = content.replace(/<[^>]*>/g, '');
+    excerpt = plainText.length > 200 ? plainText.slice(0, 200) + '...' : plainText;
   }
 
-  return (data || []).map(row => ({
-    slug: row.slug,
-    title: row.title || '无标题',
-    date: row.updated_at || new Date().toISOString(),
-    category: row.category_id || '',
-    author: row.author || '',
-    excerpt: row.excerpt || '',
-    videoUrl: '',
-    content: '',
-    seo: null,
-  }));
+  await upsertPost(locale, {
+    id: data.id,
+    slug: data.slug,
+    title: data.title,
+    excerpt,
+    visibility: data.visibility || 'visible',
+    featured_image: data.featured_image || '',
+    author: data.author || '',
+    category_id: data.category_id || '',
+    tags: data.tags || [],
+    template: data.template || 'default',
+    seo_keywords: data.seo_keywords || '',
+    seo_title: data.seo_title || '',
+    seo_description: data.seo_description || '',
+  }, content);
 }
 
-// 保存文章（供后台使用，根据实际 API 补充）
-export async function saveBlogPost(locale: string, slug: string, data: any, content: string) {
-  // 请根据您的后台实现填写
-  // 这里仅留空，保持签名兼容
+export async function deleteBlogPost(locale: string, id: string): Promise<void> {
+  await deletePost(locale, id);
 }
 
-// 删除文章（供后台使用）
-export async function deleteBlogPost(locale: string, slug: string) {
-  // 请根据您的后台实现填写
-}
+// 导出类型
+export type { BlogPost, BlogCategory, BlogConfig } from './types';

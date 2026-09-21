@@ -8,7 +8,7 @@ import { toast } from 'sonner';
 
 // 模板分类（全量，用于类型推断）
 const CATEGORIES = [
-  { value: 'page', label: '页面' },
+  { value: 'page', label: '页面/落地页' },
   { value: 'product', label: '产品' },
   { value: 'product_category', label: '产品合集' },
   { value: 'product_line', label: '产品线' },

@@ -1,33 +1,57 @@
+// app/api/front/products/[productId]/related-resources/route.ts
 import { NextRequest, NextResponse } from 'next/server';
+import NodeCache from 'node-cache';
 import { getResourcesByProduct } from '@/lib/products/resourceRelations';
+import { getVideosByIds } from '@/lib/videosys';
 
-// 辅助：根据资源类型和ID列表获取详情
+// 缓存 5 分钟
+const relatedResourcesCache = new NodeCache({ stdTTL: 300, checkperiod: 60 });
+
+// ========== 辅助：生成视频播放 URL ==========
+function buildVideoPlayUrl(sourceType: string, videoId: string): string {
+  switch (sourceType) {
+    case 'youtube':
+      return `https://www.youtube.com/embed/${videoId}`;
+    case 'vimeo':
+      return `https://player.vimeo.com/video/${videoId}`;
+    case 'bilibili':
+      return `https://player.bilibili.com/player.html?bvid=${videoId}&page=1`;
+    default:
+      return '';
+  }
+}
+
+// ========== 资源详情填充 ==========
 async function enrichResources(
   resourceType: string,
   ids: { id: string; sortOrder: number }[],
   locale: string
-) {
+): Promise<any[]> {
   if (ids.length === 0) return [];
-  // 根据资源类型调用不同的详情查询
-  // 示例：假设博客有表 `blogs`，文档有 `documents`，视频有 `videos`
-  // 为避免复杂，这里返回基础信息，实际可分别实现
-  // 此处只做示例，真实项目需对接各自的资源表
-  const baseUrl = process.env.NEXT_PUBLIC_BASE_URL || 'http://localhost:3000';
-  let results = [];
+
+  const idList = ids.map(i => i.id);
+  let items: any[] = [];
+
   try {
-    if (resourceType === 'blog') {
-      // 调用博客详情API（需要自行实现）
-      const res = await fetch(`${baseUrl}/api/front/blogs?ids=${ids.map(i => i.id).join(',')}&locale=${locale}`);
-      if (res.ok) results = await res.json();
+    if (resourceType === 'video') {
+      const videos = await getVideosByIds(idList, locale);
+      items = videos.map(video => ({
+        ...video,
+        type: 'video',
+        url: buildVideoPlayUrl(video.source_type, video.video_id),
+        sortOrder: ids.find(i => i.id === video.id)?.sortOrder ?? 0,
+      }));
+    } else if (resourceType === 'blog') {
+      return [];
     } else if (resourceType === 'document') {
-      // 类似
-    } else if (resourceType === 'video') {
-      // 类似
+      return [];
     }
   } catch (err) {
     console.error(`Fetch ${resourceType} details error:`, err);
+    return [];
   }
-  return results.map((r: any) => ({ ...r, sortOrder: ids.find(i => i.id === r.id)?.sortOrder }));
+
+  return items;
 }
 
 export async function GET(
@@ -38,15 +62,43 @@ export async function GET(
     const { productId } = await params;
     const searchParams = request.nextUrl.searchParams;
     const locale = searchParams.get('locale') || 'zh';
+
+    const cacheKey = `related-resources:${productId}:${locale}`;
+
+    // 1. 命中缓存
+    const cached = relatedResourcesCache.get<{
+      blogs: any[];
+      documents: any[];
+      videos: any[];
+    }>(cacheKey);
+    if (cached) {
+      return NextResponse.json(cached, {
+        headers: {
+          'Cache-Control': 'public, s-maxage=300, stale-while-revalidate=600',
+          'X-Cache': 'HIT',
+        },
+      });
+    }
+
+    // 2. 查库
     const grouped = await getResourcesByProduct(productId);
-    
-    // 分别获取各类型资源的详情（此处简化，实际可以并行查询）
-    const enriched = {
-      blogs: await enrichResources('blog', grouped.blog, locale),
-      documents: await enrichResources('document', grouped.document, locale),
-      videos: await enrichResources('video', grouped.video, locale),
-    };
-    return NextResponse.json(enriched);
+
+    // 并行获取各类型资源详情
+    const [blogs, documents, videos] = await Promise.all([
+      enrichResources('blog', grouped.blog, locale),
+      enrichResources('document', grouped.document, locale),
+      enrichResources('video', grouped.video, locale),
+    ]);
+
+    const result = { blogs, documents, videos };
+    relatedResourcesCache.set(cacheKey, result);
+
+    return NextResponse.json(result, {
+      headers: {
+        'Cache-Control': 'public, s-maxage=300, stale-while-revalidate=600',
+        'X-Cache': 'MISS',
+      },
+    });
   } catch (error) {
     console.error('[Product Related Resources]', error);
     return NextResponse.json({ error: '加载失败' }, { status: 500 });

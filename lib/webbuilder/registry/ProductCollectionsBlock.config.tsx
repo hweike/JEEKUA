@@ -3,7 +3,7 @@ import type { ComponentConfig } from '@puckeditor/core';
 import type { Components } from '../types';
 
 export const config: ComponentConfig<Components['ProductCollectionsBlock']> = {
-  label: '产品集合展示',
+  label: '产品合集列表',
   category: 'Product',
   defaultProps: {
     productsPerRow: 3,

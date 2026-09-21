@@ -4,6 +4,7 @@ import { useEffect, useState, useCallback, useMemo } from 'react';
 import Toast from '@/components/common/Toast';
 import MenuCategory from './components/MenuCategory';
 import AddMenuModal from './components/AddMenuModal';
+import AiHelperMenuModal from './components/AiHelperMenuModal';
 import { Plus } from 'lucide-react';
 
 interface Menu {
@@ -26,14 +27,7 @@ function generateNumericId(): string {
 }
 
 function isValidMenu(menu: any): boolean {
-  return (
-    menu &&
-    typeof menu === 'object' &&
-    menu.id &&
-    menu.name &&
-    Array.isArray(menu.items) &&
-    menu.items.length > 0
-  );
+  return menu && typeof menu === 'object' && menu.id && menu.name && Array.isArray(menu.items);
 }
 
 export default function MenusPage() {
@@ -42,12 +36,14 @@ export default function MenusPage() {
   const [loading, setLoading] = useState(true);
   const [initLoading, setInitLoading] = useState<{ type: string; locale: string; loading: boolean } | null>(null);
   const [showAddModal, setShowAddModal] = useState(false);
+  const [showAiHelper, setShowAiHelper] = useState(false);
+  const [aiHelperSourceLocale, setAiHelperSourceLocale] = useState<string>('');
+  const [aiHelperMenuType, setAiHelperMenuType] = useState<'navigation' | 'footer' | 'custom_menus'>('navigation');
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
 
-  // 获取所有启用的语言列表
   const fetchAvailableLocales = useCallback(async () => {
     try {
-      const res = await fetch('/api/languages/enabled');
+      const res = await fetch('/api/languages/enabled', { cache: 'no-store' });
       const data = await res.json();
       let locales: string[] = [];
       if (Array.isArray(data)) {
@@ -67,16 +63,18 @@ export default function MenusPage() {
     }
   }, []);
 
-  // ---- 改为批量获取所有语言的菜单数据 ----
   const fetchAllMenus = useCallback(async (locales: string[]) => {
     if (locales.length === 0) return;
     setLoading(true);
-    setAllMenus({}); // 清空旧数据
+    setAllMenus({});
     try {
-      const url = `/api/admin/menus?locales=${locales.join(',')}`;
-      const res = await fetch(url);
+      const url = `/api/admin/menus?locales=${locales.join(',')}&t=${Date.now()}`;
+      const res = await fetch(url, {
+        cache: 'no-store',
+        headers: { 'Cache-Control': 'no-cache' },
+      });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const data = await res.json(); // { "zh": { navigation, footer, customMenus }, "en": {...}, ... }
+      const data = await res.json();
 
       const newAllMenus: AllMenus = {};
       locales.forEach((locale) => {
@@ -96,12 +94,10 @@ export default function MenusPage() {
     }
   }, []);
 
-  // 首次加载：获取语言列表
   useEffect(() => {
     fetchAvailableLocales();
   }, [fetchAvailableLocales]);
 
-  // 当语言列表更新后，获取菜单数据
   useEffect(() => {
     if (availableLocales.length > 0) {
       fetchAllMenus(availableLocales);
@@ -114,11 +110,11 @@ export default function MenusPage() {
     }
   }, [availableLocales, fetchAllMenus]);
 
-  // 初始化默认菜单
   const initMenu = useCallback(
     async (locale: string, menuType: 'navigation' | 'footer') => {
-      if (!confirm(`确定要将 "${locale}" 站点的“${menuType === 'navigation' ? '主导航' : '底部菜单'}”恢复为默认预设吗？当前菜单将被覆盖。`))
-        return;
+      const displayName = menuType === 'navigation' ? '主导航' : '底部菜单';
+      if (!confirm(`确定要将 "${locale}" 站点的“${displayName}”恢复为默认预设吗？当前菜单将被覆盖。`)) return;
+
       setInitLoading({ type: menuType, locale, loading: true });
       try {
         const res = await fetch('/api/admin/menus/init', {
@@ -128,7 +124,7 @@ export default function MenusPage() {
         });
         if (res.ok) {
           setToast({ message: `初始化成功 (${locale})`, type: 'success' });
-          refreshMenus();
+          setTimeout(() => refreshMenus(), 300);
         } else {
           const err = await res.json();
           setToast({ message: err.error || '初始化失败', type: 'error' });
@@ -142,7 +138,29 @@ export default function MenusPage() {
     [refreshMenus]
   );
 
-  // 删除自定义菜单
+  // 彻底删除菜单，恢复到未设置状态（menu = null）
+  const clearMenu = useCallback(
+    async (locale: string, menuType: 'navigation' | 'footer') => {
+      try {
+        const res = await fetch(`/api/admin/menus/${locale}/${menuType}`, {
+          method: 'DELETE',
+        });
+
+        if (res.ok) {
+          setToast({ message: `已删除 ${locale} 站点的菜单，恢复为未设置状态`, type: 'success' });
+          refreshMenus();
+        } else {
+          const err = await res.json();
+          setToast({ message: err.error || '删除失败', type: 'error' });
+        }
+      } catch (error) {
+        console.error('删除菜单失败:', error);
+        setToast({ message: '删除失败，请稍后重试', type: 'error' });
+      }
+    },
+    [refreshMenus]
+  );
+
   const deleteCustomMenu = useCallback(
     async (locale: string, menuId: string) => {
       if (!confirm('删除菜单会同时删除其所有菜单项，确定吗？')) return;
@@ -163,7 +181,6 @@ export default function MenusPage() {
     [allMenus, refreshMenus]
   );
 
-  // 新增自定义菜单
   const addCustomMenu = useCallback(
     async (locale: string, name: string) => {
       const newMenu: Menu = {
@@ -188,7 +205,17 @@ export default function MenusPage() {
     [allMenus, refreshMenus]
   );
 
-  // 分类数据
+  const handleAiTranslate = useCallback((
+    sourceLocale: string,
+    menuType: 'navigation' | 'footer' | 'custom_menus'
+  ) => {
+    if (!sourceLocale || !menuType) return;
+    if (sourceLocale !== 'zh' && sourceLocale !== 'en') return;
+    setAiHelperSourceLocale(sourceLocale);
+    setAiHelperMenuType(menuType);
+    setShowAiHelper(true);
+  }, []);
+
   const categoryData = useMemo(() => {
     const locales = availableLocales;
     return {
@@ -202,15 +229,17 @@ export default function MenusPage() {
         menu: allMenus[locale]?.footer || null,
         isDefault: true,
       })),
-      custom: locales.map((locale) => ({
-        locale,
-        menus: allMenus[locale]?.customMenus || [],
-        isDefault: false,
-      })),
+      custom: locales.flatMap((locale) => {
+        const menus = allMenus[locale]?.customMenus || [];
+        return menus.map((menu) => ({
+          locale,
+          menu,
+          isDefault: false,
+        }));
+      }),
     };
   }, [availableLocales, allMenus]);
 
-  // 加载完成前显示占位
   if (loading) {
     return (
       <div className="p-6 text-center text-gray-500">
@@ -239,6 +268,8 @@ export default function MenusPage() {
           entries={categoryData.navigation}
           type="navigation"
           onInit={initMenu}
+          onClear={clearMenu}
+          onAiTranslate={handleAiTranslate}
           initLoading={initLoading}
           availableLocales={availableLocales}
           onRefresh={refreshMenus}
@@ -248,6 +279,8 @@ export default function MenusPage() {
           entries={categoryData.footer}
           type="footer"
           onInit={initMenu}
+          onClear={clearMenu}
+          onAiTranslate={handleAiTranslate}
           initLoading={initLoading}
           availableLocales={availableLocales}
           onRefresh={refreshMenus}
@@ -257,6 +290,7 @@ export default function MenusPage() {
           entries={categoryData.custom}
           type="custom"
           onDelete={deleteCustomMenu}
+          onAiTranslate={handleAiTranslate}
           availableLocales={availableLocales}
           onRefresh={refreshMenus}
         />
@@ -268,6 +302,18 @@ export default function MenusPage() {
           onSave={addCustomMenu}
           availableLocales={availableLocales}
           defaultLocale={availableLocales[0] || 'zh'}
+        />
+      )}
+
+      {showAiHelper && (
+        <AiHelperMenuModal
+          sourceLocale={aiHelperSourceLocale}
+          menuType={aiHelperMenuType}
+          onClose={() => setShowAiHelper(false)}
+          onImportSuccess={() => {
+            refreshMenus();
+            setShowAiHelper(false);
+          }}
         />
       )}
 

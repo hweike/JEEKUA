@@ -1,4 +1,5 @@
 // lib/webbuilder/template-manager.ts
+import { unstable_cache } from 'next/cache';
 import { getPrivateStorage } from '@/lib/storage/factory';
 import { createHash } from 'crypto';
 
@@ -96,10 +97,10 @@ export async function getAllTemplates(category?: TemplateCategory | null): Promi
 }
 
 /**
- * 根据 ID 获取模板（自动遍历所有分类查找）
+ * 内部实现：根据 ID 获取模板（自动遍历所有分类查找）
  * 返回的模板对象包含 hash 字段（如果模板文件中有）
  */
-export async function getTemplateById(id: string): Promise<Template | null> {
+async function getTemplateByIdImpl(id: string): Promise<Template | null> {
   const storage = getPrivateStorage();
   for (const cat of ALL_CATEGORIES) {
     const key = getTemplateKey(cat, id);
@@ -115,6 +116,24 @@ export async function getTemplateById(id: string): Promise<Template | null> {
   }
   return null;
 }
+
+/**
+ * 根据 ID 获取模板（带 1 小时缓存）
+ *
+ * 缓存策略：
+ * - 缓存键：['template-by-id'] + 函数参数 id（Next.js 自动处理）
+ * - 缓存有效期：1 小时
+ * - 首次读取后，1 小时内所有请求直接返回缓存
+ *
+ * 使用场景：
+ * - createPage / updatePage 中读取模板数据
+ * - 避免每次保存都从远程云存储读取
+ */
+export const getTemplateById = unstable_cache(
+  getTemplateByIdImpl,
+  ['template-by-id'],
+  { revalidate: 3600 }
+);
 
 /**
  * 创建新模板（注意：此函数不会自动计算 hash，调用方需自行计算）

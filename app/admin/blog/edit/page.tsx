@@ -225,7 +225,8 @@ export default function BlogEdit() {
       const data = await res.json();
       if (res.ok) {
         setToast({ message: isExisting ? '更新成功' : '创建成功', type: 'success' });
-        router.push('/admin/blog');
+        // 保存后回到对应语言的列表页
+        router.push(`/admin/blog?locale=${locale}`);
       } else {
         setToast({ message: data.error || '保存失败', type: 'error' });
       }

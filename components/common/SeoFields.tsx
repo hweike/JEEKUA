@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useCallback, useRef, ReactNode } from 'react';
 import { toPinyin } from '@/lib/utils/pinyin';
 import { getFieldHint, getFieldPlaceholder, HINT_PATHS, InfoTooltip } from '@/config/fieldHints';
 
@@ -10,6 +10,8 @@ export interface SeoData {
   seoTitle: string;
   seoDescription: string;
 }
+
+export type SlugStatus = 'idle' | 'checking' | 'available' | 'taken' | 'error';
 
 export interface SeoFieldsProps {
   slug?: string;
@@ -22,6 +24,21 @@ export interface SeoFieldsProps {
   onTitleChange?: (value: string) => void;
   onDescriptionChange?: (value: string) => void;
   onChange?: (data: SeoData) => void;
+
+  /** slug 输入框失焦回调 */
+  onSlugBlur?: () => void;
+
+  /** slug 检查状态（可选，用于显示边框颜色） */
+  slugStatus?: SlugStatus;
+
+  /** slug 输入框下方的额外内容（如状态提示、建议值） */
+  slugExtra?: ReactNode;
+
+  /** 元标题下方的提示文案（非错误，仅建议） */
+  seoTitleHint?: string;
+
+  /** 元描述下方的提示文案（非错误，仅建议） */
+  seoDescriptionHint?: string;
 
   autoGenerateFrom?: string;
   showSlug?: boolean;
@@ -56,7 +73,7 @@ function generateSlugFromText(text: string): string {
   if (!text) return '';
 
   const parts: string[] = [];
-  let currentToken = ''; // 累积连续的字母/数字
+  let currentToken = '';
 
   for (let i = 0; i < text.length; i++) {
     const ch = text[i];
@@ -78,7 +95,6 @@ function generateSlugFromText(text: string): string {
       const pinyin = toPinyin(ch);
       if (pinyin) parts.push(pinyin);
     }
-    // 其他字符（空格、标点等）直接忽略
   }
 
   // 处理末尾可能剩余的token
@@ -102,6 +118,25 @@ function generateSlugFromText(text: string): string {
   return slug;
 }
 
+/**
+ * 根据 slugStatus 返回输入框的边框样式
+ */
+function getSlugInputClass(status?: SlugStatus): string {
+  const base = 'border rounded p-2 w-full transition-colors';
+  switch (status) {
+    case 'taken':
+      return `${base} border-red-500 focus:ring-red-500 focus:border-red-500`;
+    case 'available':
+      return `${base} border-green-500 focus:ring-green-500 focus:border-green-500`;
+    case 'checking':
+      return `${base} border-gray-300 focus:ring-blue-500 focus:border-blue-500`;
+    case 'error':
+      return `${base} border-yellow-500 focus:ring-yellow-500 focus:border-yellow-500`;
+    default:
+      return `${base} border-gray-300 focus:ring-blue-500 focus:border-blue-500`;
+  }
+}
+
 export default function SeoFields({
   slug: externalSlug = '',
   seoKeywords: externalKeywords = '',
@@ -112,6 +147,11 @@ export default function SeoFields({
   onTitleChange,
   onDescriptionChange,
   onChange,
+  onSlugBlur,
+  slugStatus,
+  slugExtra,
+  seoTitleHint,
+  seoDescriptionHint,
   autoGenerateFrom,
   showSlug = true,
   showKeywords = true,
@@ -132,9 +172,8 @@ export default function SeoFields({
   const [seoDescription, setSeoDescription] = useState(externalDescription);
 
   // 标记 slug 是否被用户手动编辑过
-  const [isSlugManual, setIsSlugManual] = useState(!!externalSlug); // 如果有初始值，认为是手动编辑过的
+  const [isSlugManual, setIsSlugManual] = useState(!!externalSlug);
 
-  // 用于避免因外部 props 变化覆盖内部手动标记的标志
   const isSlugManualRef = useRef(isSlugManual);
   useEffect(() => {
     isSlugManualRef.current = isSlugManual;
@@ -149,8 +188,7 @@ export default function SeoFields({
   useEffect(() => setTitleLength(seoTitle.length), [seoTitle]);
   useEffect(() => setDescLength(seoDescription.length), [seoDescription]);
 
-  // 同步外部变化到内部状态（当外部值明确变化时）
-  // 但要注意：如果 slug 外部变化且当前不是手动编辑模式，则更新；否则保留内部手动值
+  // 同步外部变化到内部状态
   useEffect(() => {
     setSeoKeywords(externalKeywords);
     setSeoTitle(externalTitle);
@@ -158,31 +196,14 @@ export default function SeoFields({
   }, [externalKeywords, externalTitle, externalDescription]);
 
   useEffect(() => {
-    // 如果 slug 外部值变化，且当前不是手动编辑模式（或者外部值由空变为非空也可能是初始化），则使用外部值
     if (!isSlugManualRef.current) {
       setSlug(externalSlug);
     } else {
-      // 如果已经是手动模式，但外部值变化且不为空（例如加载已保存的 slug），
-      // 这时应保留外部值，并标记为手动（因为加载的 slug 就是用户之前保存的手动值）
       if (externalSlug && externalSlug !== slug) {
         setSlug(externalSlug);
-        // 注意：不改变 isSlugManual，因为外部值已经是手动编辑的结果
       }
     }
   }, [externalSlug, slug]);
-
-  // 自动生成 slug（仅在非手动模式且 autoGenerateFrom 触发时）
-  useEffect(() => {
-    if (!autoGenerateFrom || disabled || !showSlug) return;
-    if (!isSlugManual) {
-      const generated = generateSlugFromText(autoGenerateFrom);
-      // 只有当生成的值与当前 slug 不同，且当前 slug 为空或者不是由外部手动提供时，才更新
-      if (generated && generated !== slug) {
-        setSlug(generated);
-        handleChange({ slug: generated });
-      }
-    }
-  }, [autoGenerateFrom, isSlugManual, slug, showSlug, disabled]);
 
   // 统一向外发送变化
   const handleChange = useCallback(
@@ -202,12 +223,31 @@ export default function SeoFields({
     [slug, seoKeywords, seoTitle, seoDescription, onSlugChange, onKeywordsChange, onTitleChange, onDescriptionChange, onChange]
   );
 
+  // 自动生成 slug（仅在非手动模式且 autoGenerateFrom 触发时）
+  useEffect(() => {
+    if (!autoGenerateFrom || disabled || !showSlug) return;
+    if (!isSlugManual) {
+      const generated = generateSlugFromText(autoGenerateFrom);
+      if (generated && generated !== slug) {
+        setSlug(generated);
+        handleChange({ slug: generated });
+      }
+    }
+  }, [autoGenerateFrom, isSlugManual, slug, showSlug, disabled, handleChange]);
+
   const handleSlugEdit = (value: string) => {
     if (disabled) return;
     setIsSlugManual(true);
     const newSlug = value.slice(0, slugMaxLength);
     setSlug(newSlug);
     handleChange({ slug: newSlug });
+  };
+
+  const handleSlugBlur = () => {
+    if (disabled) return;
+    if (onSlugBlur) {
+      onSlugBlur();
+    }
   };
 
   const handleKeywords = (value: string) => {
@@ -251,10 +291,19 @@ export default function SeoFields({
             type="text"
             value={slug}
             onChange={e => handleSlugEdit(e.target.value)}
-            className="border rounded p-2 w-full"
+            onBlur={handleSlugBlur}
+            className={getSlugInputClass(slugStatus)}
             placeholder={getFieldPlaceholder('common.seo.slug')}
             disabled={disabled}
           />
+
+          {/* slug 输入框下方的额外内容（如状态提示、建议值） */}
+          {slugExtra && (
+            <div className="mt-1">
+              {slugExtra}
+            </div>
+          )}
+
           <div className="text-xs text-gray-500 mt-1 flex justify-between">
             <span>{slugLength}/{slugMaxLength} 字符</span>
             {autoGenerateFrom && !disabled && !isSlugManual && (
@@ -298,6 +347,10 @@ export default function SeoFields({
             placeholder={getFieldPlaceholder('common.seo.title')}
             disabled={disabled}
           />
+          {/* ✅ 元标题提示（非错误） */}
+          {seoTitleHint && (
+            <p className="text-xs text-amber-600 mt-1">{seoTitleHint}</p>
+          )}
           <div className="text-xs text-gray-500 mt-1 flex justify-between">
             <span>{titleLength}/{titleMaxLength} 字符</span>
           </div>
@@ -318,6 +371,10 @@ export default function SeoFields({
             placeholder={getFieldPlaceholder('common.seo.description')}
             disabled={disabled}
           />
+          {/* ✅ 元描述提示（非错误） */}
+          {seoDescriptionHint && (
+            <p className="text-xs text-amber-600 mt-1">{seoDescriptionHint}</p>
+          )}
           <div className="text-xs text-gray-500 mt-1 flex justify-between">
             <span>{descLength}/{descMaxLength} 字符</span>
           </div>

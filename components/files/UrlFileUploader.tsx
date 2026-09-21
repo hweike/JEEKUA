@@ -6,9 +6,15 @@ interface UrlFileUploaderProps {
   open: boolean;
   onClose: () => void;
   onUploadSuccess: () => void;
+  categoryId?: string | null; // 新增：从父页面传入
 }
 
-export default function UrlFileUploader({ open, onClose, onUploadSuccess }: UrlFileUploaderProps) {
+export default function UrlFileUploader({ 
+  open, 
+  onClose, 
+  onUploadSuccess,
+  categoryId // 接收 categoryId
+}: UrlFileUploaderProps) {
   const [urlInput, setUrlInput] = useState('');
   const [downloading, setDownloading] = useState(false);
   const [progress, setProgress] = useState(0);
@@ -21,7 +27,7 @@ export default function UrlFileUploader({ open, onClose, onUploadSuccess }: UrlF
     setProgress(0);
     setResult(null);
 
-    // 模拟下载进度（因为后端下载进度无法精确获取，这里用模拟递增）
+    // 模拟下载进度
     const progressInterval = setInterval(() => {
       setProgress(prev => {
         if (prev >= 95) {
@@ -33,10 +39,16 @@ export default function UrlFileUploader({ open, onClose, onUploadSuccess }: UrlF
     }, 200);
 
     try {
+      // 构建请求体，包含 categoryId
+      const body: any = { url: trimmedUrl };
+      if (categoryId) {
+        body.categoryId = categoryId;
+      }
+
       const res = await fetch('/api/admin/files/download', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ url: trimmedUrl }),
+        body: JSON.stringify(body),
       });
       clearInterval(progressInterval);
       setProgress(100);
@@ -71,6 +83,11 @@ export default function UrlFileUploader({ open, onClose, onUploadSuccess }: UrlF
           <h3 className="text-lg font-semibold">从网络地址添加图片</h3>
           <button onClick={onClose}><X size={20} /></button>
         </div>
+        {categoryId && (
+          <div className="mb-3 text-xs text-gray-500">
+            📁 将上传到当前分类
+          </div>
+        )}
         <input
           type="url"
           value={urlInput}

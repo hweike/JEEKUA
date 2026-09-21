@@ -36,9 +36,9 @@ export async function getTemplateDisplayName(
     return templateNameCache.get(templateId)!;
   }
 
-  // 3. 通过API获取
+  // 3. 通过API获取（修复：使用 /api/webbuilder）
   try {
-    const res = await fetch(`/api/templates?id=${templateId}`);
+    const res = await fetch(`/api/webbuilder?id=${templateId}`);
     if (res.ok) {
       const data = await res.json();
       if (data.name) {

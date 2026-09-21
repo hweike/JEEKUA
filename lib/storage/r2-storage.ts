@@ -4,6 +4,16 @@ import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 
 export type BucketType = 'public' | 'private';
 
+// 自定义错误类，用于标识 R2 存储相关的错误
+export class R2StorageError extends Error {
+  code: string;
+  constructor(message: string, code: string = 'R2_UNKNOWN') {
+    super(message);
+    this.code = code;
+    this.name = 'R2StorageError';
+  }
+}
+
 export class R2Storage {
   private client: S3Client;
   private bucketName: string;
@@ -44,14 +54,46 @@ export class R2Storage {
     return localPath;
   }
 
+  /**
+   * 检查错误是否为网络/超时/TLS 相关错误
+   */
+  private isNetworkError(err: any): boolean {
+    return (
+      err?.code === 'ECONNRESET' ||
+      err?.code === 'TimeoutError' ||
+      err?.name === 'TimeoutError' ||
+      err?.message?.includes('TLS') ||
+      err?.message?.includes('timed out') ||
+      err?.message?.includes('socket hang up')
+    );
+  }
+
+  /**
+   * 将原始错误转换为 R2StorageError（如果是网络错误）
+   */
+  private handleStorageError(err: any, operation: string): never {
+    if (this.isNetworkError(err)) {
+      throw new R2StorageError(
+        `R2 存储服务暂时不可用（操作: ${operation}），请稍后重试`,
+        'R2_UNAVAILABLE'
+      );
+    }
+    // 其他错误原样抛出
+    throw err;
+  }
+
   async read(localPath: string, encoding?: 'utf8' | 'binary'): Promise<string | Buffer> {
     const key = this.localPathToKey(localPath);
     const command = new GetObjectCommand({ Bucket: this.bucketName, Key: key });
-    const response = await this.client.send(command);
-    const body = await response.Body?.transformToByteArray();
-    if (!body) throw new Error(`File not found: ${key}`);
-    const buffer = Buffer.from(body);
-    return encoding === 'utf8' ? buffer.toString('utf-8') : buffer;
+    try {
+      const response = await this.client.send(command);
+      const body = await response.Body?.transformToByteArray();
+      if (!body) throw new Error(`File not found: ${key}`);
+      const buffer = Buffer.from(body);
+      return encoding === 'utf8' ? buffer.toString('utf-8') : buffer;
+    } catch (err) {
+      this.handleStorageError(err, 'read');
+    }
   }
 
   async write(localPath: string, content: string | Buffer, options?: { contentType?: string }): Promise<void> {
@@ -62,19 +104,31 @@ export class R2Storage {
       Body: content,
       ContentType: options?.contentType,
     });
-    await this.client.send(command);
+    try {
+      await this.client.send(command);
+    } catch (err) {
+      this.handleStorageError(err, 'write');
+    }
   }
 
   async delete(localPath: string): Promise<void> {
     const key = this.localPathToKey(localPath);
     const command = new DeleteObjectCommand({ Bucket: this.bucketName, Key: key });
-    await this.client.send(command);
+    try {
+      await this.client.send(command);
+    } catch (err) {
+      this.handleStorageError(err, 'delete');
+    }
   }
 
   async list(prefix: string): Promise<string[]> {
     const command = new ListObjectsV2Command({ Bucket: this.bucketName, Prefix: prefix });
-    const response = await this.client.send(command);
-    return response.Contents?.map(item => item.Key!) || [];
+    try {
+      const response = await this.client.send(command);
+      return response.Contents?.map(item => item.Key!) || [];
+    } catch (err) {
+      this.handleStorageError(err, 'list');
+    }
   }
 
   /**
@@ -96,7 +150,8 @@ export class R2Storage {
       if ((error as any).name === 'NotFound') {
         return null;
       }
-      throw error;
+      // 网络错误转换
+      this.handleStorageError(error, 'head');
     }
   }
 
@@ -111,13 +166,21 @@ export class R2Storage {
   async getPresignedUploadUrl(localPath: string, expiresIn: number = 3600): Promise<string> {
     const key = this.localPathToKey(localPath);
     const command = new PutObjectCommand({ Bucket: this.bucketName, Key: key });
-    return getSignedUrl(this.client, command, { expiresIn });
+    try {
+      return await getSignedUrl(this.client, command, { expiresIn });
+    } catch (err) {
+      this.handleStorageError(err, 'getPresignedUploadUrl');
+    }
   }
 
   async getPresignedDownloadUrl(localPath: string, expiresIn: number = 3600): Promise<string> {
     const key = this.localPathToKey(localPath);
     const command = new GetObjectCommand({ Bucket: this.bucketName, Key: key });
-    return getSignedUrl(this.client, command, { expiresIn });
+    try {
+      return await getSignedUrl(this.client, command, { expiresIn });
+    } catch (err) {
+      this.handleStorageError(err, 'getPresignedDownloadUrl');
+    }
   }
 
   /**

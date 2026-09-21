@@ -1,11 +1,16 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useLocale } from 'next-intl';
 import { parseVideoUrl, getVideoEmbedUrl } from '@/lib/video-utils';
 import { DEFAULT_VIDEO } from '@/lib/webbuilder/defaults/Video';
 import { getAltSuffix } from '@/lib/webbuilder/alt-suffix-config';
 import { getImageUrl } from '@/lib/files/url';
+
+// ✅ 入场动画参数（硬编码）
+const ANIMATION_DURATION_MS = 800;
+const TITLE_DELAY_MS = 0;
+const VIDEO_DELAY_MS = 150;
 
 // 兼容旧多语言数据
 function getString(field: any): string {
@@ -36,7 +41,6 @@ export function Video(props: any) {
     titleGroup: propTitleGroup,
     videoGroup: propVideoGroup,
     paddingGroup: propPaddingGroup,
-    // 顶层扁平字段（兼容旧数据）
     title: oldTitle,
     titleFontSize: oldTitleFontSize,
     titleColor: oldTitleColor,
@@ -52,7 +56,6 @@ export function Video(props: any) {
   const videoGroup = propVideoGroup || {};
   const paddingGroup = propPaddingGroup || {};
 
-  // 获取 mobileScaleFactor
   const mobileScaleFactor = DEFAULT_VIDEO.mobileScaleFactor ?? 0.7;
 
   const title = getString(titleGroup.title ?? oldTitle ?? DEFAULT_VIDEO.titleGroup.title);
@@ -83,7 +86,39 @@ export function Video(props: any) {
 
   const displayThumbnail = getDisplayImageUrl(videoThumbnail || '', isEditMode);
 
-  // ===== 响应式字体（引入 mobileScaleFactor） =====
+  // ✅ 入场动画状态
+  const containerRef = useRef<HTMLDivElement>(null);
+  const [hasEntered, setHasEntered] = useState(false);
+
+  useEffect(() => {
+    if (isEditMode) {
+      setHasEntered(true);
+      return;
+    }
+
+    const el = containerRef.current;
+    if (!el) {
+      setHasEntered(true);
+      return;
+    }
+
+    const observer = new IntersectionObserver(
+      (entries) => {
+        entries.forEach((entry) => {
+          if (entry.isIntersecting) {
+            setHasEntered(true);
+            observer.unobserve(entry.target);
+          }
+        });
+      },
+      { threshold: 0.15 }
+    );
+
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [isEditMode]);
+
+  // ===== 响应式字体 =====
   const titleSizeStyle = {
     fontSize: `clamp(${titleFontSize * mobileScaleFactor}px, 3vw, ${titleFontSize}px)`,
     color: titleColor,
@@ -92,7 +127,6 @@ export function Video(props: any) {
     wordBreak: 'break-word',
   };
 
-  // 填充：使用 clamp 以用户设置值为首选
   const paddingTopFinal = typeof paddingTop === 'number' ? `clamp(8px, ${paddingTop}px, 120px)` : 0;
   const paddingBottomFinal = typeof paddingBottom === 'number' ? `clamp(8px, ${paddingBottom}px, 120px)` : 0;
 
@@ -121,17 +155,15 @@ export function Video(props: any) {
     }
   }, [isClient, isEditMode, videoUrl, loop, displayThumbnail]);
 
-  // 无封面自动播放
   useEffect(() => {
     if (!isEditMode && videoUrl && embedUrl && !thumbnailUrl && !showVideo) {
       setShowVideo(true);
     }
   }, [isEditMode, videoUrl, embedUrl, thumbnailUrl, showVideo]);
 
-  // ===== 通栏宽度统一（参考 PicwithText） =====
+  // ===== 通栏宽度统一 =====
   const isFullwidth = bannerType === 'fullwidth';
 
-  // 外层容器样式：标准模式限制宽度，全屏模式全屏背景
   const outerStyle: React.CSSProperties = {
     backgroundColor: backgroundColor || DEFAULT_VIDEO.backgroundColor,
     ...(isFullwidth
@@ -152,7 +184,6 @@ export function Video(props: any) {
 
   const outerClasses = 'relative overflow-hidden';
 
-  // 内容包装器：统一左右内边距，与 PicwithText 一致
   const contentStyle: React.CSSProperties = {
     paddingTop: paddingTopFinal,
     paddingBottom: paddingBottomFinal,
@@ -165,7 +196,6 @@ export function Video(props: any) {
 
   // ===== 渲染视频区域 =====
   const renderVideoArea = () => {
-    // 1. 无视频 URL：显示灰色占位
     if (!videoUrl) {
       return (
         <div className="border-2 border-dashed border-gray-300 rounded-lg p-8 text-center text-gray-400 bg-gray-50 w-full h-full flex items-center justify-center">
@@ -174,7 +204,6 @@ export function Video(props: any) {
       );
     }
 
-    // 2. 有封面且未播放（非编辑模式）
     if (!showVideo && thumbnailUrl && !isEditMode) {
       return (
         <div
@@ -185,6 +214,7 @@ export function Video(props: any) {
             src={thumbnailUrl}
             alt={coverAlt}
             className="w-full h-full object-cover"
+            decoding="async"
           />
           <div className="absolute inset-0 flex items-center justify-center bg-black/30 transition group-hover:bg-black/40">
             <div className="w-16 h-16 bg-white rounded-full flex items-center justify-center shadow-lg">
@@ -197,7 +227,6 @@ export function Video(props: any) {
       );
     }
 
-    // 3. 播放中或编辑模式：显示 iframe
     if ((showVideo || isEditMode) && embedUrl) {
       return (
         <iframe
@@ -210,7 +239,6 @@ export function Video(props: any) {
       );
     }
 
-    // 4. 视频解析失败
     if (isParsingFailed) {
       return (
         <div className="flex items-center justify-center h-full text-white bg-black rounded-lg">
@@ -219,7 +247,6 @@ export function Video(props: any) {
       );
     }
 
-    // 5. 其他情况
     return (
       <div className="flex items-center justify-center h-full text-gray-400 bg-gray-50 rounded-lg">
         暂无视频内容
@@ -227,17 +254,32 @@ export function Video(props: any) {
     );
   };
 
-  // ===== 渲染主体 =====
+  // ✅ 标题入场动画
+  const titleEnterStyle: React.CSSProperties = {
+    opacity: hasEntered ? 1 : 0,
+    transform: hasEntered ? 'translateY(0)' : 'translateY(24px)',
+    transition: `opacity ${ANIMATION_DURATION_MS}ms ease-out ${TITLE_DELAY_MS}ms, transform ${ANIMATION_DURATION_MS}ms ease-out ${TITLE_DELAY_MS}ms`,
+    willChange: 'opacity, transform',
+  };
+
+  // ✅ 视频区入场动画
+  const videoEnterStyle: React.CSSProperties = {
+    opacity: hasEntered ? 1 : 0,
+    transform: hasEntered ? 'translateY(0)' : 'translateY(32px)',
+    transition: `opacity ${ANIMATION_DURATION_MS}ms ease-out ${VIDEO_DELAY_MS}ms, transform ${ANIMATION_DURATION_MS}ms ease-out ${VIDEO_DELAY_MS}ms`,
+    willChange: 'opacity, transform',
+  };
+
   return (
     <div ref={props.puck?.dragRef} className={outerClasses} style={outerStyle}>
-      <div className="relative w-full">
+      <div className="relative w-full" ref={containerRef}>
         <div style={contentStyle}>
           {title && (
-            <div className="max-w-full mx-auto">
+            <div className="max-w-full mx-auto" style={titleEnterStyle}>
               <div style={titleSizeStyle}>{title}</div>
             </div>
           )}
-          <div className="max-w-full mx-auto">
+          <div className="max-w-full mx-auto" style={videoEnterStyle}>
             <div className="aspect-video relative bg-black rounded-lg overflow-hidden">
               {renderVideoArea()}
             </div>

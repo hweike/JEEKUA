@@ -4,7 +4,7 @@ import type { ComponentConfig } from '@puckeditor/core';
 import type { Components } from '../types';
 
 export const config: ComponentConfig<Components['ProductLineBlock']> = {
-  label: '产品线展示',
+  label: '产品线落地页',
   category: 'Product',
   defaultProps: {
     showSidebar: true,

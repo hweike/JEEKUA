@@ -32,7 +32,7 @@ export async function createAddress(
   addressData: Omit<Address, 'id' | 'site_id' | 'customer_id' | 'created_at' | 'updated_at'>
 ): Promise<Address> {
   // 如果设为默认，清除其他默认地址
-  if (addressData.is_default) {
+  if (addressData.isDefault) {
     await supabase
       .from('addresses')
       .update({ is_default: false })
@@ -48,12 +48,12 @@ export async function createAddress(
       recipient: addressData.recipient,
       phone: addressData.phone,
       country_code: addressData.country_code,
-      company: addressData.company || '',          // 新增 company 字段
+      company: addressData.company || '',
       province: addressData.province || '',
       city: addressData.city || '',
       district: addressData.district || '',
       detail: addressData.detail,
-      is_default: addressData.is_default || false,
+      is_default: addressData.isDefault || false,  // 映射为数据库列名
       created_at: new Date().toISOString(),
       updated_at: new Date().toISOString(),
     })
@@ -69,7 +69,7 @@ export async function updateAddress(
   addressData: Partial<Omit<Address, 'id' | 'site_id' | 'customer_id' | 'created_at' | 'updated_at'>>
 ): Promise<Address> {
   // 如果设为默认，清除其他默认地址
-  if (addressData.is_default) {
+  if (addressData.isDefault) {
     await supabase
       .from('addresses')
       .update({ is_default: false })
@@ -77,20 +77,23 @@ export async function updateAddress(
       .eq('customer_id', customerId);
   }
 
+  // 构建更新对象，只包含传递的字段
+  const updatePayload: any = {
+    updated_at: new Date().toISOString(),
+  };
+  if (addressData.recipient !== undefined) updatePayload.recipient = addressData.recipient;
+  if (addressData.phone !== undefined) updatePayload.phone = addressData.phone;
+  if (addressData.country_code !== undefined) updatePayload.country_code = addressData.country_code;
+  if (addressData.company !== undefined) updatePayload.company = addressData.company || '';
+  if (addressData.province !== undefined) updatePayload.province = addressData.province || '';
+  if (addressData.city !== undefined) updatePayload.city = addressData.city || '';
+  if (addressData.district !== undefined) updatePayload.district = addressData.district || '';
+  if (addressData.detail !== undefined) updatePayload.detail = addressData.detail;
+  if (addressData.isDefault !== undefined) updatePayload.is_default = addressData.isDefault; // 映射
+
   const { data, error } = await supabase
     .from('addresses')
-    .update({
-      recipient: addressData.recipient,
-      phone: addressData.phone,
-      country_code: addressData.country_code,
-      company: addressData.company || '',
-      province: addressData.province || '',
-      city: addressData.city || '',
-      district: addressData.district || '',
-      detail: addressData.detail,
-      is_default: addressData.is_default || false,
-      updated_at: new Date().toISOString(),
-    })
+    .update(updatePayload)
     .eq('site_id', DEFAULT_SITE_ID)
     .eq('id', addressId)
     .eq('customer_id', customerId)

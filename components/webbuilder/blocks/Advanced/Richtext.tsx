@@ -1,7 +1,13 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { DEFAULT_RICHTEXT } from '@/lib/webbuilder/defaults/Richtext';
+
+// ✅ 入场动画参数（硬编码）
+const ANIMATION_DURATION_MS = 700;
+const TITLE_DELAY_MS = 0;
+const TEXT_DELAY_MS = 100;
+const BUTTON_DELAY_MS = 200;
 
 export function Richtext(props: any) {
   const isEditMode = !!props.puck?.isEditing;
@@ -67,13 +73,45 @@ export function Richtext(props: any) {
     mobileScaleFactor,
   } = mergedSpacingGroup;
 
-  // 自适应字体：与 PicwithText 统一，使用 mobileScaleFactor 作为最小值基数
+  // ✅ 入场动画状态
+  const containerRef = useRef<HTMLDivElement>(null);
+  const [hasEntered, setHasEntered] = useState(false);
+
+  useEffect(() => {
+    if (isEditMode) {
+      setHasEntered(true);
+      return;
+    }
+
+    const el = containerRef.current;
+    if (!el) {
+      setHasEntered(true);
+      return;
+    }
+
+    const observer = new IntersectionObserver(
+      (entries) => {
+        entries.forEach((entry) => {
+          if (entry.isIntersecting) {
+            setHasEntered(true);
+            observer.unobserve(entry.target);
+          }
+        });
+      },
+      { threshold: 0.15 }
+    );
+
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [isEditMode]);
+
+  // 自适应字体
   const titleFontSizeClamp = `clamp(${titleFontSize * mobileScaleFactor}px, 4vw, ${titleFontSize}px)`;
   const textFontSizeClamp = `clamp(${textFontSize * mobileScaleFactor}px, 2.5vw, ${textFontSize}px)`;
   const button1FontSizeClamp = `clamp(${button1FontSize * mobileScaleFactor}px, 2vw, ${button1FontSize}px)`;
   const button2FontSizeClamp = `clamp(${button2FontSize * mobileScaleFactor}px, 2vw, ${button2FontSize}px)`;
 
-  // 统一通栏宽度控制：与 PicwithText 完全一致
+  // 统一通栏宽度控制
   const outerStyle: React.CSSProperties = {
     backgroundColor: mergedBackgroundColor,
     ...(mergedBannerType === 'fullwidth'
@@ -94,7 +132,6 @@ export function Richtext(props: any) {
 
   const outerClasses = 'relative overflow-hidden';
 
-  // 内容内边距：与 PicwithText 统一（clamp 自适应）
   const contentPaddingStyle: React.CSSProperties = {
     paddingTop: `${containerPaddingTop}px`,
     paddingBottom: `${containerPaddingBottom}px`,
@@ -112,6 +149,14 @@ export function Richtext(props: any) {
     color: '#fff',
     textAlign: textAlign as 'left' | 'center' | 'right',
   };
+
+  // ✅ 通用入场动画样式
+  const enterStyle = (delayMs: number): React.CSSProperties => ({
+    opacity: hasEntered ? 1 : 0,
+    transform: hasEntered ? 'translateY(0)' : 'translateY(24px)',
+    transition: `opacity ${ANIMATION_DURATION_MS}ms ease-out ${delayMs}ms, transform ${ANIMATION_DURATION_MS}ms ease-out ${delayMs}ms`,
+    willChange: 'opacity, transform',
+  });
 
   if (isEditMode && !title && !text && !button1Text && !button2Text) {
     return (
@@ -131,6 +176,7 @@ export function Richtext(props: any) {
             fontSize: titleFontSizeClamp,
             color: titleColor,
             marginBottom: `${titleMarginBottom}px`,
+            ...enterStyle(TITLE_DELAY_MS),
           }}
         >
           {title}
@@ -142,6 +188,7 @@ export function Richtext(props: any) {
             fontSize: textFontSizeClamp,
             color: textColor,
             marginBottom: `${textMarginBottom}px`,
+            ...enterStyle(TEXT_DELAY_MS),
           }}
         >
           {text}
@@ -152,6 +199,7 @@ export function Richtext(props: any) {
         style={{
           justifyContent: textAlign === 'center' ? 'center' : textAlign === 'right' ? 'flex-end' : 'flex-start',
           gap: `${buttonGap}px`,
+          ...enterStyle(BUTTON_DELAY_MS),
         }}
       >
         {button1Text && (
@@ -214,11 +262,12 @@ export function Richtext(props: any) {
     </div>
   );
 
-  const contentJustify = contentPosition === 'left' ? 'flex-start' : contentPosition === 'right' ? 'flex-end' : 'center';
+  const contentJustify =
+    contentPosition === 'left' ? 'flex-start' : contentPosition === 'right' ? 'flex-end' : 'center';
 
   return (
     <div ref={props.puck?.dragRef} className={outerClasses} style={outerStyle}>
-      <div className="relative w-full">
+      <div className="relative w-full" ref={containerRef}>
         <div style={{ maxWidth: '80rem', margin: '0 auto', width: '100%' }}>
           <div
             className="flex"
@@ -226,7 +275,7 @@ export function Richtext(props: any) {
               alignItems: 'center',
               minHeight: '200px',
               width: '90%',
-              margin: '0 auto',          // ✅ 添加这一行
+              margin: '0 auto',
               justifyContent: contentJustify,
             }}
           >

@@ -19,37 +19,55 @@ export async function GET(request: NextRequest) {
       MAX_PAGE_SIZE,
       Math.max(1, parseInt(searchParams.get('pageSize') || String(DEFAULT_PAGE_SIZE)))
     );
-    const locale = searchParams.get('locale') || 'zh';
+    const localeParam = searchParams.get('locale') || 'zh';
     const status = searchParams.get('status') || 'all';
-    const type = searchParams.get('type') || 'all';
+    const typeParam = searchParams.get('type') || 'all';
     const keyword = searchParams.get('keyword') || '';
 
-    console.log(`[SEO Pages API] 查询参数: page=${page}, pageSize=${pageSize}, locale=${locale}, status=${status}, type=${type}, keyword=${keyword}`);
+    console.log(`[SEO Pages API] 查询参数: page=${page}, pageSize=${pageSize}, locale=${localeParam}, status=${status}, type=${typeParam}, keyword=${keyword}`);
 
     // ====== 2. 构建基础查询 ======
     let countQuery = supabase
       .from('pages')
       .select('*', { count: 'exact', head: true })
-      .eq('site_id', DEFAULT_SITE_ID)
-      .eq('locale', locale);
+      .eq('site_id', DEFAULT_SITE_ID);
 
     let dataQuery = supabase
       .from('pages')
       .select('id, title, type, locale, url, seo_title, seo_description, seo_keywords, updatedAt')
-      .eq('site_id', DEFAULT_SITE_ID)
-      .eq('locale', locale);
+      .eq('site_id', DEFAULT_SITE_ID);
 
-    if (type !== 'all') {
-      countQuery = countQuery.eq('type', type);
-      dataQuery = dataQuery.eq('type', type);
+    // ====== 3. 处理 locale（支持逗号分隔的多个语言，如 "zh,global"） ======
+    if (localeParam && localeParam !== 'all') {
+      const locales = localeParam.split(',').filter(Boolean);
+      if (locales.length === 1) {
+        countQuery = countQuery.eq('locale', locales[0]);
+        dataQuery = dataQuery.eq('locale', locales[0]);
+      } else if (locales.length > 1) {
+        countQuery = countQuery.in('locale', locales);
+        dataQuery = dataQuery.in('locale', locales);
+      }
     }
 
+    // ====== 4. 处理类型筛选（支持逗号分隔的多类型） ======
+    if (typeParam && typeParam !== 'all') {
+      const types = typeParam.split(',').filter(Boolean);
+      if (types.length === 1) {
+        countQuery = countQuery.eq('type', types[0]);
+        dataQuery = dataQuery.eq('type', types[0]);
+      } else if (types.length > 1) {
+        countQuery = countQuery.in('type', types);
+        dataQuery = dataQuery.in('type', types);
+      }
+    }
+
+    // ====== 5. 关键词搜索 ======
     if (keyword) {
       countQuery = countQuery.ilike('title', `%${keyword}%`);
       dataQuery = dataQuery.ilike('title', `%${keyword}%`);
     }
 
-    // ====== 3. 获取总数（仅计数，不返回数据） ======
+    // ====== 6. 获取总数 ======
     const { count: totalCount, error: countError } = await countQuery;
     if (countError) {
       console.error('[SEO Pages API] 计数查询失败:', countError);
@@ -61,8 +79,7 @@ export async function GET(request: NextRequest) {
     const from = (page - 1) * pageSize;
     const to = from + pageSize - 1;
 
-    // ====== 4. 获取当前页数据 ======
-    // 利用复合索引 idx_pages_site_locale_type_updated 加速排序
+    // ====== 7. 获取当前页数据 ======
     const { data: pages, error: pagesError } = await dataQuery
       .order('updatedAt', { ascending: false })
       .range(from, to);
@@ -81,7 +98,7 @@ export async function GET(request: NextRequest) {
       });
     }
 
-    // ====== 5. 批量查询 page_seo_data 获取状态和 analyzed_keywords ======
+    // ====== 8. 批量查询 page_seo_data ======
     const pageIds = pages.map((p) => p.id).filter((id) => id && typeof id === 'string' && id.trim().length > 0);
 
     let statusMap: Record<string, string> = {};
@@ -105,19 +122,16 @@ export async function GET(request: NextRequest) {
       }
     }
 
-    // ====== 6. 如果状态筛选不是 'all'，在内存中过滤 ======
-    // 注意：这会导致返回的数据少于 pageSize，但分页信息（total）仍是基于 pages 表，不准确。
-    // 对于精确状态筛选，需要联表查询，此处保持简单。
+    // ====== 9. 状态筛选（内存过滤） ======
     let filteredPages = pages;
     if (status !== 'all') {
       filteredPages = pages.filter((page) => {
         const key = `${page.id}_${page.locale}`;
         return (statusMap[key] || 'pending') === status;
       });
-      // 如果过滤后数据不足，可以补充获取更多（但这里简化处理）
     }
 
-    // ====== 7. 获取策略配置 ======
+    // ====== 10. 获取策略配置 ======
     let strategies = [];
     try {
       strategies = await strategiesService.getStrategies(DEFAULT_SITE_ID);
@@ -129,7 +143,7 @@ export async function GET(request: NextRequest) {
       strategyMap[s.page_type] = s.fields;
     });
 
-    // ====== 8. 计算评分（仅针对当前页数据） ======
+    // ====== 11. 计算评分 ======
     const result = filteredPages.map((page) => {
       const fields = strategyMap[page.type] || {};
       const config = {
@@ -205,8 +219,6 @@ export async function GET(request: NextRequest) {
       };
     });
 
-    // 注意：如果 status 筛选后数据量减少，实际返回数量可能小于 pageSize
-    // 但分页信息仍基于 pages 表 total，可能导致页码跳变。建议后续实现联表查询精确计数。
     return NextResponse.json({
       data: result,
       pagination: {
@@ -214,7 +226,6 @@ export async function GET(request: NextRequest) {
         pageSize,
         total,
         totalPages,
-        // 增加一个字段指示实际返回条数（用于调试）
         returnedCount: result.length,
       },
     });

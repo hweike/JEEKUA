@@ -1,0 +1,50 @@
+{
+  "themes": [
+    {
+      "id": "Black_JEEKUA-Black",
+      "type": "builtin",
+      "category": "Black",
+      "name": "JEEKUA-Black",
+      "displayName": "JEEKUA-Black",
+      "previewImage": "themes/presets/Black/JEEKUA-Black/jeekua-black.png",
+      "primaryColor": "#171717",
+      "globalThemePath": "themes/presets/Black/JEEKUA-Black/theme.json",
+      "pageThemePath": "themes/presets/Black/JEEKUA-Black/page-theme.json"
+    },
+    {
+      "id": "Blue_Facebook",
+      "type": "builtin",
+      "category": "Blue",
+      "name": "Facebook",
+      "displayName": "Facebook",
+      "previewImage": "themes/presets/Blue/Facebook/Facebook.webp",
+      "primaryColor": "#3b82f6",
+      "globalThemePath": "themes/presets/Blue/Facebook/theme.json",
+      "pageThemePath": "themes/presets/Blue/Facebook/page-theme.json"
+    },
+    {
+      "id": "Blue_Twitter",
+      "type": "builtin",
+      "category": "Blue",
+      "name": "Twitter",
+      "displayName": "Twitter",
+      "previewImage": "themes/presets/Blue/Twitter/Twitter.png",
+      "primaryColor": "#3b82f6",
+      "globalThemePath": "themes/presets/Blue/Twitter/theme.json",
+      "pageThemePath": "themes/presets/Blue/Twitter/page-theme.json"
+    },
+    {
+      "id": "Red_Tangerine (tweakcn)",
+      "type": "builtin",
+      "category": "Red",
+      "name": "Tangerine (tweakcn)",
+      "displayName": "Tangerine (tweakcn)",
+      "previewImage": "themes/presets/Red/Tangerine (tweakcn)/Tangerine (tweakcn).webp",
+      "primaryColor": "#ef4444",
+      "globalThemePath": "themes/presets/Red/Tangerine (tweakcn)/theme.json",
+      "pageThemePath": "themes/presets/Red/Tangerine (tweakcn)/page-theme.json"
+    }
+  ],
+  "activeTheme": "Blue_Facebook",
+  "updatedAt": "2026-08-07T10:00:00Z"
+}

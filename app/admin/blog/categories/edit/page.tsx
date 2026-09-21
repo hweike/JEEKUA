@@ -89,7 +89,6 @@ export default function CategoryEdit() {
 
     setLoading(true);
     try {
-      // 根据是否已存在决定方法
       const method = isExisting ? 'PUT' : 'POST';
       const payload = {
         locale: localeFromUrl,
@@ -105,7 +104,8 @@ export default function CategoryEdit() {
       const data = await res.json();
       if (res.ok) {
         showToast(isExisting ? '更新成功' : '创建成功', 'success');
-        router.push('/admin/blog/categories');
+        // ✅ 跳转回当前语言的分类列表
+        router.push(`/admin/blog/categories?locale=${localeFromUrl}`);
       } else {
         showToast(data.error || '操作失败', 'error');
       }
@@ -114,6 +114,11 @@ export default function CategoryEdit() {
     } finally {
       setLoading(false);
     }
+  };
+
+  // ✅ 取消时也返回当前语言的分类列表
+  const handleCancel = () => {
+    router.push(`/admin/blog/categories?locale=${localeFromUrl}`);
   };
 
   if (fetchLoading) return <div className="p-6">加载中...</div>;
@@ -198,7 +203,7 @@ export default function CategoryEdit() {
         </div>
 
         <div className="flex justify-end gap-3 mt-8">
-          <button type="button" onClick={() => router.back()} className="bg-gray-300 px-5 py-2 rounded">
+          <button type="button" onClick={handleCancel} className="bg-gray-300 px-5 py-2 rounded">
             取消
           </button>
           <button type="submit" disabled={loading} className="bg-blue-600 text-white px-5 py-2 rounded disabled:opacity-50">

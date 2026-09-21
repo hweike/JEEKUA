@@ -1,13 +1,11 @@
 // lib/docs/docs-lib.ts
 import { getPrivateStorage } from '@/lib/storage/factory';
 import type { DocsLib } from './types';
-// ═══ 新增导入 ═══
 import { registerEntity } from '@/lib/discovery/services/business-register-pages.service';
 import { deletePage } from '@/lib/discovery/register';
-import type { PageData } from '@/lib/discovery/register';
 
 const STORAGE_BASE = 'docs';
-const GLOBAL_LOCALE = 'global'; // 文档库全局共享，使用固定 locale
+const GLOBAL_LOCALE = 'global';
 
 function getLibsKey(): string {
   return `${STORAGE_BASE}/libs.json`;
@@ -17,15 +15,34 @@ function getLibDirKey(locale: string, libId: string): string {
   return `${STORAGE_BASE}/${locale}/${libId}`;
 }
 
+/**
+ * 健壮地判断是否为“文件不存在”错误
+ * 支持多种存储后端（本地文件系统、S3、Supabase Storage 等）
+ */
+function isNotFoundError(error: any): boolean {
+  if (!error) return false;
+  // 常见错误码
+  const codes = ['NoSuchKey', 'ENOENT', 'NotFound', '404'];
+  if (error.code && codes.includes(error.code)) return true;
+  if (error.Code && codes.includes(error.Code)) return true;
+  if (error.statusCode === 404 || error.status === 404) return true;
+  // 错误消息中的关键词
+  const msg = error.message || '';
+  if (msg.includes('NoSuchKey') || msg.includes('not found') || msg.includes('ENOENT')) return true;
+  return false;
+}
+
 async function readJsonFile<T>(key: string): Promise<T | null> {
   const storage = getPrivateStorage();
   try {
     const content = await storage.read(key, 'utf8');
     return JSON.parse(content as string);
   } catch (error: any) {
-    if (error?.code === 'NoSuchKey' || error?.Code === 'NoSuchKey' || error?.message?.includes('File not found')) {
+    if (isNotFoundError(error)) {
       return null;
     }
+    // 其他错误记录日志并重新抛出（但上层会捕获）
+    console.error(`[readJsonFile] 读取 ${key} 失败:`, error);
     throw error;
   }
 }
@@ -45,7 +62,6 @@ async function deleteDir(keyPrefix: string): Promise<void> {
   }
 }
 
-// 获取所有语言目录（通过读取 STORAGE_BASE 下的一级目录）
 async function getLocaleDirs(): Promise<string[]> {
   const storage = getPrivateStorage();
   try {
@@ -64,8 +80,14 @@ async function getLocaleDirs(): Promise<string[]> {
 }
 
 export async function getDocsLibs(): Promise<DocsLib[]> {
-  const libs = await readJsonFile<DocsLib[]>(getLibsKey());
-  return libs ?? [];
+  try {
+    const libs = await readJsonFile<DocsLib[]>(getLibsKey());
+    return libs ?? [];
+  } catch (error) {
+    // 读取失败时记录日志并返回空数组，避免整个应用崩溃
+    console.error('[getDocsLibs] 读取文档库列表失败:', error);
+    return [];
+  }
 }
 
 export async function getDocsLib(id: string): Promise<DocsLib | null> {
@@ -74,14 +96,11 @@ export async function getDocsLib(id: string): Promise<DocsLib | null> {
 }
 
 export async function getDocsLibBySlug(slug: string): Promise<DocsLib | null> {
+  if (!slug) return null;
   const libs = await getDocsLibs();
   return libs.find(lib => lib.slug?.toLowerCase() === slug.toLowerCase()) || null;
 }
 
-/**
- * 创建文档库
- * 新增：注册到 pages 表（locale = 'global'）
- */
 export async function createDocsLib(
   name: string,
   description?: string,
@@ -107,7 +126,6 @@ export async function createDocsLib(
   libs.push(newLib);
   await writeJsonFile(getLibsKey(), libs);
 
-  // 异步注册到 pages 表（全局 locale）
   registerEntity({
     type: 'docLibrary',
     id: newLib.id,
@@ -119,10 +137,6 @@ export async function createDocsLib(
   return newLib;
 }
 
-/**
- * 更新文档库
- * 新增：更新后重新注册到 pages 表（locale = 'global'）
- */
 export async function updateDocsLib(
   id: string,
   updates: Partial<Pick<DocsLib, 'name' | 'description' | 'templateId' | 'slug' | 'seo_keywords' | 'seo_title' | 'seo_description'>>
@@ -134,7 +148,6 @@ export async function updateDocsLib(
   libs[index] = updatedLib;
   await writeJsonFile(getLibsKey(), libs);
 
-  // 异步重新注册到 pages 表
   registerEntity({
     type: 'docLibrary',
     id: id,
@@ -144,24 +157,18 @@ export async function updateDocsLib(
   }).catch(err => console.error(`更新文档库注册失败 (${id}):`, err));
 }
 
-/**
- * 删除文档库
- * 新增：删除对应的 pages 记录（locale = 'global'）
- */
 export async function deleteDocsLib(id: string): Promise<void> {
   const libs = await getDocsLibs();
   const filtered = libs.filter(lib => lib.id !== id);
   if (filtered.length === libs.length) throw new Error('文档库不存在');
   await writeJsonFile(getLibsKey(), filtered);
 
-  // 删除所有已存在的语言目录下该库的数据
   const locales = await getLocaleDirs();
   for (const locale of locales) {
     const libDirKey = getLibDirKey(locale, id);
     await deleteDir(libDirKey);
   }
 
-  // 删除对应的 pages 记录
   const pageId = `docLibrary:${id}`;
   try {
     await deletePage(pageId, GLOBAL_LOCALE);

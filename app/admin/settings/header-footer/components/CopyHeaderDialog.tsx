@@ -11,6 +11,8 @@ interface CopyHeaderDialogProps {
   sourceLocale: string;
   availableLocales: string[];
   onRefresh: () => void;
+  onSuccess?: (message: string) => void;  // 新增
+  onError?: (message: string) => void;    // 新增
 }
 
 export default function CopyHeaderDialog({
@@ -20,6 +22,8 @@ export default function CopyHeaderDialog({
   sourceLocale,
   availableLocales,
   onRefresh,
+  onSuccess,
+  onError,
 }: CopyHeaderDialogProps) {
   const [targetLocale, setTargetLocale] = useState('');
   const [loading, setLoading] = useState(false);
@@ -47,17 +51,26 @@ export default function CopyHeaderDialog({
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          type,           // 新增
+          type,
           sourceLocale,
           targetLocale,
         }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || '复制失败');
+
+      // 复制成功：调用父组件回调（显示 Toast）
+      const successMsg = `${type === 'header' ? '页头' : '页脚'} 已从 ${getLocaleDisplay(sourceLocale)} 复制到 ${getLocaleDisplay(targetLocale)}`;
+      onSuccess?.(successMsg);
+
+      // 刷新列表并关闭对话框
       onRefresh();
       onClose();
     } catch (err: any) {
-      setError(err.message || '复制失败，请重试');
+      const errorMsg = err.message || '复制失败，请重试';
+      setError(errorMsg);
+      // 调用父组件错误回调（显示错误 Toast）
+      onError?.(errorMsg);
     } finally {
       setLoading(false);
     }

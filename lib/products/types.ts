@@ -1,4 +1,5 @@
 // lib/products/types.ts
+
 export interface PriceTier {
   min_qty: number;
   max_qty: number | null;
@@ -33,7 +34,7 @@ export interface ProductFrontMatter {
   categoryId: string;
   seriesId: string;
   parent_product_id: string;
-  order?: number; // 排序，用于列表
+  order?: number;
 }
 
 export interface ProductIndexItem {
@@ -45,4 +46,54 @@ export interface ProductIndexItem {
   minOrderQuantity: number;
   order: number;
   updatedAt: string;
+}
+
+// ========== 新增类型（供 helpers.ts 使用） ==========
+
+/** 系列（二级分类） */
+export interface Series {
+  id: string;
+  name: string;
+  slug: string;
+  order: number;
+  image?: string;
+  description?: string;
+  seoTitle?: string;
+  seoDescription?: string;
+  seoKeywords?: string;
+}
+
+/** 分类（一级） */
+export interface Category {
+  id: string;
+  name: string;
+  slug: string;
+  order: number;
+  productLineId: string;
+  templateId?: string;
+  image?: string;
+  description?: string;
+  seoTitle?: string;
+  seoDescription?: string;
+  seoKeywords?: string;
+  attributeTemplateId?: string;
+  series: Series[];
+}
+
+/** 产品线 */
+export interface ProductLine {
+  id: string;
+  name: string;
+  slug: string;
+  order: number;
+  templateId?: string;
+  seoTitle?: string;
+  seoDescription?: string;
+  seoKeywords?: string;
+}
+
+/** 完整目录数据结构（包含产品线和分类列表） */
+export interface ProductData {
+  productLines: ProductLine[];
+  categories: Category[];
 }

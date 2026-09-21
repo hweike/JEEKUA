@@ -1,8 +1,10 @@
+// app/admin/settings/header-footer/page.tsx
 'use client';
 
 import { useEffect, useState, useCallback, useMemo, useRef } from 'react';
 import Toast from '@/components/common/Toast';
 import HeaderFooterCategory from './components/HeaderFooterCategory';
+import AiHelperHeaderFooterModal from './components/AiHelperHeaderFooterModal';
 import { HeaderConfig, FooterConfig } from '@/lib/SiteHeadersFooters/types';
 
 type ConfigType = 'header' | 'footer';
@@ -14,6 +16,11 @@ export default function HeaderFooterPage() {
   const [loading, setLoading] = useState(true);
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
+
+  // AI 翻译相关状态
+  const [showAiHelper, setShowAiHelper] = useState(false);
+  const [aiHelperType, setAiHelperType] = useState<'header' | 'footer'>('header');
+  const [aiHelperSourceLocale, setAiHelperSourceLocale] = useState<string>('');
 
   const fetchAvailableLocales = useCallback(async () => {
     try {
@@ -55,7 +62,6 @@ export default function HeaderFooterPage() {
   const loadAllData = useCallback(async () => {
     if (availableLocales.length === 0) return;
 
-    // 取消之前的请求
     if (abortControllerRef.current) {
       abortControllerRef.current.abort();
     }
@@ -63,7 +69,7 @@ export default function HeaderFooterPage() {
     abortControllerRef.current = controller;
 
     setLoading(true);
-    let isCancelled = false; // 标志请求是否被取消
+    let isCancelled = false;
 
     try {
       const [headers, footers] = await Promise.all([
@@ -71,7 +77,6 @@ export default function HeaderFooterPage() {
         fetchAllConfigs('footer', availableLocales, controller.signal),
       ]);
 
-      // 只在请求未被取消且组件仍挂载时更新状态
       if (!controller.signal.aborted) {
         setAllHeaders(headers);
         setAllFooters(footers);
@@ -80,12 +85,11 @@ export default function HeaderFooterPage() {
       if (error instanceof Error && error.name === 'AbortError') {
         isCancelled = true;
         console.log('请求已取消');
-        return; // 直接返回，不执行 finally 中的 setLoading(false)
+        return;
       }
       console.error('加载数据失败:', error);
       setToast({ message: '加载页头/页脚配置失败', type: 'error' });
     } finally {
-      // 只有在未被取消的情况下才将 loading 设为 false
       if (!isCancelled && !controller.signal.aborted) {
         setLoading(false);
       }
@@ -133,6 +137,13 @@ export default function HeaderFooterPage() {
     [refreshAll]
   );
 
+  // AI 翻译处理函数
+  const handleAiTranslate = useCallback((locale: string, type: 'header' | 'footer') => {
+    setAiHelperSourceLocale(locale);
+    setAiHelperType(type);
+    setShowAiHelper(true);
+  }, []);
+
   const headerEntries = useMemo(() => {
     return availableLocales.map((locale) => ({
       locale,
@@ -147,7 +158,6 @@ export default function HeaderFooterPage() {
     }));
   }, [availableLocales, allFooters]);
 
-  // 当 loading 为 true 且数据为空时，显示加载中
   if (loading && !Object.keys(allHeaders).length && !Object.keys(allFooters).length) {
     return (
       <div className="p-6 text-center text-gray-500">
@@ -164,7 +174,6 @@ export default function HeaderFooterPage() {
       </div>
 
       <div className="space-y-6">
-        {/* 使用 JSON.stringify 作为 key，强制在数据变化时重建组件 */}
         <HeaderFooterCategory
           key={`header-${JSON.stringify(allHeaders)}`}
           title="页头配置"
@@ -173,6 +182,7 @@ export default function HeaderFooterPage() {
           availableLocales={availableLocales}
           onRefresh={refreshAll}
           onInit={(locale) => initConfig('header', locale)}
+          onAiTranslate={handleAiTranslate}
         />
         <HeaderFooterCategory
           key={`footer-${JSON.stringify(allFooters)}`}
@@ -182,8 +192,22 @@ export default function HeaderFooterPage() {
           availableLocales={availableLocales}
           onRefresh={refreshAll}
           onInit={(locale) => initConfig('footer', locale)}
+          onAiTranslate={handleAiTranslate}
         />
       </div>
+
+      {/* AI 翻译模态框 */}
+      {showAiHelper && (
+        <AiHelperHeaderFooterModal
+          sourceLocale={aiHelperSourceLocale}
+          type={aiHelperType}
+          onClose={() => setShowAiHelper(false)}
+          onImportSuccess={() => {
+            refreshAll();
+            setShowAiHelper(false);
+          }}
+        />
+      )}
 
       {toast && <Toast message={toast.message} type={toast.type} onClose={() => setToast(null)} />}
     </div>

@@ -3,9 +3,9 @@
 import { useForm, useFieldArray } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
-import { useState } from 'react';
+import { useState, forwardRef, useImperativeHandle, useEffect } from 'react';
 import { HeaderConfig } from '@/lib/SiteHeadersFooters/types';
-import ImageUpload from '@/components/ImageUpload';  // 改用全局组件
+import ImageUpload from '@/components/ImageUpload';
 import SliderInput from '../common/SliderInput';
 import ToggleSwitch from '../common/ToggleSwitch';
 import MenuSelector from '../common/MenuSelector';
@@ -46,6 +46,8 @@ const headerSchema = z.object({
 interface HeaderFormProps {
   initialConfig: HeaderConfig;
   locale: string;
+  onSuccess?: (message: string) => void;
+  onError?: (message: string) => void;
 }
 
 const DEFAULTS = {
@@ -53,195 +55,241 @@ const DEFAULTS = {
   search: { enabled: false, placeholder: '搜索...' },
 };
 
-export default function HeaderForm({ initialConfig, locale }: HeaderFormProps) {
-  const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
+const HeaderForm = forwardRef<{ submit: () => void }, HeaderFormProps>(
+  ({ initialConfig, locale, onSuccess, onError }, ref) => {
+    const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
 
-  const mergedConfig = {
-    ...initialConfig,
-    style: initialConfig.style || DEFAULTS.style,
-    search: initialConfig.search || DEFAULTS.search,
-  };
+    const mergedConfig = {
+      ...initialConfig,
+      style: initialConfig.style || DEFAULTS.style,
+      search: initialConfig.search || DEFAULTS.search,
+    };
 
-  const { register, control, handleSubmit, watch, setValue } = useForm({
-    resolver: zodResolver(headerSchema),
-    defaultValues: mergedConfig,
-  });
+    const { register, control, handleSubmit, watch, setValue } = useForm({
+      resolver: zodResolver(headerSchema),
+      defaultValues: mergedConfig,
+    });
 
-  const { fields, append, remove } = useFieldArray({
-    control,
-    name: 'announcements.items',
-  });
+    const { fields, append, remove } = useFieldArray({
+      control,
+      name: 'announcements.items',
+    });
 
-  const onSubmit = async (data: HeaderConfig) => {
-    try {
-      const res = await fetch('/api/SiteHeadersFooters/save', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ type: 'header', locale, config: data }),
-      });
-      if (res.ok) {
-        setToast({ message: '保存成功', type: 'success' });
-      } else {
-        const err = await res.json();
-        setToast({ message: err.error || '保存失败', type: 'error' });
+    // 监听当前选择的风格
+    const currentStyle = watch('style');
+
+    // 当风格为 luxury 时，强制锁定 Logo 位置和粘性行为
+    useEffect(() => {
+      if (currentStyle === 'luxury') {
+        setValue('logo.position', 'middle-left');
+        setValue('menu.stickyBehavior', 'always');
       }
-    } catch (error) {
-      setToast({ message: '保存失败，请重试', type: 'error' });
-    }
-  };
+    }, [currentStyle, setValue]);
 
-  return (
-    <>
-      <form onSubmit={handleSubmit(onSubmit)} className="space-y-8">
-        {/* ========== 页头风格卡片 ========== */}
-        <div className="border rounded-lg p-6 space-y-4">
-          <h2 className="text-lg font-semibold">页头风格</h2>
-          <div>
-            <label className="block text-sm font-medium mb-2">选择风格</label>
-            <select {...register('style')} className="w-full border rounded px-3 py-2">
-              <option value="simple">简洁风格</option>
-              <option value="classic">经典风格</option>
-              <option value="luxury">轻奢展示</option>
-            </select>
-            <p className="text-xs text-gray-500 mt-1">不同风格影响前台导航栏的布局和视觉效果</p>
-          </div>
-        </div>
+    const onSubmit = async (data: HeaderConfig) => {
+      try {
+        const res = await fetch('/api/SiteHeadersFooters/save', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ type: 'header', locale, config: data }),
+        });
+        if (res.ok) {
+          setToast({ message: '保存成功', type: 'success' });
+          if (onSuccess) onSuccess('保存成功');
+        } else {
+          const err = await res.json();
+          const msg = err.error || '保存失败';
+          setToast({ message: msg, type: 'error' });
+          if (onError) onError(msg);
+        }
+      } catch (error) {
+        console.error('🔴 HeaderForm onSubmit 异常:', error);
+        const msg = '保存失败，请重试';
+        setToast({ message: msg, type: 'error' });
+        if (onError) onError(msg);
+      }
+    };
 
-        {/* ========== Logo 设置 ========== */}
-        <div className="border rounded-lg p-6 space-y-4">
-          <h2 className="text-lg font-semibold">Logo 设置</h2>
-          <ImageUpload
-            value={watch('logo.imageUrl')}
-            onChange={(url) => setValue('logo.imageUrl', Array.isArray(url) ? url[0] : url)}
-            maxCount={1}
-            label="Logo"
-            hint="建议尺寸 250×100px (2.5:1)，优先使用 PNG 格式"
-          />
-          <SliderInput
-            value={watch('logo.width')}
-            onChange={(val) => setValue('logo.width', val)}
-            label="宽度"
-            min={50}
-            max={300}
-          />
-          <div>
-            <label className="block text-sm font-medium">Logo 位置</label>
-            <select {...register('logo.position')} className="mt-1 w-full border rounded px-3 py-2">
-              {LOGO_POSITIONS.map(opt => <option key={opt.value} value={opt.value}>{opt.label}</option>)}
-            </select>
-          </div>
-          <div>
-            <label className="block text-sm font-medium">移动设备 Logo 位置</label>
-            <select {...register('logo.mobilePosition')} className="mt-1 w-full border rounded px-3 py-2">
-              {MOBILE_LOGO_POSITIONS.map(opt => <option key={opt.value} value={opt.value}>{opt.label}</option>)}
-            </select>
-          </div>
-          <ImageUpload
-            value={watch('logo.faviconUrl')}
-            onChange={(url) => setValue('logo.faviconUrl', Array.isArray(url) ? url[0] : url)}
-            maxCount={1}
-            label="网站图标"
-            hint="以 32×32px 显示，格式建议 .ico 或 PNG"
-          />
-        </div>
+    useImperativeHandle(ref, () => ({
+      submit: handleSubmit(onSubmit),
+    }));
 
-        {/* ========== 菜单设置 ========== */}
-        <div className="border rounded-lg p-6 space-y-4">
-          <h2 className="text-lg font-semibold">菜单设置</h2>
-          <MenuSelector
-            value={watch('menu.menuSourceId')}
-            onChange={(id) => setValue('menu.menuSourceId', id)}
-            label="菜单"
-            locale={locale}
-          />
-          <div>
-            <label className="block text-sm font-medium">菜单类型</label>
-            <select {...register('menu.menuType')} className="mt-1 w-full border rounded px-3 py-2">
-              {MENU_TYPES.map(opt => <option key={opt.value} value={opt.value}>{opt.label}</option>)}
-            </select>
-          </div>
-          <div>
-            <label className="block text-sm font-medium">粘性页头</label>
-            <select {...register('menu.stickyBehavior')} className="mt-1 w-full border rounded px-3 py-2">
-              {STICKY_BEHAVIORS.map(opt => <option key={opt.value} value={opt.value}>{opt.label}</option>)}
-            </select>
-          </div>
-          <ToggleSwitch
-            enabled={watch('menu.showSeparator')}
-            onChange={(val) => setValue('menu.showSeparator', val)}
-            label="分隔线"
-          />
-        </div>
+    // 判断是否禁用相关字段
+    const isLuxury = currentStyle === 'luxury';
 
-        {/* ========== 公共设施 ========== */}
-        <div className="border rounded-lg p-6 space-y-4">
-          <h2 className="text-lg font-semibold">公共设施</h2>
-          <ToggleSwitch
-            enabled={watch('utilities.showLanguageSelector')}
-            onChange={(val) => setValue('utilities.showLanguageSelector', val)}
-            label="多语言选择器"
-          />
-          <SliderInput
-            value={watch('utilities.topSpacing')}
-            onChange={(val) => setValue('utilities.topSpacing', val)}
-            label="顶部间隔"
-            max={100}
-          />
-          <SliderInput
-            value={watch('utilities.bottomSpacing')}
-            onChange={(val) => setValue('utilities.bottomSpacing', val)}
-            label="底部间隔"
-            max={100}
-          />
-        </div>
-
-        {/* ========== 公告栏 ========== */}
-        <div className="border rounded-lg p-6 space-y-4">
-          <h2 className="text-lg font-semibold">公告栏</h2>
-          <ToggleSwitch
-            enabled={watch('announcements.enabled')}
-            onChange={(val) => setValue('announcements.enabled', val)}
-            label="是否开启"
-          />
-          {watch('announcements.enabled') && (
-            <div className="space-y-3">
-              {fields.map((field, idx) => (
-                <div key={field.id} className="bg-gray-50 rounded p-3 space-y-2">
-                  <div className="flex gap-2">
-                    <input
-                      {...register(`announcements.items.${idx}.text`)}
-                      className="flex-1 border rounded px-3 py-2"
-                      placeholder="公告内容"
-                    />
-                    <button type="button" onClick={() => remove(idx)} className="text-red-500">
-                      <Trash2 size={18} />
-                    </button>
-                  </div>
-                  <input
-                    {...register(`announcements.items.${idx}.link`)}
-                    className="w-full border rounded px-3 py-2"
-                    placeholder="链接（可选，例如：https://example.com）"
-                  />
-                </div>
-              ))}
-              <button
-                type="button"
-                onClick={() => append({ id: crypto.randomUUID(), text: '', link: '' })}
-                className="text-blue-600 text-sm inline-flex items-center gap-1"
-              >
-                <Plus size={16} /> 添加公告
-              </button>
+    return (
+      <>
+        <form onSubmit={handleSubmit(onSubmit)} className="space-y-8">
+          {/* ========== 页头风格卡片 ========== */}
+          <div className="border rounded-lg p-6 space-y-4">
+            <h2 className="text-lg font-semibold">页头风格</h2>
+            <div>
+              <label className="block text-sm font-medium mb-2">选择风格</label>
+              <select {...register('style')} className="w-full border rounded px-3 py-2">
+                <option value="simple">简洁风格</option>
+                <option value="classic">经典风格</option>
+                <option value="luxury">轻奢展示</option>
+              </select>
+              <p className="text-xs text-gray-500 mt-1">不同风格影响前台导航栏的布局和视觉效果</p>
             </div>
-          )}
-        </div>
+          </div>
 
-        <div className="flex justify-end">
-          <button type="submit" className="bg-blue-600 text-white px-6 py-2 rounded hover:bg-blue-700">
-            保存设置
-          </button>
-        </div>
-      </form>
-      {toast && <Toast message={toast.message} type={toast.type} onClose={() => setToast(null)} />}
-    </>
-  );
-}
+          {/* ========== Logo 设置 ========== */}
+          <div className="border rounded-lg p-6 space-y-4">
+            <h2 className="text-lg font-semibold">Logo 设置</h2>
+            <ImageUpload
+              value={watch('logo.imageUrl')}
+              onChange={(url) => setValue('logo.imageUrl', Array.isArray(url) ? url[0] : url)}
+              maxCount={1}
+              label="Logo"
+              hint="建议尺寸 250×100px (2.5:1)，优先使用 PNG 格式"
+            />
+            <SliderInput
+              value={watch('logo.width')}
+              onChange={(val) => setValue('logo.width', val)}
+              label="宽度"
+              min={50}
+              max={300}
+            />
+            <div>
+              <label className="block text-sm font-medium">Logo 位置</label>
+              <select
+                {...register('logo.position')}
+                disabled={isLuxury}
+                className={`mt-1 w-full border rounded px-3 py-2 ${isLuxury ? 'bg-gray-100 cursor-not-allowed' : ''}`}
+              >
+                {LOGO_POSITIONS.map(opt => (
+                  <option key={opt.value} value={opt.value}>{opt.label}</option>
+                ))}
+              </select>
+              {isLuxury && (
+                <p className="text-xs text-gray-500 mt-1">轻奢风格下 Logo 位置固定为“中间居左”</p>
+              )}
+            </div>
+            <div>
+              <label className="block text-sm font-medium">移动设备 Logo 位置</label>
+              <select {...register('logo.mobilePosition')} className="mt-1 w-full border rounded px-3 py-2">
+                {MOBILE_LOGO_POSITIONS.map(opt => (
+                  <option key={opt.value} value={opt.value}>{opt.label}</option>
+                ))}
+              </select>
+            </div>
+            <ImageUpload
+              value={watch('logo.faviconUrl')}
+              onChange={(url) => setValue('logo.faviconUrl', Array.isArray(url) ? url[0] : url)}
+              maxCount={1}
+              label="网站图标"
+              hint="以 32×32px 显示，格式建议 .ico 或 PNG"
+            />
+          </div>
+
+          {/* ========== 菜单设置 ========== */}
+          <div className="border rounded-lg p-6 space-y-4">
+            <h2 className="text-lg font-semibold">菜单设置</h2>
+            <MenuSelector
+              value={watch('menu.menuSourceId')}
+              onChange={(id) => setValue('menu.menuSourceId', id)}
+              label="菜单"
+              locale={locale}
+            />
+            <div>
+              <label className="block text-sm font-medium">菜单类型</label>
+              <select {...register('menu.menuType')} className="mt-1 w-full border rounded px-3 py-2">
+                {MENU_TYPES.map(opt => (
+                  <option key={opt.value} value={opt.value}>{opt.label}</option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label className="block text-sm font-medium">粘性页头</label>
+              <select
+                {...register('menu.stickyBehavior')}
+                disabled={isLuxury}
+                className={`mt-1 w-full border rounded px-3 py-2 ${isLuxury ? 'bg-gray-100 cursor-not-allowed' : ''}`}
+              >
+                {STICKY_BEHAVIORS.map(opt => (
+                  <option key={opt.value} value={opt.value}>{opt.label}</option>
+                ))}
+              </select>
+              {isLuxury && (
+                <p className="text-xs text-gray-500 mt-1">轻奢风格下粘性页头固定为“始终”</p>
+              )}
+            </div>
+            <ToggleSwitch
+              enabled={watch('menu.showSeparator')}
+              onChange={(val) => setValue('menu.showSeparator', val)}
+              label="分隔线"
+            />
+          </div>
+
+          {/* ========== 公共设施 ========== */}
+          <div className="border rounded-lg p-6 space-y-4">
+            <h2 className="text-lg font-semibold">公共设施</h2>
+            <ToggleSwitch
+              enabled={watch('utilities.showLanguageSelector')}
+              onChange={(val) => setValue('utilities.showLanguageSelector', val)}
+              label="多语言选择器"
+            />
+            <SliderInput
+              value={watch('utilities.topSpacing')}
+              onChange={(val) => setValue('utilities.topSpacing', val)}
+              label="顶部间隔"
+              max={100}
+            />
+            <SliderInput
+              value={watch('utilities.bottomSpacing')}
+              onChange={(val) => setValue('utilities.bottomSpacing', val)}
+              label="底部间隔"
+              max={100}
+            />
+          </div>
+
+          {/* ========== 公告栏 ========== */}
+          <div className="border rounded-lg p-6 space-y-4">
+            <h2 className="text-lg font-semibold">公告栏</h2>
+            <ToggleSwitch
+              enabled={watch('announcements.enabled')}
+              onChange={(val) => setValue('announcements.enabled', val)}
+              label="是否开启"
+            />
+            {watch('announcements.enabled') && (
+              <div className="space-y-3">
+                {fields.map((field, idx) => (
+                  <div key={field.id} className="bg-gray-50 rounded p-3 space-y-2">
+                    <div className="flex gap-2">
+                      <input
+                        {...register(`announcements.items.${idx}.text`)}
+                        className="flex-1 border rounded px-3 py-2"
+                        placeholder="公告内容"
+                      />
+                      <button type="button" onClick={() => remove(idx)} className="text-red-500">
+                        <Trash2 size={18} />
+                      </button>
+                    </div>
+                    <input
+                      {...register(`announcements.items.${idx}.link`)}
+                      className="w-full border rounded px-3 py-2"
+                      placeholder="链接（可选，例如：https://example.com）"
+                    />
+                  </div>
+                ))}
+                <button
+                  type="button"
+                  onClick={() => append({ id: crypto.randomUUID(), text: '', link: '' })}
+                  className="text-blue-600 text-sm inline-flex items-center gap-1"
+                >
+                  <Plus size={16} /> 添加公告
+                </button>
+              </div>
+            )}
+          </div>
+        </form>
+        {toast && <Toast message={toast.message} type={toast.type} onClose={() => setToast(null)} />}
+      </>
+    );
+  }
+);
+
+HeaderForm.displayName = 'HeaderForm';
+
+export default HeaderForm;

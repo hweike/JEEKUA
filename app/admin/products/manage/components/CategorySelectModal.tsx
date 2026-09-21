@@ -1,13 +1,13 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { ChevronRight } from 'lucide-react';
 
 interface CategorySelectModalProps {
   locale: string;
   onSelect: (categoryId: string, seriesId: string) => void;
   onClose: () => void;
-  confirmText?: string;  // 新增，默认“下一步”
+  confirmText?: string;
 }
 
 interface ProductLine {
@@ -31,27 +31,122 @@ interface Category {
   series: Series[];
 }
 
+interface Language {
+  code: string;
+  zhName: string;
+  nativeName: string;
+}
+
 export default function CategorySelectModal({ locale, onSelect, onClose, confirmText = '下一步' }: CategorySelectModalProps) {
+  const [languages, setLanguages] = useState<Language[]>([]);
+  const [selectedLanguage, setSelectedLanguage] = useState(locale); // 默认当前页面语言
   const [productLines, setProductLines] = useState<ProductLine[]>([]);
   const [categories, setCategories] = useState<Category[]>([]);
   const [selectedProductLineId, setSelectedProductLineId] = useState('');
   const [selectedCategoryId, setSelectedCategoryId] = useState('');
   const [selectedSeriesId, setSelectedSeriesId] = useState('');
   const [loading, setLoading] = useState(true);
+  const [switchingLanguage, setSwitchingLanguage] = useState(false);
+  
+  // 缓存所有语言的数据
+  const cacheRef = useRef<Map<string, { productLines: ProductLine[]; categories: Category[] }>>(new Map());
+  const initialLocaleLoadedRef = useRef(false);
 
+  // 首次加载：并行加载语言和分类数据
   useEffect(() => {
-    fetch(`/api/admin/products/categories?locale=${locale}`)
-      .then(res => res.json())
-      .then(data => {
-        setProductLines(data.productLines || []);
-        setCategories(data.categories || []);
-        if (data.productLines?.length > 0) {
-          setSelectedProductLineId(data.productLines[0].id);
+    const loadData = async () => {
+      setLoading(true);
+      try {
+        const [langRes, categoryRes] = await Promise.all([
+          fetch('/api/languages/enabled'),
+          fetch(`/api/admin/products/categories?locale=${locale}`)
+        ]);
+
+        const [langData, categoryData] = await Promise.all([
+          langRes.json(),
+          categoryRes.json()
+        ]);
+
+        setLanguages(langData || []);
+        
+        // 缓存初始语言的数据
+        cacheRef.current.set(locale, {
+          productLines: categoryData.productLines || [],
+          categories: categoryData.categories || []
+        });
+        
+        setProductLines(categoryData.productLines || []);
+        setCategories(categoryData.categories || []);
+        
+        if (categoryData.productLines?.length > 0) {
+          setSelectedProductLineId(categoryData.productLines[0].id);
         }
+        initialLocaleLoadedRef.current = true;
+      } catch (error) {
+        console.error('加载数据失败:', error);
+      } finally {
         setLoading(false);
-      })
-      .catch(console.error);
+      }
+    };
+
+    loadData();
   }, [locale]);
+
+  // 语言切换时加载数据（每次切换都触发，无限制）
+  useEffect(() => {
+    // 首次加载完成前不触发（避免重复请求）
+    if (!initialLocaleLoadedRef.current) return;
+    if (!selectedLanguage) return;
+    
+    // 从缓存获取数据
+    const cachedData = cacheRef.current.get(selectedLanguage);
+    if (cachedData) {
+      // 从缓存恢复数据（无需显示加载状态）
+      setProductLines(cachedData.productLines);
+      setCategories(cachedData.categories);
+      if (cachedData.productLines.length > 0) {
+        setSelectedProductLineId(cachedData.productLines[0].id);
+      } else {
+        setSelectedProductLineId('');
+      }
+      setSelectedCategoryId('');
+      setSelectedSeriesId('');
+      return;
+    }
+
+    // 缓存中没有，请求数据
+    const loadCategories = async () => {
+      setSwitchingLanguage(true);
+      try {
+        const res = await fetch(`/api/admin/products/categories?locale=${selectedLanguage}`);
+        const data = await res.json();
+        const productLinesData = data.productLines || [];
+        const categoriesData = data.categories || [];
+        
+        // 存入缓存
+        cacheRef.current.set(selectedLanguage, {
+          productLines: productLinesData,
+          categories: categoriesData
+        });
+        
+        setProductLines(productLinesData);
+        setCategories(categoriesData);
+        if (productLinesData.length > 0) {
+          setSelectedProductLineId(productLinesData[0].id);
+        } else {
+          setSelectedProductLineId('');
+        }
+        setSelectedCategoryId('');
+        setSelectedSeriesId('');
+      } catch (error) {
+        console.error('加载分类失败:', error);
+      } finally {
+        setSwitchingLanguage(false);
+      }
+    };
+
+    loadCategories();
+  }, [selectedLanguage]);
 
   const filteredCategories = categories.filter(cat => cat.productLineId === selectedProductLineId);
   const currentCategory = filteredCategories.find(cat => cat.id === selectedCategoryId);
@@ -67,34 +162,64 @@ export default function CategorySelectModal({ locale, onSelect, onClose, confirm
     onSelect(selectedCategoryId, selectedSeriesId);
   };
 
-  if (loading) return <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center">加载中...</div>;
+  // 首次加载显示全屏加载
+  if (loading) {
+    return (
+      <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+        <div className="bg-white rounded-lg shadow-xl w-[800px] max-w-[90vw] p-6 text-center">
+          <div className="py-8 text-gray-500">加载中...</div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
       <div className="bg-white rounded-lg shadow-xl w-[800px] max-w-[90vw] p-6">
         <h2 className="text-xl font-bold mb-4">选择商品分类</h2>
 
-        <div className="mb-4 w-1/2">
-          <label className="block text-sm font-medium mb-1">产品线</label>
-          <select
-            value={selectedProductLineId}
-            onChange={(e) => {
-              setSelectedProductLineId(e.target.value);
-              setSelectedCategoryId('');
-              setSelectedSeriesId('');
-            }}
-            className="border rounded p-2 w-full"
-          >
-            {productLines.map(line => (
-              <option key={line.id} value={line.id}>{line.name}</option>
-            ))}
-          </select>
+        <div className="flex gap-4 mb-4">
+          <div className="w-1/4">
+            <label className="block text-sm font-medium mb-1">语言</label>
+            <select
+              value={selectedLanguage}
+              onChange={(e) => setSelectedLanguage(e.target.value)}
+              className="border rounded p-2 w-full"
+            >
+              {languages.map(lang => (
+                <option key={lang.code} value={lang.code}>
+                  {lang.zhName} ({lang.code})
+                </option>
+              ))}
+            </select>
+          </div>
+          <div className="w-[45%]">
+            <label className="block text-sm font-medium mb-1">产品线</label>
+            <select
+              value={selectedProductLineId}
+              onChange={(e) => {
+                setSelectedProductLineId(e.target.value);
+                setSelectedCategoryId('');
+                setSelectedSeriesId('');
+              }}
+              className="border rounded p-2 w-full"
+            >
+              {productLines.map(line => (
+                <option key={line.id} value={line.id}>{line.name}</option>
+              ))}
+            </select>
+          </div>
         </div>
 
         <div className="flex gap-4 mt-4">
           <div className="flex-1 border rounded-lg overflow-hidden">
             <div className="bg-gray-100 px-4 py-2 font-medium border-b">一级分类</div>
-            <div className="max-h-[320px] overflow-y-auto">
+            <div className="max-h-[320px] overflow-y-auto relative">
+              {switchingLanguage ? (
+                <div className="absolute inset-0 bg-white/70 flex items-center justify-center z-10">
+                  <span className="text-gray-500">加载中...</span>
+                </div>
+              ) : null}
               {filteredCategories.length === 0 ? (
                 <div className="p-4 text-gray-500 text-center">暂无一级分类</div>
               ) : (
@@ -118,7 +243,12 @@ export default function CategorySelectModal({ locale, onSelect, onClose, confirm
 
           <div className="flex-1 border rounded-lg overflow-hidden">
             <div className="bg-gray-100 px-4 py-2 font-medium border-b">二级分类</div>
-            <div className="max-h-[320px] overflow-y-auto">
+            <div className="max-h-[320px] overflow-y-auto relative">
+              {switchingLanguage ? (
+                <div className="absolute inset-0 bg-white/70 flex items-center justify-center z-10">
+                  <span className="text-gray-500">加载中...</span>
+                </div>
+              ) : null}
               {!selectedCategoryId ? (
                 <div className="p-4 text-gray-500 text-center">请先选择一级分类</div>
               ) : seriesList.length === 0 ? (
@@ -146,9 +276,11 @@ export default function CategorySelectModal({ locale, onSelect, onClose, confirm
           <button onClick={onClose} className="bg-gray-300 px-4 py-2 rounded">取消</button>
           <button
             onClick={handleConfirm}
-            disabled={!selectedCategoryId}
+            disabled={!selectedCategoryId || switchingLanguage}
             className={`px-4 py-2 rounded ${
-              selectedCategoryId ? 'bg-blue-600 text-white' : 'bg-gray-200 text-gray-400 cursor-not-allowed'
+              selectedCategoryId && !switchingLanguage
+                ? 'bg-blue-600 text-white' 
+                : 'bg-gray-200 text-gray-400 cursor-not-allowed'
             }`}
           >
             {confirmText} →

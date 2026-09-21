@@ -3,7 +3,7 @@ import type { ComponentConfig } from '@puckeditor/core';
 import type { Components } from '../types';
 
 export const config: ComponentConfig<Components['BlogCollectionBlock']> = {
-  label: '博客分类文章列表',
+  label: '新闻资讯(博客)文章列表',
   category: 'Blog',
   defaultProps: {
     showSidebar: false,

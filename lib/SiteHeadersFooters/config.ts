@@ -1,7 +1,8 @@
-import { SiteHeadersFootersConfig, SocialLink } from './types';
+// lib/SiteHeadersFooters/config.ts
+import { HeaderConfig, FooterConfig, SocialLink } from './types';
 
-export const DEFAULT_HEADER_CONFIG: SiteHeadersFootersConfig['header'] = {
-  style: 'simple', // 默认简洁风格
+export const DEFAULT_HEADER_CONFIG: HeaderConfig = {
+  style: 'simple',
   logo: {
     imageUrl: '',
     width: 120,
@@ -10,7 +11,7 @@ export const DEFAULT_HEADER_CONFIG: SiteHeadersFootersConfig['header'] = {
     faviconUrl: '',
   },
   menu: {
-    menuSourceId: 'main-nav',
+    menuSourceId: 'navigation',
     menuType: 'dropdown',
     stickyBehavior: 'scroll-up',
     showSeparator: false,
@@ -24,10 +25,14 @@ export const DEFAULT_HEADER_CONFIG: SiteHeadersFootersConfig['header'] = {
     enabled: false,
     items: [],
   },
+  search: {
+    enabled: true,
+    placeholder: '',
+  },
 };
 
-export const DEFAULT_FOOTER_CONFIG: SiteHeadersFootersConfig['footer'] = {
-  style: 'simple', // 新增
+export const DEFAULT_FOOTER_CONFIG: FooterConfig = {
+  style: 'simple',
   emailSubscription: {
     enabled: false,
     title: 'Subscribe to our newsletter',
@@ -53,17 +58,24 @@ export const DEFAULT_FOOTER_CONFIG: SiteHeadersFootersConfig['footer'] = {
     topSpacing: 32,
     bottomSpacing: 32,
   },
+  // ✅ 顶层 textInfo 字段已包含（与 FooterConfig 类型匹配）
+  textInfo: {
+    enabled: false,
+    title: '',
+    content: '',
+  },
 };
 
+// 社交平台配置（顺序已调整：LinkedIn 在 Twitter 之后）
 export const SOCIAL_PLATFORMS: { value: SocialLink['platform']; label: string }[] = [
   { value: 'facebook', label: 'Facebook' },
   { value: 'instagram', label: 'Instagram' },
   { value: 'youtube', label: 'YouTube' },
   { value: 'tiktok', label: 'TikTok' },
   { value: 'twitter', label: 'X / Twitter' },
+  { value: 'linkedin', label: 'LinkedIn' },
   { value: 'snapchat', label: 'Snapchat' },
   { value: 'pinterest', label: 'Pinterest' },
-  { value: 'tumblr', label: 'Tumblr' },
   { value: 'vimeo', label: 'Vimeo' },
 ];
 

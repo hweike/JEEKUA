@@ -10,6 +10,7 @@ import VideoUrlModal from './VideoUrlModal';
 import VideoPreviewModal from './VideoPreviewModal';
 import ResourceAssociation from '@/components/admin/products/ResourceAssociation';
 import { VideoIcon } from 'lucide-react';
+import { getImageUrl } from '@/lib/files/url'; // 导入统一图片处理
 
 // 动态导入富文本编辑器，禁用 SSR
 const RichTextEditor = dynamic(() => import('@/components/RichTextEditor'), { ssr: false });
@@ -96,7 +97,6 @@ export default function VideoForm({ mode, locale, initialData, videoId }: VideoF
       setSeoKeywords(initialData.seo_keywords ?? '');
       setSeoTitle(initialData.seo_title ?? '');
       setSeoDescription(initialData.seo_description ?? '');
-      // 处理 tags（存储为 JSON 字符串）
       if (initialData.tags) {
         try {
           setTags(JSON.parse(initialData.tags));
@@ -233,7 +233,7 @@ export default function VideoForm({ mode, locale, initialData, videoId }: VideoF
       category_key: categoryKey,
       flagged: flagged ? 1 : 0,
       template: '',
-      tags: JSON.stringify(tags), // 存储为 JSON 数组字符串
+      tags: JSON.stringify(tags),
     };
     if (mode === 'edit' && videoId) videoData.id = videoId;
     const res = await fetch('/api/admin/videosys-videos', {
@@ -253,13 +253,8 @@ export default function VideoForm({ mode, locale, initialData, videoId }: VideoF
   const titleText = mode === 'new' ? `发布视频 (站点: ${locale})` : `编辑视频 (站点: ${locale})`;
   const hasValidVideo = !!videoIdState;
 
-  const getDisplayThumbnail = (url: string) => {
-    if (!url) return '';
-    if (url.startsWith('/uploads') || url.includes('localhost')) return url;
-    if (url.startsWith('http')) return `/api/proxy-image?url=${encodeURIComponent(url)}`;
-    return url;
-  };
-  const displayThumbnail = getDisplayThumbnail(thumbnail);
+  // 获取显示的缩略图（统一使用 getImageUrl）
+  const displayThumbnail = thumbnail ? getImageUrl(thumbnail) : '';
 
   return (
     <div className="p-6 max-w-7xl mx-auto pb-24">
@@ -297,7 +292,7 @@ export default function VideoForm({ mode, locale, initialData, videoId }: VideoF
                       }`}
                       onClick={() => hasValidVideo && setIsPreviewModalOpen(true)}
                     >
-                      {thumbnail && hasValidVideo ? (
+                      {displayThumbnail && hasValidVideo ? (
                         <img
                           src={displayThumbnail}
                           alt="视频封面"
@@ -335,9 +330,16 @@ export default function VideoForm({ mode, locale, initialData, videoId }: VideoF
                         支持 YouTube、Vimeo、Bilibili
                       </p>
                       {videoIdState && (
-                        <p className="text-xs text-green-600 mt-1">
-                          已识别：{sourceType} - {videoIdState}
-                        </p>
+                        <>
+                          <p className="text-xs text-green-600 mt-1">
+                            已识别：{sourceType} - {videoIdState}
+                          </p>
+                          {videoUrl && (
+                            <p className="text-xs text-gray-500 mt-1 break-all">
+                              链接：<a href={videoUrl} target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline">查看视频</a>
+                            </p>
+                          )}
+                        </>
                       )}
                     </div>
                   </div>
@@ -397,10 +399,10 @@ export default function VideoForm({ mode, locale, initialData, videoId }: VideoF
                 <div>
                   <label className="block text-sm font-medium">视频介绍 *</label>
                   <RichTextEditor
-                    key={mode === 'edit' ? videoId : 'new'}   // 视频 ID 变化时重建编辑器
+                    key={mode === 'edit' ? videoId : 'new'}
                     value={content}
                     onChange={(val) => setContent(val)}
-                  /> 
+                  />
                 </div>
               </div>
             </div>
@@ -459,7 +461,7 @@ export default function VideoForm({ mode, locale, initialData, videoId }: VideoF
             <div className="bg-white rounded-lg shadow p-6">
               <h2 className="text-lg font-semibold mb-4">视频封面</h2>
               <ImageUpload
-                value={displayThumbnail}
+                value={thumbnail}
                 onChange={(url) => setThumbnail(url)}
                 maxCount={1}
                 label=""

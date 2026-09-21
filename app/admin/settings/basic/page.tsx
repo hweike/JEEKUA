@@ -1,14 +1,16 @@
+// app/admin/settings/basic/page.tsx
 'use client';
 
 import { useState, useEffect, useRef } from 'react';
 import { provinces } from '@/lib/Basicsettings/provinces';
 import { validatePhone } from '@/lib/Basicsettings/validation';
+import ImageUpload from '@/components/ImageUpload';
 
 interface Settings {
   siteName: string;
   websiteUrl: string;
-  defaultLocale: string;        // 新增
-  targetAudience: string;        // 新增
+  defaultLocale: string;
+  targetAudience: string;
   contactEmail: string;
   contactPhone: string;
   companyName: string;
@@ -18,6 +20,8 @@ interface Settings {
   province: string;
   postalCode: string;
   brand: string[];
+  socialShareImage: string;
+  logo: string; // 新增
 }
 
 // TagsInput 组件（不变）
@@ -103,6 +107,8 @@ export default function BasicSettingsPage() {
           defaultLocale: data.defaultLocale || 'en',
           targetAudience: data.targetAudience || '',
           brand: Array.isArray(data.brand) ? data.brand : [],
+          socialShareImage: data.socialShareImage || '',
+          logo: data.logo || '', // 新增
         });
         setLoading(false);
       })
@@ -125,7 +131,7 @@ export default function BasicSettingsPage() {
       return '邮箱格式不正确';
     }
     if (settings.contactPhone?.trim() && !validatePhone(settings.contactPhone)) {
-     return '电话格式不正确（请填写国内手机/固话或国际号码）';
+      return '电话格式不正确（请填写国内手机/固话或国际号码）';
     }
     return null;
   };
@@ -161,7 +167,14 @@ export default function BasicSettingsPage() {
 
   return (
     <div className="max-w-4xl mx-auto p-6">
+      {/* ✅ 顶部提示 */}
       <h1 className="text-2xl font-bold mb-6">基本设置</h1>
+      <div className="mb-6 p-4 bg-blue-50 border border-blue-200 rounded-lg">
+        <p className="text-blue-800 text-sm">
+          ⚠️ 本页面设置的基本信息非常重要，网站对客户所有输出的官方信息来自本页面的设置。
+          请仔细核对各项内容的准确性。
+        </p>
+      </div>
       <form onSubmit={handleSubmit} className="space-y-6">
         {/* 卡片1：网站信息 */}
         <div className="bg-white rounded-lg shadow p-6">
@@ -194,6 +207,18 @@ export default function BasicSettingsPage() {
               />
               <p className="text-xs text-gray-500 mt-1">必须以 http:// 或 https:// 开头</p>
             </div>
+            {/* ✅ 新增：企业 Logo */}
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">企业 Logo</label>
+              <ImageUpload
+                value={settings.logo}
+                onChange={(url) => handleChange('logo', Array.isArray(url) ? url[0] : url)}
+                maxCount={1}
+                label=""
+                hint="建议采用与网站相同或者相近的 Logo"
+                previewAspectRatio="1:1"
+              />
+            </div>
             <div>
               <label className="block text-sm font-medium text-gray-700">默认语言</label>
               <input
@@ -224,15 +249,26 @@ export default function BasicSettingsPage() {
               />
               <p className="text-xs text-gray-500 mt-1">可添加多个品牌，每个品牌按回车确认</p>
             </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">社交分享图片</label>
+              <ImageUpload
+                value={settings.socialShareImage}
+                onChange={(url) => handleChange('socialShareImage', Array.isArray(url) ? url[0] : url)}
+                maxCount={1}
+                label=""
+                hint="建议尺寸 1200×628px，用于社交媒体分享时的预览图"
+                previewAspectRatio="16:9"
+              />
+            </div>
           </div>
         </div>
 
-        {/* 卡片2：商务联系方式（不变） */}
+        {/* 卡片2：商务联系方式 */}
         <div className="bg-white rounded-lg shadow p-6">
           <h2 className="text-lg font-semibold mb-4">商务联系方式</h2>
           <div className="space-y-4">
             <div>
-              <label className="block text-sm font-medium text-gray-700">电子邮件（可选）</label>
+              <label className="block text-sm font-medium text-gray-700">电子邮件</label>
               <input
                 type="email"
                 value={settings.contactEmail}
@@ -241,25 +277,25 @@ export default function BasicSettingsPage() {
                 placeholder="example@domain.com"
               />
             </div>
-          <div>
-          <label className="block text-sm font-medium text-gray-700">联系电话（可选）</label>
-          <input
-            type="tel"
-            value={settings.contactPhone}
-            onChange={e => handleChange('contactPhone', e.target.value)}
-            className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm p-2"
-            placeholder="手机、固话或国际电话（含区号）"
-          />
-          </div>  
+            <div>
+              <label className="block text-sm font-medium text-gray-700">联系电话</label>
+              <input
+                type="tel"
+                value={settings.contactPhone}
+                onChange={e => handleChange('contactPhone', e.target.value)}
+                className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm p-2"
+                placeholder="手机、固话或国际电话（含区号）"
+              />
+            </div>
           </div>
         </div>
 
-        {/* 卡片3：公司信息（修正省份下拉框） */}
+        {/* 卡片3：公司信息 */}
         <div className="bg-white rounded-lg shadow p-6">
           <h2 className="text-lg font-semibold mb-4">公司信息</h2>
           <div className="space-y-4">
             <div>
-              <label className="block text-sm font-medium text-gray-700">公司名称（可选）</label>
+              <label className="block text-sm font-medium text-gray-700">公司名称</label>
               <input
                 type="text"
                 value={settings.companyName}
@@ -277,7 +313,7 @@ export default function BasicSettingsPage() {
               />
             </div>
             <div>
-              <label className="block text-sm font-medium text-gray-700">注册地址（可选）</label>
+              <label className="block text-sm font-medium text-gray-700">注册地址</label>
               <input
                 type="text"
                 value={settings.registeredAddress}
@@ -287,7 +323,7 @@ export default function BasicSettingsPage() {
             </div>
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
               <div>
-                <label className="block text-sm font-medium text-gray-700">省份（可选）</label>
+                <label className="block text-sm font-medium text-gray-700">省份</label>
                 <select
                   value={settings.province}
                   onChange={e => handleChange('province', e.target.value)}
@@ -300,7 +336,7 @@ export default function BasicSettingsPage() {
                 </select>
               </div>
               <div>
-                <label className="block text-sm font-medium text-gray-700">城市（可选）</label>
+                <label className="block text-sm font-medium text-gray-700">城市</label>
                 <input
                   type="text"
                   value={settings.city}
@@ -309,7 +345,7 @@ export default function BasicSettingsPage() {
                 />
               </div>
               <div>
-                <label className="block text-sm font-medium text-gray-700">邮编（可选）</label>
+                <label className="block text-sm font-medium text-gray-700">邮编</label>
                 <input
                   type="text"
                   value={settings.postalCode}

@@ -19,12 +19,29 @@ function getDefaultDescriptionSuffix(locale: string, siteName: string): string {
     case 'es':
       return `${siteName} - Sitio oficial`;
     default:
-      return `${siteName} - Official Website`; // 默认英文
+      return `${siteName} - Official Website`;
   }
 }
 
+/**
+ * 安全地从 settings 中读取属性，支持动态语言后缀
+ * @param settings SiteSettings 对象（类型可能不完整）
+ * @param baseKey 基础字段名，如 'homeSeoDescription'
+ * @param locale 当前语言
+ */
+function getSeoField(settings: any, baseKey: string, locale: string): string | undefined {
+  // 优先读取语言专属字段：homeSeoDescription_zh
+  const langKey = `${baseKey}_${locale}`;
+  if (settings[langKey]) {
+    return settings[langKey];
+  }
+  // 回退到基础字段：homeSeoDescription
+  return settings[baseKey];
+}
+
 export async function getHomeSeoInput(locale: string): Promise<SeoInput<'home'>> {
-  const settings = await getSiteSettings();
+  // 使用 as any 临时绕过不完整的类型定义
+  const settings = (await getSiteSettings()) as any;
   const header = await getHeaderConfig(locale);
   const footer = await getFooterConfig(locale);
   const baseUrl = (settings.websiteUrl || process.env.NEXT_PUBLIC_BASE_URL || '').replace(/\/$/, '');
@@ -40,21 +57,16 @@ export async function getHomeSeoInput(locale: string): Promise<SeoInput<'home'>>
       : `${baseUrl}${header.logo.imageUrl}`;
   }
   
-  // 动态生成描述：优先使用配置中的多语言描述，否则使用带后缀的默认描述
-  let description = settings.homeSeoDescription;
-  if (!description) {
-    // 支持按语言配置独立字段，例如 homeSeoDescription_zh, homeSeoDescription_en
-    const langDescKey = `homeSeoDescription_${locale}`;
-    if (settings[langDescKey]) {
-      description = settings[langDescKey];
-    } else {
-      description = getDefaultDescriptionSuffix(locale, settings.siteName);
-    }
-  }
+  // 获取标题：优先 homeSeoTitle，否则使用 siteName
+  const title = settings.homeSeoTitle || settings.siteName || 'Site Name';
+  
+  // 获取描述：优先语言专属，再基础字段，最后动态生成
+  const description = getSeoField(settings, 'homeSeoDescription', locale) ||
+                      getDefaultDescriptionSuffix(locale, settings.siteName || 'Site');
   
   return {
     type: 'home',
-    title: settings.homeSeoTitle || settings.siteName,
+    title,
     description,
     url: `${baseUrl}/${locale}`,
     image: defaultOgImage,

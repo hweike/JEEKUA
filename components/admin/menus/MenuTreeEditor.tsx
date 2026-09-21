@@ -1,8 +1,8 @@
-// components/admin/menus/MenuTreeEditor.tsx
 'use client';
 import { forwardRef, useImperativeHandle, useState, useEffect, useCallback, useRef } from 'react';
-import { GripVertical, Pencil, Trash2, Plus, Check, X, ChevronRight, ChevronDown } from 'lucide-react';
+import { GripVertical, Pencil, Trash2, Plus, ChevronRight, ChevronDown } from 'lucide-react';
 import LinkInput from './LinkInput';
+import ImageUpload from '@/components/ImageUpload';
 import type { MenuItem } from '@/lib/menus/types';
 
 interface FlatNode extends MenuItem {
@@ -18,7 +18,7 @@ interface MenuTreeEditorProps {
   initialItems: MenuItem[];
   onSave: (items: MenuItem[]) => void;
   onCancel: () => void;
-  locale?: string; // 新增 locale prop
+  locale?: string;
 }
 
 function buildFlatList(items: MenuItem[]): FlatNode[] {
@@ -28,7 +28,18 @@ function buildFlatList(items: MenuItem[]): FlatNode[] {
   const addNode = (id: string, depth: number) => {
     const node = map.get(id);
     if (!node) return;
-    result.push({ ...node, depth });
+    result.push({
+      id: node.id,
+      parentId: node.parentId,
+      label: node.label,
+      linkType: node.linkType,
+      linkValue: node.linkValue,
+      order: node.order,
+      depth,
+      picture: node.picture || '',
+      description: node.description || '',
+      megaMenuImageMode: node.megaMenuImageMode || false,
+    });
     const children = items.filter(i => i.parentId === id).sort((a, b) => a.order - b.order);
     children.forEach(child => addNode(child.id, depth + 1));
   };
@@ -54,6 +65,9 @@ function rebuildItems(flatList: FlatNode[]): MenuItem[] {
         linkType: node.linkType,
         linkValue: node.linkValue,
         order: idx,
+        picture: node.picture,
+        description: node.description,
+        megaMenuImageMode: node.megaMenuImageMode,
       });
     });
   }
@@ -66,7 +80,13 @@ const MenuTreeEditor = forwardRef<MenuTreeEditorRef, MenuTreeEditorProps>(
     const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set());
     const [editingId, setEditingId] = useState<string | null>(null);
     const [addingParentId, setAddingParentId] = useState<string | null>(null);
-    const [editForm, setEditForm] = useState({ label: '', linkValue: '' });
+    const [editForm, setEditForm] = useState({
+      label: '',
+      linkValue: '',
+      picture: '',
+      description: '',
+      megaMenuImageMode: false,
+    });
     const dragSourceRef = useRef<{ id: string; parentId: string | null; depth: number } | null>(null);
     const [dragTarget, setDragTarget] = useState<{ id: string; position: 'before' | 'after' | 'inside' } | null>(null);
 
@@ -124,14 +144,24 @@ const MenuTreeEditor = forwardRef<MenuTreeEditorRef, MenuTreeEditorProps>(
     };
 
     const saveEdit = (id: string) => {
-      const { label, linkValue } = editForm;
+      const { label, linkValue, picture, description, megaMenuImageMode } = editForm;
       if (!label.trim() || !linkValue.trim()) {
         alert('请填写完整');
         return;
       }
       const linkType = linkValue.startsWith('http') ? 'external' : 'internal';
       const updated = allNodes.map(node =>
-        node.id === id ? { ...node, label: label.trim(), linkValue: linkValue.trim(), linkType } : node
+        node.id === id
+          ? {
+              ...node,
+              label: label.trim(),
+              linkValue: linkValue.trim(),
+              linkType,
+              picture: picture || undefined,
+              description: description || undefined,
+              megaMenuImageMode: megaMenuImageMode ?? false,
+            }
+          : node
       );
       const newItems = rebuildItems(updated);
       updateTree(newItems);
@@ -166,12 +196,15 @@ const MenuTreeEditor = forwardRef<MenuTreeEditorRef, MenuTreeEditorProps>(
         linkValue: '',
         order: newOrder,
         depth: parentId ? parentDepth + 1 : 0,
+        picture: '',
+        description: '',
+        megaMenuImageMode: false,
       };
       const newItems = rebuildItems([...allNodes, newNode]);
       updateTree(newItems);
       setEditingId(newId);
       setAddingParentId(parentId);
-      setEditForm({ label: '', linkValue: '' });
+      setEditForm({ label: '', linkValue: '', picture: '', description: '', megaMenuImageMode: false });
       if (parentId) {
         setExpandedIds(prev => new Set(prev).add(parentId));
       }
@@ -187,15 +220,17 @@ const MenuTreeEditor = forwardRef<MenuTreeEditorRef, MenuTreeEditorProps>(
     };
 
     const handleDragStart = (e: React.DragEvent, node: FlatNode) => {
-      if (editingId !== null) cancelEdit();
+      if (editingId !== null) return;
       dragSourceRef.current = { id: node.id, parentId: node.parentId, depth: node.depth };
       e.dataTransfer.setData('text/plain', node.id);
       e.dataTransfer.effectAllowed = 'move';
-      const dragIcon = document.createElement('div');
-      dragIcon.style.opacity = '0';
-      document.body.appendChild(dragIcon);
-      e.dataTransfer.setDragImage(dragIcon, 0, 0);
-      setTimeout(() => document.body.removeChild(dragIcon), 0);
+
+      const canvas = document.createElement('canvas');
+      canvas.width = 1;
+      canvas.height = 1;
+      const ctx = canvas.getContext('2d');
+      ctx?.clearRect(0, 0, 1, 1);
+      e.dataTransfer.setDragImage(canvas, 0, 0);
     };
 
     const handleDragOver = (e: React.DragEvent, targetNode: FlatNode) => {
@@ -385,7 +420,6 @@ const MenuTreeEditor = forwardRef<MenuTreeEditorRef, MenuTreeEditorProps>(
           }
         `}</style>
 
-        {/* 标题栏：与“菜单名称”卡片样式一致 */}
         <div className="p-4 border-b bg-gray-50 flex justify-between items-center">
           <h2 className="text-lg font-semibold">菜单项</h2>
           <button
@@ -396,8 +430,7 @@ const MenuTreeEditor = forwardRef<MenuTreeEditorRef, MenuTreeEditorProps>(
           </button>
         </div>
 
-        {/* 树形菜单列表 */}
-         <div className="p-4">
+        <div className="p-4">
           {visibleNodes.map((node) => {
             const hasChildren = allNodes.some(c => c.parentId === node.id);
             const isExpanded = expandedIds.has(node.id);
@@ -406,6 +439,7 @@ const MenuTreeEditor = forwardRef<MenuTreeEditorRef, MenuTreeEditorProps>(
             const cardMarginLeft = getCardMarginLeft(node.depth);
             const contentPaddingLeft = getContentPaddingLeft(node.depth);
             const lineStart = getLineStart(node.depth);
+            const isTopLevel = node.depth === 0;
 
             let dragOverClass = '';
             let isDragInside = false;
@@ -421,7 +455,7 @@ const MenuTreeEditor = forwardRef<MenuTreeEditorRef, MenuTreeEditorProps>(
             return (
               <div
                 key={node.id}
-                draggable={true}
+                draggable={!isEditing}
                 onDragStart={(e) => handleDragStart(e, node)}
                 onDragOver={(e) => handleDragOver(e, node)}
                 onDragLeave={handleDragLeave}
@@ -456,33 +490,134 @@ const MenuTreeEditor = forwardRef<MenuTreeEditorRef, MenuTreeEditorProps>(
                     )}
 
                     {isEditing ? (
-                      <div className="flex-1 flex items-center space-x-2">
-                        <input
-                          value={editForm.label}
-                          onChange={e => setEditForm({ ...editForm, label: e.target.value })}
-                          className="flex-1 px-2 py-1 text-sm border border-blue-300 rounded focus:outline-none focus:ring-1 focus:ring-blue-500"
-                          autoFocus
-                          placeholder="标签"
-                        />
-                        <LinkInput
-                          value={editForm.linkValue}
-                          onChange={val => setEditForm({ ...editForm, linkValue: val })}
-                          placeholder="搜索或粘贴链接"
-                          locale={locale} // 传递 locale
-                        />
-                        <button onClick={() => saveEdit(node.id)} className="p-1 text-green-600 hover:text-green-800">
-                          <Check className="w-4 h-4" />
-                        </button>
-                        <button onClick={cancelEdit} className="p-1 text-gray-500 hover:text-gray-700">
-                          <X className="w-4 h-4" />
-                        </button>
+                      <div className="flex-1 flex flex-col space-y-2">
+                        {isTopLevel ? (
+                          <div className="flex flex-col space-y-2 w-full">
+                            <div className="flex items-center space-x-2 w-full">
+                              <input
+                                value={editForm.label}
+                                onChange={e => setEditForm({ ...editForm, label: e.target.value })}
+                                className="flex-1 px-2 py-1 text-sm border border-blue-300 rounded focus:outline-none focus:ring-1 focus:ring-blue-500"
+                                autoFocus
+                                placeholder="标签"
+                              />
+                              <LinkInput
+                                value={editForm.linkValue}
+                                onChange={(val, label) => {
+                                  setEditForm(prev => {
+                                    const newState = { ...prev, linkValue: val };
+                                    // 若菜单名称为空且链接有名称，则自动填充
+                                    if (!prev.label && label) {
+                                      newState.label = label;
+                                    }
+                                    return newState;
+                                  });
+                                }}
+                                placeholder="搜索或粘贴链接"
+                                locale={locale}
+                              />
+                            </div>
+                            <div className="flex items-center gap-3">
+                              <label className="flex items-center gap-1 text-sm">
+                                <input
+                                  type="checkbox"
+                                  checked={editForm.megaMenuImageMode || false}
+                                  onChange={e => setEditForm({ ...editForm, megaMenuImageMode: e.target.checked })}
+                                />
+                                二级菜单大图文模式
+                              </label>
+                              <span className="text-xs text-muted-foreground">（该设置只对超级菜单有效）</span>
+                            </div>
+                            <div className="flex justify-end space-x-2">
+                              <button
+                                onClick={() => saveEdit(node.id)}
+                                className="px-3 py-1 text-sm bg-blue-600 text-white rounded hover:bg-blue-700"
+                              >
+                                确认
+                              </button>
+                              <button
+                                onClick={cancelEdit}
+                                className="px-3 py-1 text-sm bg-gray-300 text-gray-700 rounded hover:bg-gray-400"
+                              >
+                                取消
+                              </button>
+                            </div>
+                          </div>
+                        ) : (
+                          <div className="w-full space-y-2">
+                            <div>
+                              <ImageUpload
+                                value={editForm.picture || ''}
+                                onChange={(url) => setEditForm({ ...editForm, picture: Array.isArray(url) ? url[0] : url })}
+                                maxCount={1}
+                                label="图片"
+                                hint="菜单图片请采用统一尺寸，图片尺寸建议500*500px以上像素"
+                              />
+                            </div>
+                            <div className="flex items-center space-x-2">
+                              <input
+                                value={editForm.label}
+                                onChange={e => setEditForm({ ...editForm, label: e.target.value })}
+                                className="flex-1 px-2 py-1 text-sm border border-blue-300 rounded focus:outline-none focus:ring-1 focus:ring-blue-500"
+                                autoFocus
+                                placeholder="菜单名称"
+                              />
+                            </div>
+                            <div>
+                              <LinkInput
+                                value={editForm.linkValue}
+                                onChange={(val, label) => {
+                                  setEditForm(prev => {
+                                    const newState = { ...prev, linkValue: val };
+                                    // 若菜单名称为空且链接有名称，则自动填充
+                                    if (!prev.label && label) {
+                                      newState.label = label;
+                                    }
+                                    return newState;
+                                  });
+                                }}
+                                placeholder="搜索或粘贴链接"
+                                locale={locale}
+                              />
+                            </div>
+                            <div>
+                              <textarea
+                                value={editForm.description || ''}
+                                onChange={e => setEditForm({ ...editForm, description: e.target.value })}
+                                className="w-full px-2 py-1 text-sm border border-blue-300 rounded focus:outline-none focus:ring-1 focus:ring-blue-500"
+                                placeholder="描述"
+                                rows={2}
+                              />
+                            </div>
+                            <div className="flex justify-end space-x-2">
+                              <button
+                                onClick={() => saveEdit(node.id)}
+                                className="px-3 py-1 text-sm bg-blue-600 text-white rounded hover:bg-blue-700"
+                              >
+                                确认
+                              </button>
+                              <button
+                                onClick={cancelEdit}
+                                className="px-3 py-1 text-sm bg-gray-300 text-gray-700 rounded hover:bg-gray-400"
+                              >
+                                取消
+                              </button>
+                            </div>
+                          </div>
+                        )}
                       </div>
                     ) : (
                       <>
                         <button
                           onClick={() => {
                             setEditingId(node.id);
-                            setEditForm({ label: node.label, linkValue: node.linkValue });
+                            setEditForm({
+                              label: node.label,
+                              linkValue: node.linkValue,
+                              picture: node.picture || '',
+                              description: node.description || '',
+                              megaMenuImageMode: node.megaMenuImageMode || false,
+                            });
                             setAddingParentId(null);
                           }}
                           className="flex-1 text-left text-sm font-medium text-gray-800 hover:text-blue-600 truncate"
@@ -502,7 +637,13 @@ const MenuTreeEditor = forwardRef<MenuTreeEditorRef, MenuTreeEditorProps>(
                           <button
                             onClick={() => {
                               setEditingId(node.id);
-                              setEditForm({ label: node.label, linkValue: node.linkValue });
+                              setEditForm({
+                                label: node.label,
+                                linkValue: node.linkValue,
+                                picture: node.picture || '',
+                                description: node.description || '',
+                                megaMenuImageMode: node.megaMenuImageMode || false,
+                              });
                               setAddingParentId(null);
                             }}
                             className="p-1 text-gray-500 hover:text-blue-600"

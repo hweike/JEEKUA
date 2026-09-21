@@ -6,18 +6,34 @@ interface TextInfoProps {
 }
 
 export default function TextInfo({ title, content }: TextInfoProps) {
-  // 将换行符转换为 <br />
-  const formattedContent = content.split('\n').map((line, i) => (
+  // ✅ 优化：只 split 一次
+  const lines = content.split('\n');
+  const formattedContent = lines.map((line, i) => (
     <span key={i}>
       {line}
-      {i < content.split('\n').length - 1 && <br />}
+      {i < lines.length - 1 && <br />}
     </span>
   ));
-  
+
+  // ✅ 标题样式
+  const titleStyle: React.CSSProperties = {
+    fontSize: 'var(--font-size-lg, 1.125rem)',
+    fontWeight: 'var(--font-weight-semibold, 600)',
+    color: 'var(--footer-text, var(--foreground, #0f172a))',
+    marginBottom: 'var(--spacing-4, 1rem)',
+  };
+
+  // ✅ 内容样式
+  const contentStyle: React.CSSProperties = {
+    fontSize: 'var(--font-size-sm, 0.875rem)',
+    color: 'var(--muted-foreground, #64748b)',
+    lineHeight: 'var(--line-height-normal, 1.5)',
+  };
+
   return (
     <div>
-      {title && <h3 className="font-semibold text-lg mb-4">{title}</h3>}
-      <div className="text-muted-foreground text-sm space-y-1">
+      {title && <h3 style={titleStyle}>{title}</h3>}
+      <div style={contentStyle}>
         {formattedContent}
       </div>
     </div>

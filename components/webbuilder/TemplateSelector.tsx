@@ -30,17 +30,31 @@ export function TemplateSelector({
     onChangeRef.current = onChange;
   }, [onChange]);
 
+  // ✅ 诊断：打印接收到的 props
+  console.log('[TemplateSelector] 🔍 组件渲染');
+  console.log('[TemplateSelector] 🔍 category:', category);
+  console.log('[TemplateSelector] 🔍 value:', value);
+  console.log('[TemplateSelector] 🔍 templates.length:', templates.length);
+  console.log('[TemplateSelector] 🔍 loading:', loading);
+
   // 获取模板列表
   useEffect(() => {
+    console.log('[TemplateSelector] 🔍 开始加载模板列表，category:', category);
     fetch(`/api/webbuilder?category=${category}`)
-      .then((res) => res.json())
+      .then((res) => {
+        console.log('[TemplateSelector] 🔍 API 响应状态:', res.status);
+        return res.json();
+      })
       .then((data: any[]) => {
+        console.log('[TemplateSelector] 🔍 API 返回数据:', data);
         const mapped = data.map((t) => ({ id: t.id, name: t.name }));
+        console.log('[TemplateSelector] 🔍 映射后的模板列表:', mapped);
+        console.log('[TemplateSelector] 🔍 模板列表中的 ID:', mapped.map(t => t.id));
         setTemplates(mapped);
         setLoading(false);
       })
       .catch((err) => {
-        console.error('加载模板失败', err);
+        console.error('[TemplateSelector] ❌ 加载模板失败:', err);
         setLoading(false);
       });
   }, [category]);
@@ -48,8 +62,8 @@ export function TemplateSelector({
   // 自动选中第一个（仅在 autoSelectFirst 开启且 value 为空且从未选中过）
   useEffect(() => {
     if (autoSelectFirst && !loading && templates.length > 0 && (value === undefined || value === '') && !autoSelectedRef.current) {
+      console.log('[TemplateSelector] 🔍 自动选中第一个模板:', templates[0].id);
       autoSelectedRef.current = true;
-      // 使用 setTimeout 规避潜在的状态更新冲突
       setTimeout(() => {
         onChangeRef.current(templates[0].id);
       }, 0);
@@ -68,6 +82,14 @@ export function TemplateSelector({
   }, []);
 
   const selectedTemplate = templates.find((t) => t.id === value);
+
+  // ✅ 诊断：打印匹配结果
+  console.log('[TemplateSelector] 🔍 当前 value:', value);
+  console.log('[TemplateSelector] 🔍 selectedTemplate:', selectedTemplate);
+  console.log('[TemplateSelector] 🔍 是否匹配成功:', !!selectedTemplate);
+  console.log('[TemplateSelector] 🔍 将显示的文字:', 
+    loading ? '加载中...' : selectedTemplate ? selectedTemplate.name : placeholder
+  );
 
   return (
     <div className="relative w-full" ref={containerRef}>
@@ -95,6 +117,7 @@ export function TemplateSelector({
                   template.id === value ? 'bg-blue-50 text-blue-700 font-medium' : ''
                 }`}
                 onClick={() => {
+                  console.log('[TemplateSelector] 🔍 用户选择模板:', template.id);
                   onChange(template.id);
                   setIsOpen(false);
                 }}

@@ -1,6 +1,10 @@
 // lib/config-loader.ts
-import { cache } from 'react';
-import { getPrivateStorage } from '@/lib/storage/factory';
+import { unstable_cache, revalidateTag } from 'next/cache';
+import {
+  readHeaderConfig,
+  readFooterConfig,
+} from '@/lib/SiteHeadersFooters/storage';
+import { readMenuFile } from '@/lib/menus/storage';
 
 // ========== 类型定义 ==========
 export interface HeaderConfig {
@@ -127,7 +131,7 @@ const DEFAULT_HEADER_CONFIG: HeaderConfig = {
     items: []
   },
   search: {
-    enabled: false,
+    enabled: true,
     placeholder: "Search..."
   }
 };
@@ -177,7 +181,7 @@ const DEFAULT_FOOTER_CONFIG: FooterConfig = {
   }
 };
 
-// 深度合并函数
+// ========== 深度合并函数 ==========
 function mergeDeep(target: any, source: any): any {
   const output = { ...target };
   if (source && typeof source === 'object') {
@@ -198,77 +202,153 @@ function mergeDeep(target: any, source: any): any {
   return output;
 }
 
-// 从私有桶读取 JSON 文件，不存在时返回 null
-async function readConfigFile(key: string): Promise<any | null> {
-  const storage = getPrivateStorage();
-  try {
-    const content = await storage.read(key, 'utf8');
-    return JSON.parse(content as string);
-  } catch (error: any) {
-    // ✅ 增强错误捕获：检查多种可能的 404 标识
-    if (error?.code === 'NoSuchKey' ||
-        error?.Code === 'NoSuchKey' ||
-        error?.$metadata?.httpStatusCode === 404 ||
-        (error?.message && (error.message.includes('NoSuchKey') || error.message.includes('not found')))) {
-      return null;
+// ============================================================
+// 缓存标签 - 用于手动失效
+// ============================================================
+export const CONFIG_CACHE_TAGS = {
+  HEADER: 'header-config',
+  FOOTER: 'footer-config',
+  MENU: 'menu-config',
+} as const;
+
+// ============================================================
+// 对外接口（从数据库读取，带缓存）
+// ============================================================
+
+/**
+ * 获取页头配置
+ * 缓存时间：1 小时
+ * 缓存标签：header-config
+ */
+export const getHeaderConfig = unstable_cache(
+  async (locale: string): Promise<HeaderConfig> => {
+    const userConfig = await readHeaderConfig(locale);
+    let finalConfig = userConfig ? mergeDeep(DEFAULT_HEADER_CONFIG, userConfig) : DEFAULT_HEADER_CONFIG;
+    if (!finalConfig.menu?.menuSourceId) {
+      finalConfig.menu = { ...finalConfig.menu, menuSourceId: 'navigation' };
     }
-    // 其他错误继续抛出
-    throw error;
+    if (!finalConfig.search) {
+      finalConfig.search = { enabled: false, placeholder: 'Search...' };
+    }
+    return finalConfig;
+  },
+  ['header-config'],
+  {
+    revalidate: 3600,
+    tags: [CONFIG_CACHE_TAGS.HEADER],
   }
+);
+
+/**
+ * 获取页脚配置
+ * 缓存时间：1 小时
+ * 缓存标签：footer-config
+ */
+export const getFooterConfig = unstable_cache(
+  async (locale: string): Promise<FooterConfig> => {
+    const userConfig = await readFooterConfig(locale);
+    return userConfig ? mergeDeep(DEFAULT_FOOTER_CONFIG, userConfig) : DEFAULT_FOOTER_CONFIG;
+  },
+  ['footer-config'],
+  {
+    revalidate: 3600,
+    tags: [CONFIG_CACHE_TAGS.FOOTER],
+  }
+);
+
+// ============================================================
+// 菜单获取
+// ============================================================
+
+/**
+ * 获取固定菜单（navigation / footer-menu）
+ */
+async function getFixedMenu(locale: string, menuSourceId: 'navigation' | 'footer-menu'): Promise<Menu | null> {
+  return await readMenuFile(locale, menuSourceId);
 }
 
-// 获取页头配置（文件不存在直接返回默认配置）
-export const getHeaderConfig = cache(async (locale: string): Promise<HeaderConfig> => {
-  const key = `SiteHeadersFooters/header/${locale}.json`;
-  const userConfig = await readConfigFile(key);
-  if (!userConfig) {
-    console.warn(`Header config for locale ${locale} not found, using default.`);
-    return DEFAULT_HEADER_CONFIG;
-  }
-  return mergeDeep(DEFAULT_HEADER_CONFIG, userConfig);
-});
-
-// 获取页脚配置（文件不存在直接返回默认配置）
-export const getFooterConfig = cache(async (locale: string): Promise<FooterConfig> => {
-  const key = `SiteHeadersFooters/footer/${locale}.json`;
-  const userConfig = await readConfigFile(key);
-  if (!userConfig) {
-    console.warn(`Footer config for locale ${locale} not found, using default.`);
-    return DEFAULT_FOOTER_CONFIG;
-  }
-  return mergeDeep(DEFAULT_FOOTER_CONFIG, userConfig);
-});
-
-// 获取固定菜单（navigation / footer）- 文件不存在返回 null
-async function getFixedMenu(locale: string, menuSourceId: 'navigation' | 'footer'): Promise<Menu | null> {
-  const key = `menus/${locale}/${menuSourceId}.json`;
-  return await readConfigFile(key);
-}
-
-// 获取自定义菜单（从 custom_menus.json 中按 ID 查找）
+/**
+ * 获取自定义菜单（从 custom_menus 中按 ID 查找）
+ */
 async function getCustomMenuById(locale: string, menuId: string | number): Promise<Menu | null> {
-  const key = `menus/${locale}/custom_menus.json`;
-  const customMenus = await readConfigFile(key);
-  if (!customMenus || !Array.isArray(customMenus)) return null;
-  const target = customMenus.find(menu => String(menu.id) === String(menuId));
-  return target || null;
+  const customMenus = await readMenuFile(locale, 'custom_menus');
+  if (!Array.isArray(customMenus)) return null;
+  return customMenus.find(menu => String(menu.id) === String(menuId)) || null;
 }
 
-// 获取菜单（支持固定菜单和自定义菜单），不存在返回 null
-export const getMenuBySourceId = cache(async (locale: string, menuSourceId: string): Promise<Menu | null> => {
-  if (menuSourceId === 'navigation' || menuSourceId === 'footer') {
-    return await getFixedMenu(locale, menuSourceId);
+/**
+ * 获取菜单（支持固定菜单和自定义菜单）
+ * 缓存时间：1 小时
+ * 缓存标签：menu-config
+ */
+export const getMenuBySourceId = unstable_cache(
+  async (locale: string, menuSourceId: string): Promise<Menu | null> => {
+    if (menuSourceId === 'navigation' || menuSourceId === 'footer-menu') {
+      return await getFixedMenu(locale, menuSourceId as 'navigation' | 'footer-menu');
+    }
+    return await getCustomMenuById(locale, menuSourceId);
+  },
+  ['menu-config'],
+  {
+    revalidate: 3600,
+    tags: [CONFIG_CACHE_TAGS.MENU],
   }
-  return await getCustomMenuById(locale, menuSourceId);
-});
+);
 
-// 批量获取多个菜单
-export const getMultipleMenus = cache(async (locale: string, menuIds: string[]): Promise<Map<string, Menu | null>> => {
-  const results = new Map();
+/**
+ * 批量获取多个菜单
+ * 注意：此函数不使用 unstable_cache，因为它内部已调用 getMenuBySourceId（已缓存）
+ */
+export async function getMultipleMenus(
+  locale: string,
+  menuIds: string[]
+): Promise<Map<string, Menu | null>> {
+  const results = new Map<string, Menu | null>();
   const uniqueIds = [...new Set(menuIds.filter(id => id && id.trim() !== ''))];
-  await Promise.all(uniqueIds.map(async (id) => {
-    const menu = await getMenuBySourceId(locale, id);
-    results.set(id, menu);
-  }));
+
+  await Promise.all(
+    uniqueIds.map(async (id) => {
+      const menu = await getMenuBySourceId(locale, id);
+      results.set(id, menu);
+    })
+  );
+
   return results;
-});
+}
+
+// ============================================================
+// 缓存失效工具
+// ============================================================
+
+/**
+ * 手动刷新页头配置缓存
+ * 
+ * 注意：Next.js 15+ 的 revalidateTag 需要第二个参数 profile。
+ * - 'default'：标准缓存配置
+ */
+export async function revalidateHeaderConfig(): Promise<void> {
+  revalidateTag(CONFIG_CACHE_TAGS.HEADER, 'default');
+}
+
+/**
+ * 手动刷新页脚配置缓存
+ */
+export async function revalidateFooterConfig(): Promise<void> {
+  revalidateTag(CONFIG_CACHE_TAGS.FOOTER, 'default');
+}
+
+/**
+ * 手动刷新菜单缓存
+ */
+export async function revalidateMenuConfig(): Promise<void> {
+  revalidateTag(CONFIG_CACHE_TAGS.MENU, 'default');
+}
+
+/**
+ * 手动刷新所有配置缓存
+ */
+export async function revalidateAllConfig(): Promise<void> {
+  revalidateTag(CONFIG_CACHE_TAGS.HEADER, 'default');
+  revalidateTag(CONFIG_CACHE_TAGS.FOOTER, 'default');
+  revalidateTag(CONFIG_CACHE_TAGS.MENU, 'default');
+}

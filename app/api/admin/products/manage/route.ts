@@ -6,6 +6,8 @@ import {
   updateProduct,
   deleteProductService,
 } from '@/lib/products/services/product.service';
+import { taskStore } from '@/lib/products/task/taskStore';
+import { randomUUID } from 'crypto';
 
 // ==================== GET ====================
 export async function GET(request: NextRequest) {
@@ -49,7 +51,26 @@ export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
     const locale = body.locale || 'zh';
+    const isAsync = request.nextUrl.searchParams.get('async') === 'true';
 
+    if (isAsync) {
+      const taskId = randomUUID();
+      await taskStore.create(taskId);
+
+      // 异步执行保存，不阻塞响应
+      (async () => {
+        try {
+          const result = await createProduct(locale, body);
+          await taskStore.setSuccess(taskId, result);
+        } catch (error: any) {
+          await taskStore.setFailed(taskId, error.message || '保存失败');
+        }
+      })();
+
+      return NextResponse.json({ taskId }, { status: 202 });
+    }
+
+    // 同步模式（兼容旧调用）
     const result = await createProduct(locale, body);
     return NextResponse.json(result, { status: 201 });
   } catch (error: any) {
@@ -72,7 +93,25 @@ export async function PUT(request: NextRequest) {
 
     const body = await request.json();
     const locale = body.locale || 'zh';
+    const isAsync = searchParams.get('async') === 'true';
 
+    if (isAsync) {
+      const taskId = randomUUID();
+      await taskStore.create(taskId);
+
+      (async () => {
+        try {
+          const result = await updateProduct(locale, productId, body);
+          await taskStore.setSuccess(taskId, result);
+        } catch (error: any) {
+          await taskStore.setFailed(taskId, error.message || '更新失败');
+        }
+      })();
+
+      return NextResponse.json({ taskId }, { status: 202 });
+    }
+
+    // 同步模式
     const result = await updateProduct(locale, productId, body);
     return NextResponse.json(result);
   } catch (error: any) {

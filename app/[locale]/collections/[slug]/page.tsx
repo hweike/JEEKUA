@@ -1,48 +1,189 @@
+// app/[locale]/collections/[slug]/page.tsx
 import { notFound } from 'next/navigation';
-import { getTemplateById } from '@/lib/webbuilder/template-manager';
+import { unstable_cache } from 'next/cache';
+import { Suspense, cache } from 'react';
 import { injectRuntimeDataSafe } from '@/lib/webbuilder/runtime-injector';
 import { TemplateRenderer } from '@/components/webbuilder/TemplateRenderer';
 import { fetchCollectionRuntime } from '@/lib/webbuilder/collection-helpers';
-import ProductCard from '@/components/front/ProductCard';
 import { withDynamicLocale } from '@/lib/withPageLocale';
+import { getSeoInput } from '@/lib/seo/getSeoInput';
+import { generatePageMetadata } from '@/lib/seo';
+import { getSiteSettings } from '@/lib/getSiteSettings';
+import { getLayoutPageByTemplate } from '@/lib/pages/storage';
+import CollectionLoading from './loading';
 
-interface CollectionsPageProps {
+const PAGE_SIZE = 15;
+const DEFAULT_COLLECTION_TEMPLATE_ID = 'default_product_category_published';
+
+// ===== 缓存：集合运行时数据 =====
+const getCachedCollectionRuntime = unstable_cache(
+  async (locale: string, slug: string, page: number, pageSize: number) => {
+    return fetchCollectionRuntime(locale, slug, page, pageSize);
+  },
+  ['collection-runtime'],
+  { revalidate: 3600 }
+);
+
+// ===== SEO 缓存 =====
+const getCollectionSeoData = unstable_cache(
+  async (locale: string, slug: string) => {
+    const seoInput = await getSeoInput('productCollection', slug, locale);
+    if (!seoInput) return null;
+    const { metadata, jsonLdScripts } = await generatePageMetadata(seoInput, locale);
+    return { seoInput, metadata, jsonLdScripts };
+  },
+  ['collection-seo-data'],
+  { revalidate: 3600 }
+);
+
+// ✅ React cache：同一请求内只执行一次
+const getCollectionSeoDataOnce = cache(getCollectionSeoData);
+
+// ===== generateMetadata =====
+export async function generateMetadata({
+  params,
+}: {
   params: Promise<{ locale: string; slug: string }>;
+}) {
+  const { locale, slug } = await params;
+  const settings = await getSiteSettings();
+  const baseUrl = (settings.websiteUrl || process.env.NEXT_PUBLIC_BASE_URL || '').replace(
+    /\/+$/,
+    ''
+  );
+  const siteName = settings.siteName || 'Site Name';
+
+  const seoData = await getCollectionSeoDataOnce(locale, slug);
+
+  if (!seoData) {
+    const fallbackTitle = `${slug.replace(/-/g, ' ')} | ${siteName}`;
+    const fallbackDescription = `Browse products in ${slug.replace(/-/g, ' ')} collection.`;
+    return {
+      title: fallbackTitle,
+      description: fallbackDescription,
+      robots: 'index, follow',
+      alternates: { canonical: `${baseUrl}/${locale}/collections/${slug}` },
+      openGraph: {
+        title: fallbackTitle,
+        description: fallbackDescription,
+        locale,
+        url: `${baseUrl}/${locale}/collections/${slug}`,
+      },
+    };
+  }
+
+  const { metadata, seoInput } = seoData;
+  const canonicalPath =
+    seoInput.canonical || seoInput.url || `/${locale}/collections/${slug}`;
+  const canonical = canonicalPath.startsWith('http')
+    ? canonicalPath
+    : `${baseUrl}${canonicalPath.startsWith('/') ? '' : '/'}${canonicalPath}`;
+
+  return {
+    ...metadata,
+    alternates: { canonical },
+    openGraph: {
+      ...metadata.openGraph,
+      locale,
+      url: metadata.openGraph?.url || canonical,
+    },
+  };
 }
 
-async function CollectionsPage({ params }: CollectionsPageProps) {
-  const { locale, slug } = await params;
-  const runtimeData = await fetchCollectionRuntime(locale, slug);
-  
+// ===== 内容组件（用于 Suspense） =====
+interface CollectionContentProps {
+  locale: string;
+  slug: string;
+  page: number;
+}
+
+async function CollectionContent({ locale, slug, page }: CollectionContentProps) {
+  const decodedSlug = decodeURIComponent(slug);
+
+  // 1. 获取运行时数据（缓存）
+  const runtimeData = await getCachedCollectionRuntime(locale, decodedSlug, page, PAGE_SIZE);
   if (!runtimeData) notFound();
 
-  const templateId = runtimeData.collection.templateId || 'default_product_category_published';
-  const template = await getTemplateById(templateId);
-  
-  // 如果模板不存在，降级显示产品列表
-  if (!template) {
-    console.error(`Template not found: ${templateId}`);
-    const { collection, products, urlPattern } = runtimeData;
+  // 2. 获取 SEO 数据（✅ 用 Once）
+  const seoData = await getCollectionSeoDataOnce(locale, decodedSlug);
+  const seoTitle = seoData?.seoInput?.title || runtimeData.collection?.name || '';
+  const jsonLdScripts = seoData?.jsonLdScripts || [];
+
+  // 3. 确定模板 ID
+  const templateId = runtimeData.collection?.template || DEFAULT_COLLECTION_TEMPLATE_ID;
+
+  // ✅ 用 getLayoutPageByTemplate 替代本地 getCachedLayout
+  let layoutPage = await getLayoutPageByTemplate('base', templateId);
+
+  if (!layoutPage && templateId !== DEFAULT_COLLECTION_TEMPLATE_ID) {
+    console.warn(`[CollectionContent] 模板 ${templateId} 不存在，回退到默认模板`);
+    layoutPage = await getLayoutPageByTemplate('base', DEFAULT_COLLECTION_TEMPLATE_ID);
+  }
+
+  const templateData = layoutPage?.templateData; // ✅ 驼峰
+  const hasValidTemplate =
+    templateData && Array.isArray(templateData.content) && templateData.content.length > 0;
+
+  if (!layoutPage || !hasValidTemplate) {
     return (
-      <div className="container mx-auto px-4 py-8">
-        <h1 className="text-3xl font-bold mb-4">{collection.name}</h1>
-        {collection.description && <p className="text-gray-600 mb-6">{collection.description}</p>}
-        {products.length === 0 ? (
-          <div className="text-center py-12 text-gray-500">暂无产品</div>
-        ) : (
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
-            {products.map((product: any) => (
-              <ProductCard key={product.productId} product={product} locale={locale} urlPattern={urlPattern} />
-            ))}
-          </div>
-        )}
+      <div className="container mx-auto px-4 py-16 text-center">
+        <div className="text-4xl mb-4">📄</div>
+        <h1 className="text-2xl font-semibold text-gray-700 mb-2">分类页尚未配置模板</h1>
+        <p className="text-gray-500">模板 ID: {templateId}</p>
       </div>
     );
   }
 
-  const finalData = injectRuntimeDataSafe(template.data, runtimeData);
-  
-  return <TemplateRenderer data={finalData} />;
+  // ✅ 移除 texts 相关
+  const finalRuntime = { ...runtimeData, locale, seoTitle };
+
+  // 注入运行时数据
+  let finalData = injectRuntimeDataSafe(templateData, finalRuntime);
+  if (!finalData.__runtime) {
+    (finalData as any).__runtime = finalRuntime;
+    if (finalData.content && Array.isArray(finalData.content)) {
+      finalData.content = finalData.content.map((node: any) => ({
+        ...node,
+        __runtime: finalRuntime,
+        props: { ...node.props, __runtime: finalRuntime },
+      }));
+    }
+  }
+
+  return (
+    <>
+      {jsonLdScripts.map((script, idx) => (
+        <script
+          key={idx}
+          type="application/ld+json"
+          dangerouslySetInnerHTML={{ __html: script }}
+        />
+      ))}
+      <TemplateRenderer data={finalData} runtime={finalRuntime} />
+    </>
+  );
 }
 
+// ===== 页面组件 =====
+interface CollectionsPageProps {
+  params: Promise<{ locale: string; slug: string }>;
+  searchParams?: Promise<{ page?: string }>;
+}
+
+async function CollectionsPage({ params, searchParams }: CollectionsPageProps) {
+  const { locale, slug } = await params;
+  const page = parseInt((await searchParams)?.page || '1', 10) || 1;
+
+  return (
+    <Suspense fallback={<CollectionLoading />}>
+      <CollectionContent locale={locale} slug={slug} page={page} />
+    </Suspense>
+  );
+}
+
+export async function generateStaticParams() {
+  return [];
+}
+
+export const revalidate = 3600;
 export default withDynamicLocale(CollectionsPage);

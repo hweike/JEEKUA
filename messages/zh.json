@@ -1,32 +1,478 @@
 {
- "Common": {
-    "search_placeholder": "搜索...",
-    "subscribe_success": "订阅成功！",
-    "subscribe_error": "订阅失败，请重试。",
-    "subscribe_loading": "提交中...",
+  "Shared": {
+    "submit": "提交",
+    "cancel": "取消",
+    "save": "保存",
+    "saving": "保存中...",
+    "loading": "加载中...",
+    "back": "返回",
+    "refresh": "刷新",
+    "noData": "暂无数据",
+    "email": "邮箱",
+    "name": "姓名",
+    "phone": "电话",
+    "company": "公司",
+    "updateFailed": "更新失败，请重试",
+    "search": "搜索",
     "close": "关闭",
-    "submit": "提交"
+    "searchPlaceholder": "搜索..."
   },
-  "Home": {
-    "title": "MORNSUN 电源解决方案",
-    "subtitle": "一站式工业电源解决方案提供商",
-    "description": "作为 MORNSUN 官方授权分销商，我们提供 100% 原装正品、专业技术支持和有竞争力的价格。",
-    "cta": "查看产品目录"
+  "common": {
+    "home": "首页",
+    "products": "产品",
+    "collections": "产品集合",
+    "docs": "文档"
+  },
+  "Login": {
+    "title": "登录",
+    "subtitle": "登录或创建账户",
+    "emailLabel": "邮箱地址",
+    "emailPlaceholder": "your@email.com",
+    "continueButton": "继续使用邮箱",
+    "sending": "发送中...",
+    "codeSent": "我们已向 {email} 发送验证码",
+    "codeLabel": "验证码",
+    "codePlaceholder": "6位数字验证码",
+    "back": "返回",
+    "resendIn": "在 {seconds} 秒后重发",
+    "resendButton": "重新发送验证码",
+    "verifying": "验证中...",
+    "verifyButton": "登录 / 创建账户",
+    "terms": "继续即表示您同意我们的服务条款和隐私政策。",
+    "error": {
+      "emailInvalid": "请输入有效的邮箱地址",
+      "sendFailed": "发送失败，请重试",
+      "network": "网络错误，请重试",
+      "codeInvalid": "请输入6位验证码",
+      "verifyFailed": "验证失败，请重试"
+    }
+  },
+  "Search": {
+    "meta_title": "搜索",
+    "meta_title_with_query": "{query} - 搜索",
+    "meta_description": "搜索产品、文章等",
+    "meta_description_with_query": "搜索“{query}”的相关结果",
+    "title": "搜索",
+    "subtitle": "输入关键词查找您需要的信息",
+    "result_count": "找到 {count} 个与“{term}”相关的结果",
+    "no_results": "未找到相关结果",
+    "no_results_hint": "请尝试使用不同的关键词或调整筛选条件",
+    "breadcrumb_home": "首页",
+    "breadcrumb_search": "搜索",
+    "placeholder": "搜索产品、页面、博客...",
+    "submit": "搜索",
+    "types": {
+    "product": "产品",
+    "page": "页面",
+    "blogPost": "博客",
+    "doc": "文档",
+    "video": "视频"
+      },
+      "pagination": {
+        "prev": "上一页",
+        "next": "下一页",
+        "pageInfo": "第 {current} / {total} 页"
+      }
   },
   "Inquiry": {
-    "title": "询盘",
-    "subtitle": "请填写以下信息，我们将尽快与您联系",
-    "name": "姓名",
-    "email": "邮箱",
-    "company": "公司",
-    "phone": "电话",
-    "message": "询盘内容",
-    "relatedProduct": "关联产品",
-    "submit": "提交询盘",
-    "submitting": "提交中...",
-    "success": "提交成功！",
-    "thanks": "感谢您的询盘，我们会尽快回复您。",
-    "error": "提交失败，请稍后重试。"
+    "title": "发送询盘",
+    "fields": {
+      "name": "请输入您的姓名",
+      "email": "请输入您的邮箱",
+      "phone": "请输入您的WhatsApp、微信...",
+      "message": "请输入型号或产品详细信息..."
+    },
+    "brandLabel": "品牌",
+    "relatedProduct": "相关产品",
+    "send": "发送",
+    "sending": "发送中...",
+    "success": "感谢您！您的询盘已发送。",
+    "thanks": "我们将尽快与您联系。",
+    "error": "出错了，请重试。"
+  },
+  "Blog": {
+    "authorPrefix": "作者：",
+    "tags": "标签",
+    "breadcrumb": {
+      "home": "首页",
+      "blog": "博客"
+    },
+    "fallback": {
+      "home": {
+        "name": "博客",
+        "description": "最新资讯和技术趋势"
+      },
+      "category": {
+        "suffix": "分类文章"
+      },
+      "post": {
+        "suffix": "文章"
+      }
+    }
+  },
+  "Docs": {
+    "noContent": "暂无内容"
+  },
+  "Video": {
+    "updatedOn": "更新于",
+    "categoryLabel": "分类：",
+    "introduction": "简介",
+    "details": "详情",
+    "breadcrumb": { "home": "首页", "video": "视频" },
+    "fallback": {
+      "home": {
+        "description": "最新视频"
+      },
+      "category": {
+        "description": "相关视频"
+      }
+    }
+  },
+  "Components": {
+    "BlogBlock": {
+      "placeholder": "〖博客展示区域〗",
+      "categories": "分类",
+      "all": "全部",
+      "title": "博客",
+      "loading": "加载中...",
+      "noPosts": "暂无文章",
+      "prev": "上一页",
+      "page": "第",
+      "of": "页",
+      "next": "下一页"
+    },
+    "DocumentLibrary": {
+      "placeholder": "〖文档库展示区域〗",
+      "loading": "加载中...",
+      "noContent": "暂无内容",
+      "selectPrompt": "请从左侧选择一个文档",
+      "relatedProducts": "相关产品",
+      "loadingProducts": "加载关联产品..."
+    },
+    "VideoCategory": {
+      "placeholder": "〖视频分类展示区域〗",
+      "title": "视频频道",
+      "all": "全部",
+      "loading": "加载中...",
+      "noVideos": "暂无视频",
+      "noCover": "暂无封面",
+      "prev": "上一页",
+      "page": "第",
+      "of": "页",
+      "next": "下一页"
+    },
+    "ProductLine": {
+      "placeholder": "〖产品线展示区域〗",
+      "noProducts": "暂无产品",
+      "productCount": "共 {count} 件商品",
+      "pageInfo": "第 {current} / {total} 页",
+      "prev": "上一页",
+      "next": "下一页",
+      "expand": "展开查看更多",
+      "collapse": "点击收起"
+    },
+    "IndustrialProductLine": {
+      "placeholder": "〖工业产品线展示区域〗",
+      "editModeTitle": "🏭 工业产品线组件（折叠表格）",
+      "editModeHint": "在预览或发布时将显示分类树和产品折叠表格",
+      "sidebarEnabled": "侧边栏已开启",
+      "noProducts": "该分类下暂无产品",
+      "expand": "展开查看更多",
+      "collapse": "点击收起",
+      "prev": "上一页",
+      "next": "下一页",
+      "pageInfo": "第 {current} / {total} 页"
+    },
+    "ProductCollections": {
+      "placeholder": "〖产品分类展示区域〗",
+      "noProducts": "暂无产品",
+      "inStock": "有货",
+      "outOfStock": "无货",
+      "minPrice": "最低",
+      "maxPrice": "最高",
+      "clearFilters": "清除筛选",
+      "sortLabel": "排序：",
+      "productCount": "当前页 {count} 件，共 {total} 件商品",
+      "prev": "上一页",
+      "next": "下一页",
+      "pageInfo": "第 {current} / {total} 页（共 {totalItems} 件商品）",
+      "expand": "展开查看更多",
+      "collapse": "点击收起",
+      "sortOptions": {
+        "titleAsc": "按字母顺序，A-Z",
+        "titleDesc": "按字母顺序，Z-A",
+        "priceAsc": "价格，从低到高",
+        "priceDesc": "价格，从高到低",
+        "createdAsc": "日期，从旧到新",
+        "createdDesc": "日期，从新到旧"
+      }
+    },
+    "ProductDetails": {
+      "placeholder": "〖产品详情展示区域〗",
+      "loading": "加载中...",
+      "brand": "品牌",
+      "inquiry": "发送询盘",
+      "chat": "在线咨询",
+      "variants": "产品变体",
+      "variantDetail": "查看详情",
+      "specTitle": "商品规格说明",
+      "stockLogistics": "库存与物流",
+      "stockStatus": "库存状态",
+      "inStock": "现货",
+      "outOfStock": "缺货",
+      "preOrder": "预定",
+      "shipping": "运费",
+      "freeShipping": "包邮",
+      "returnDays": "退货天数",
+      "days": "天",
+      "params": "产品参数",
+      "description": "产品说明",
+      "prev": "上一张",
+      "next": "下一张",
+      "close": "关闭询盘窗口",
+      "variantAttributes": {
+        "expand": "▼",
+        "collapse": "▶"
+      },
+      "priceTiers": {
+        "unit": "件",
+        "range": "{min} - {max} 件",
+        "min": "≥ {min} 件"
+      }
+    },
+    "ChatForm": {
+      "title": "在线客服",
+      "emailPlaceholder": "请输入您的邮箱 *",
+      "namePlaceholder": "您的姓名（可选）",
+      "temporaryNameHint": "将使用 \"{visitorId}\" 作为您的临时名称",
+      "connecting": "连接中...",
+      "startChat": "开始聊天",
+      "footerNote": "我们会根据您提供的邮箱回复您"
+    },
+    "ChatWidget": {
+      "title": "在线客服",
+      "openChatAriaLabel": "打开聊天",
+      "visitorFallback": "访客",
+      "imagePlaceholder": "📷 图片",
+      "loadingMessagesFailed": "加载消息失败",
+      "createConversationFailed": "创建会话失败",
+      "sessionExpired": "会话已过期，请重新开始聊天",
+      "welcome": "您好，欢迎咨询！请留下您的邮箱，我们会尽快回复。",
+      "sendFailed": "发送失败，请重试"
+    },
+    "ChatWindow": {
+      "adminTeam": "客服团队",
+      "online": "在线",
+      "busy": "忙碌",
+      "disconnected": "连接断开，正在恢复...",
+      "inputPlaceholder": "输入消息...",
+      "inputConnecting": "连接中...",
+      "imageUploadError": "请选择图片文件",
+      "imageSizeError": "图片大小不能超过 5MB",
+      "uploadFailed": "上传图片失败，请重试",
+      "imagePlaceholder": "📷 图片",
+      "defaultAvatar": "客"
+    }
+  },
+  "Account": {
+    "title": "我的账户",
+    "profile": "个人信息",
+    "orders": "订单管理",
+    "inquiry": "询盘",
+    "logout": "退出登录",
+    "Dashboard": {
+      "profileTitle": "个人信息",
+      "emailLabel": "邮箱",
+      "nameLabel": "姓名",
+      "countryLabel": "国家/地区",
+      "editButton": "编辑",
+      "marketingTitle": "营销偏好",
+      "subscriptionLabel": "邮件订阅",
+      "subscribedDesc": "您已订阅！您将收到来自我们网站的营销邮件。",
+      "unsubscribedDesc": "取消订阅？您将不再收到来自我们网站的营销邮件。",
+      "saving": "保存中...",
+      "addressesTitle": "地址管理",
+      "noAddresses": "暂无地址，请添加。",
+      "addAddress": "添加地址",
+      "defaultBadge": "默认",
+      "deleteConfirm": "确定删除此地址吗？",
+      "setDefault": "设为默认",
+      "delete": "删除",
+      "saveFailed": "保存地址失败",
+      "updateFailed": "更新偏好失败",
+      "addTitle": "添加地址",
+      "editTitle": "编辑地址"
+    },
+    "AddressForm": {
+      "country": "国家/地区",
+      "countryRequired": "国家/地区 *",
+      "firstName": "名字",
+      "firstNameRequired": "名字 *",
+      "lastName": "姓氏",
+      "lastNameRequired": "姓氏 *",
+      "company": "公司",
+      "fullAddress": "详细地址",
+      "fullAddressRequired": "详细地址 *",
+      "apartment": "公寓、套房等（可选）",
+      "city": "城市",
+      "cityRequired": "城市 *",
+      "province": "省份",
+      "provinceRequired": "省份 *",
+      "postalCode": "邮政编码",
+      "phone": "电话",
+      "phoneRequired": "电话 *",
+      "phonePlaceholder": "输入本地号码",
+      "defaultAddress": "设为默认地址",
+      "cancel": "取消",
+      "save": "保存",
+      "editTitle": "编辑地址",
+      "addTitle": "添加地址",
+      "fillAllFields": "请填写所有必填字段"
+    },
+    "Profile": {
+      "title": "编辑个人信息",
+      "firstName": "名字",
+      "lastName": "姓氏",
+      "emailNote": "该邮箱用于登录和订单通知。",
+      "country": "国家/地区",
+      "selectCountry": "选择国家/地区"
+    },
+    "Inquiry": {
+      "title": "我的询盘",
+      "history": "历史询盘",
+      "newInquiry": "立即询盘",
+      "noInquiries": "暂无询盘",
+      "status": {
+        "pending": "待处理",
+        "processing": "处理中",
+        "replied": "已回复",
+        "closed": "已关闭"
+      },
+      "noReplies": "暂无回复",
+      "replyPlaceholder": "输入您的回复...",
+      "sendReply": "发送回复",
+      "sending": "发送中...",
+      "createTitle": "发起新询盘",
+      "createMessage": "询盘内容",
+      "createMessagePlaceholder": "请详细描述您的需求或问题...",
+      "productId": "关联产品（可选）",
+      "productIdPlaceholder": "产品编号或名称",
+      "productIdNote": "如有特定产品，可在此填写以便我们快速定位",
+      "submit": "提交询盘",
+      "submitting": "提交中...",
+      "emptyDetail": "点击左侧询盘查看详情，或点击“立即询盘”发起新询盘",
+      "refresh": "刷新",
+      "noContent": "无内容",
+      "nameLabel": "姓名",
+      "emailLabel": "邮箱",
+      "companyLabel": "公司",
+      "phoneLabel": "电话",
+      "productLabel": "关联产品",
+      "errorFetchList": "获取询盘列表失败",
+      "errorFetchDetail": "获取详情失败",
+      "errorReply": "回复失败",
+      "errorCreate": "提交失败"
+    },
+    "Orders": {
+      "title": "我的订单",
+      "noOrders": "暂无订单",
+      "noOrdersDesc": "您还没有任何订单记录",
+      "totalLabel": "共 {count} 个订单",
+      "orderNo": "订单号",
+      "contractNo": "合同号",
+      "buyer": "买家",
+      "product": "商品",
+      "amount": "金额",
+      "status": "状态",
+      "shipping": "运输方式",
+      "createdAt": "创建时间",
+      "viewDetail": "查看详情",
+      "payment": "支付",
+      "paid": "已付款",
+      "pending": "待付款",
+      "completed": "已完成",
+      "cancelled": "已取消",
+      "expired": "已过期",
+      "draft": "草稿",
+      "formal": "正式订单",
+      "sent": "已发送",
+      "deposit": "预付款",
+      "balance": "尾款",
+      "paymentStatus": {
+        "unpaid": "未支付",
+        "partial_paid": "部分支付",
+        "fully_paid": "已付全款"
+      },
+      "shippingInfo": "运输信息",
+      "productInfo": "商品信息",
+      "noProduct": "暂无商品",
+      "unknownProduct": "未命名商品",
+      "plusItems": "+{count} 种商品",
+      "loading": "加载订单...",
+      "errorLoading": "加载订单失败"
+    }
+  },
+   "email": {
+    "login": {
+      "subject": "登录验证码",
+      "title": "登录验证码",
+      "enterCode": "您正在登录，请输入以下验证码",
+      "validity": "⏱ 验证码 10 分钟内有效",
+      "doNotShare": "🔒 请勿将验证码泄露给他人",
+      "autoGenerated": "此邮件由系统自动发送，请勿回复",
+      "ignoreIfNotRequested": "如果您未发起此请求，请忽略本邮件"
+    },
+    "subscription": {
+      "confirmSubject": "订阅成功 - {siteName}",
+      "thankYou": "感谢订阅！",
+      "confirmSuccess": "您已成功订阅 {siteName}",
+      "confirmBadge": "订阅确认成功",
+      "greeting": "您好，",
+      "welcome": "感谢您订阅我们的资讯服务！您将定期收到：",
+      "benefit1": "最新产品动态和更新",
+      "benefit2": "实用技巧和行业洞察",
+      "benefit3": "专属优惠和活动通知",
+      "unsubscribeHint": "您可以随时点击邮件底部的「退订」链接取消订阅。",
+      "autoGenerated": "此邮件由系统自动发送，请勿回复",
+      "unsubscribeLink": "点击退订"
+    },
+    "order": {
+      "subject": "订单 #{orderId} - {siteName}",
+      "title": "订单已生成",
+      "orderId": "订单号",
+      "amount": "金额",
+      "dueDate": "到期日期",
+      "viewButton": "查看完整订单",
+      "downloadPdf": "下载 PDF",
+      "autoGenerated": "此邮件由系统自动发送，请勿回复"
+    }
+  },
+  "Addresses": {
+    "title": "地址管理",
+    "addButton": "添加地址",
+    "noAddresses": "暂无地址，请添加。",
+    "defaultBadge": "默认",
+    "setDefault": "设为默认",
+    "deleteConfirm": "确定删除此地址吗？",
+    "saveFailed": "保存地址失败",
+    "addTitle": "添加地址",
+    "editTitle": "编辑地址",
+    "form": {
+      "country": "国家/地区 *",
+      "firstName": "名字 *",
+      "lastName": "姓氏 *",
+      "fullName": "全名",
+      "company": "公司",
+      "fullAddress": "详细地址 *",
+      "apartment": "公寓、套房等（可选）",
+      "city": "城市 *",
+      "province": "省份 *",
+      "postalCode": "邮政编码",
+      "phone": "电话 *",
+      "phonePlaceholder": "电话号码",
+      "defaultCheckbox": "设为默认地址",
+      "setDefault": "设为默认地址",
+      "fillAllFields": "请填写所有必填字段"
+    }
   }
 }
-

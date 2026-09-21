@@ -3,6 +3,7 @@
 
 import { useEffect, useState, useRef, useCallback, lazy, Suspense } from 'react';
 import { Minimize2, X } from 'lucide-react';
+import { useTranslations } from 'next-intl';
 import type { Message, Conversation } from '@/lib/litechat/types';
 import { subscribeToMessages } from '@/lib/litechat/realtime';
 import ChatForm from './ChatForm';
@@ -20,8 +21,11 @@ interface ChatWidgetProps {
 export default function ChatWidget({
   siteId = process.env.NEXT_PUBLIC_SITE_ID || '000001',
   brandColor = '#3B82F6',
-  welcomeMessage = '您好，欢迎咨询！请留下您的邮箱，我们会尽快回复。',
+  welcomeMessage, // 移除默认值
 }: ChatWidgetProps) {
+  const t = useTranslations('Components.ChatWidget');
+  const welcomeText = welcomeMessage || t('welcome');
+
   const [isOpen, setIsOpen] = useState(false);
   const [isMinimized, setIsMinimized] = useState(false);
   const [email, setEmail] = useState('');
@@ -44,11 +48,11 @@ export default function ChatWidget({
   const hasLoadedRef = useRef<boolean>(false);
 
   // ===== 截取 visitor_id 用于显示（短格式） =====
-  const getShortVisitorId = (vid: string): string => {
-    if (!vid) return '访客';
+  const getShortVisitorId = useCallback((vid: string): string => {
+    if (!vid) return t('visitorFallback');
     if (!vid.startsWith('visitor_')) return vid;
     return vid;
-  };
+  }, [t]);
 
   // ===== 初始化 visitor_id =====
   useEffect(() => {
@@ -97,14 +101,12 @@ export default function ChatWidget({
       const res = await fetch(
         `/api/litechat/conversations/${conversationId}/messages?${params.toString()}`
       );
-      if (!res.ok) throw new Error('加载消息失败');
+      if (!res.ok) throw new Error(t('loadingMessagesFailed'));
       const data = await res.json();
 
       if (append) {
-        // 加载更多：将旧消息添加到列表前面
         setMessages(prev => [...data.messages, ...prev]);
       } else {
-        // 初始加载：直接设置
         setMessages(data.messages || []);
       }
       setHasMore(data.hasMore || false);
@@ -114,14 +116,13 @@ export default function ChatWidget({
       console.error('加载消息失败:', err);
       setIsConnected(false);
       if (!append) {
-        // 初始加载失败时重置状态
         localStorage.removeItem('litechat_conversation_id');
         setShowForm(true);
         setConversation(null);
       }
       throw err;
     }
-  }, [updateMessages]);
+  }, [t]);
 
   // ===== 加载更多历史消息 =====
   const loadMoreMessages = useCallback(async () => {
@@ -161,7 +162,6 @@ export default function ChatWidget({
   // ===== ✅ 打开窗口时加载消息（仅第一次） =====
   useEffect(() => {
     if (!isOpen || !conversation) {
-      // 关闭窗口时取消订阅
       if (unsubscribeRef.current) {
         unsubscribeRef.current();
         unsubscribeRef.current = null;
@@ -169,13 +169,11 @@ export default function ChatWidget({
       return;
     }
 
-    // 仅当该会话尚未加载过消息时，才加载
     if (!hasLoadedRef.current) {
       loadMessages(conversation.id);
       hasLoadedRef.current = true;
     }
 
-    // 建立订阅（如果尚未订阅）
     if (!unsubscribeRef.current) {
       const unsubscribe = subscribeToMessages(conversation.id, (newMsg) => {
         setIsConnected(true);
@@ -206,7 +204,7 @@ export default function ChatWidget({
     setLoading(true);
     setError(null);
 
-    const displayName = nameValue.trim() || visitorId || '访客';
+    const displayName = nameValue.trim() || visitorId || t('visitorFallback');
 
     try {
       const res = await fetch('/api/litechat/conversations', {
@@ -219,7 +217,7 @@ export default function ChatWidget({
       });
       if (!res.ok) {
         const err = await res.json();
-        throw new Error(err.error || '创建会话失败');
+        throw new Error(err.error || t('createConversationFailed'));
       }
       const conv = await res.json();
       setConversation(conv);
@@ -227,7 +225,6 @@ export default function ChatWidget({
       localStorage.setItem('litechat_email', emailValue);
       localStorage.setItem('litechat_conversation_id', conv.id);
 
-      // ✅ 新会话，重置加载状态并立即加载消息
       hasLoadedRef.current = false;
       await loadMessages(conv.id);
       hasLoadedRef.current = true;
@@ -262,14 +259,14 @@ export default function ChatWidget({
         } as Conversation;
         setConversation(currentConversation);
       } else {
-        setError('会话已过期，请重新开始聊天');
+        setError(t('sessionExpired'));
         setShowForm(true);
         return false;
       }
     }
     if (!content && contentType !== 'image') return false;
 
-    const senderDisplayName = name.trim() || getShortVisitorId(visitorId) || '访客';
+    const senderDisplayName = name.trim() || getShortVisitorId(visitorId) || t('visitorFallback');
 
     const tempId = `temp_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
     const tempMessage: Message = {
@@ -279,7 +276,7 @@ export default function ChatWidget({
       sender_id: '',
       sender_email: email || currentConversation.customer_email,
       sender_name: senderDisplayName,
-      content: content || '📷 图片',
+      content: content || t('imagePlaceholder'),
       content_type: contentType,
       file_url: fileUrl,
       is_read: false,
@@ -289,7 +286,7 @@ export default function ChatWidget({
 
     try {
       const body: any = {
-        content: content || '📷 图片',
+        content: content || t('imagePlaceholder'),
         senderType: 'visitor',
         contentType,
         email: email || currentConversation.customer_email,
@@ -304,17 +301,17 @@ export default function ChatWidget({
       const text = await res.text();
       let data;
       try { data = JSON.parse(text); } catch { throw new Error('服务器返回了无效的响应'); }
-      if (!res.ok) throw new Error(data.error || `发送失败 (${res.status})`);
+      if (!res.ok) throw new Error(data.error || t('sendFailed'));
 
       updateMessages(prev => prev.filter(m => m.id !== tempId).concat(data));
       return true;
     } catch (err: any) {
       console.error('发送失败:', err);
       updateMessages(prev => prev.filter(m => m.id !== tempId));
-      setError(err.message || '发送失败，请重试');
+      setError(err.message || t('sendFailed'));
       return false;
     }
-  }, [conversation, email, name, visitorId, siteId, updateMessages]);
+  }, [conversation, email, name, visitorId, siteId, updateMessages, getShortVisitorId, t]);
 
   // ===== 关闭 =====
   const closeChat = () => setIsOpen(false);
@@ -330,7 +327,6 @@ export default function ChatWidget({
         if (timeSinceLastMsg > 60000 && !lastMsg.id.startsWith('temp_')) {
           console.warn('[ChatWidget] 检测到可能断连，尝试刷新...');
           setIsConnected(false);
-          // 断连时刷新最新消息（不改变分页状态）
           loadMessages(conversation.id, undefined, false);
         }
       }
@@ -347,7 +343,7 @@ export default function ChatWidget({
           onClick={() => setIsOpen(true)}
           className="fixed bottom-6 right-6 p-4 rounded-full shadow-lg hover:shadow-xl transition-all duration-200 z-50"
           style={{ backgroundColor: brandColor }}
-          aria-label="打开聊天"
+          aria-label={t('openChatAriaLabel')}
         >
           <svg className="w-6 h-6 text-white" fill="currentColor" viewBox="0 0 24 24">
             <path d="M20 2H4c-1.1 0-2 .9-2 2v18l4-4h14c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zm0 14H6l-2 2V4h16v12z" />
@@ -366,7 +362,7 @@ export default function ChatWidget({
             style={{ backgroundColor: brandColor }}
           >
             <div className="flex items-center gap-2">
-              <span className="text-sm font-medium">在线客服</span>
+              <span className="text-sm font-medium">{t('title')}</span>
               <span
                 className={`w-2 h-2 rounded-full inline-block ${
                   isConnected ? 'bg-green-400 animate-pulse' : 'bg-yellow-400'
@@ -394,7 +390,7 @@ export default function ChatWidget({
                   onStart={startChat}
                   loading={loading}
                   error={error}
-                  welcomeMessage={welcomeMessage}
+                  welcomeMessage={welcomeText}
                   brandColor={brandColor}
                   visitorId={getShortVisitorId(visitorId)}
                 />

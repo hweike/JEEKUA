@@ -4,7 +4,18 @@ import { SortOption } from './hooks/useProductFilters';
 
 export default function SortDropdown({ value, onChange }: { value: SortOption; onChange: (val: SortOption) => void }) {
   return (
-    <select value={value} onChange={(e) => onChange(e.target.value as SortOption)} className="border rounded p-2 text-sm bg-white">
+    <select
+      value={value}
+      onChange={(e) => onChange(e.target.value as SortOption)}
+      style={{
+        border: `1px solid var(--border, #e2e8f0)`,
+        borderRadius: 'var(--radius, 0.625rem)',
+        padding: 'var(--spacing-2, 0.5rem)',
+        fontSize: 'var(--font-size-sm, 0.875rem)',
+        backgroundColor: 'var(--background, #ffffff)',
+        color: 'var(--foreground, #0f172a)',
+      }}
+    >
       <option value="title-asc">按字母顺序，A-Z</option>
       <option value="title-desc">按字母顺序，Z-A</option>
       <option value="price-asc">价格，从低到高</option>

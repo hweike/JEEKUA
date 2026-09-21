@@ -1,4 +1,5 @@
 // lib/videosys/services/category.service.ts
+import { revalidateTag } from 'next/cache';
 import { getPrivateStorage } from '@/lib/storage/factory';
 import { registerEntity } from '@/lib/discovery/services/business-register-pages.service';
 import { deletePage } from '@/lib/discovery/register';
@@ -21,12 +22,40 @@ export interface VideoCategoriesMap {
   [key: string]: VideoCategory;
 }
 
+// ---------- 缓存层 ----------
+interface CacheEntry<T> {
+  data: T;
+  timestamp: number;
+}
+
+const categoriesCache: Record<string, CacheEntry<VideoCategoriesMap>> = {};
+const systemCategoryChecked: Record<string, number> = {};
+
+const CACHE_TTL = 60 * 1000;              // 分类数据缓存 60 秒
+const SYSTEM_CHECK_TTL = 5 * 60 * 1000;   // 系统分类检查缓存 5 分钟
+
+function invalidateCategoriesCache(locale: string): void {
+  delete categoriesCache[locale];
+}
+
+function invalidateAllCache(): void {
+  Object.keys(categoriesCache).forEach(k => delete categoriesCache[k]);
+  Object.keys(systemCategoryChecked).forEach(k => delete systemCategoryChecked[k]);
+}
+
+/**
+ * 深拷贝工具：避免缓存对象被调用方直接修改
+ */
+function deepClone<T>(obj: T): T {
+  return JSON.parse(JSON.stringify(obj));
+}
+
 // ---------- 工具函数 ----------
 function getCategoryKey(locale: string): string {
   return `videosys/${locale}/categories.json`;
 }
 
-// ---------- 数据访问层（内部） ----------
+// ---------- 数据访问层（内部，无缓存） ----------
 async function readCategoriesRaw(locale: string): Promise<VideoCategoriesMap> {
   const storage = getPrivateStorage();
   const key = getCategoryKey(locale);
@@ -45,15 +74,45 @@ async function readCategoriesRaw(locale: string): Promise<VideoCategoriesMap> {
 async function writeCategoriesRaw(locale: string, categories: VideoCategoriesMap): Promise<void> {
   const storage = getPrivateStorage();
   const key = getCategoryKey(locale);
+
+  console.log(`[writeCategoriesRaw] 开始写入 locale=${locale} key=${key}`);
+  const before = Date.now();
+
   await storage.write(key, JSON.stringify(categories, null, 2), {
     contentType: 'application/json',
   });
+
+  console.log(`[writeCategoriesRaw] 写入完成，耗时 ${Date.now() - before}ms`);
+
+  // 写后校验：确认真的落盘
+  try {
+    const verify = await storage.read(key, 'utf8');
+    const parsed = JSON.parse(verify as string);
+    const expectedKeys = Object.keys(categories);
+    const actualKeys = Object.keys(parsed);
+    console.log(`[writeCategoriesRaw] 写入后校验`, {
+      targetKey: key,
+      expectedCount: expectedKeys.length,
+      actualCount: actualKeys.length,
+      match: expectedKeys.length === actualKeys.length,
+    });
+  } catch (verifyErr) {
+    console.error(`[writeCategoriesRaw] 写入后校验失败:`, verifyErr);
+  }
+
+  // 清内存缓存
+  invalidateCategoriesCache(locale);
+
+  // 清 Next.js unstable_cache
+  try {
+    revalidateTag('video-categories', 'max');
+    revalidateTag('video-config', 'max');
+  } catch (err) {
+    console.warn('[category.service] revalidateTag failed:', err);
+  }
 }
 
 // ---------- 辅助函数：注册分类到 pages 表 ----------
-/**
- * 将分类信息注册到 pages 表（异步，错误仅记录日志）
- */
 async function registerCategoryToPages(locale: string, key: string, category: VideoCategory): Promise<void> {
   const now = new Date().toISOString();
   const categoryData = {
@@ -73,31 +132,41 @@ async function registerCategoryToPages(locale: string, key: string, category: Vi
   }).catch(err => console.error(`注册视频分类到 pages 失败 (${key}, ${locale}):`, err));
 }
 
-// ---------- 服务函数 ----------
+// ---------- 服务函数（带缓存） ----------
 
 /**
- * 获取视频分类（返回对象映射）
+ * 获取视频分类（返回对象映射，带缓存）
+ * ⚠️ 返回深拷贝，避免调用方修改缓存对象导致持久化失败
  */
 export async function getCategories(locale: string): Promise<VideoCategoriesMap> {
-  return await readCategoriesRaw(locale);
+  const now = Date.now();
+  const cached = categoriesCache[locale];
+  if (cached && now - cached.timestamp < CACHE_TTL) {
+    // 返回深拷贝，避免调用方污染缓存
+    return deepClone(cached.data);
+  }
+  const data = await readCategoriesRaw(locale);
+  categoriesCache[locale] = { data, timestamp: now };
+  // 返回深拷贝
+  return deepClone(data);
 }
 
 /**
  * 获取视频分类列表（数组形式，按 order 排序）
  */
 export async function getCategoriesList(locale: string): Promise<(VideoCategory & { key: string })[]> {
-  const map = await readCategoriesRaw(locale);
+  const map = await getCategories(locale);
   return Object.entries(map)
     .map(([key, cat]) => ({ key, ...cat }))
     .sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
 }
 
 /**
- * 获取单个分类
+ * 获取单个分类（走缓存）
  */
 export async function getCategory(locale: string, key: string): Promise<VideoCategory | null> {
-  const map = await readCategoriesRaw(locale);
-  return map[key] || null;
+  const map = await getCategories(locale);
+  return map[key] ? deepClone(map[key]) : null;
 }
 
 /**
@@ -109,53 +178,61 @@ export async function saveCategories(locale: string, categories: VideoCategories
 
 /**
  * 确保系统分类存在（产品视频）
- * 自动注册系统分类到 pages 表
+ * 只在 key 不存在时创建，不依赖 name 或 isSystem 判断
+ * 已存在时不做任何修改，允许用户自由修改名称、SEO 等信息
  */
 export async function ensureSystemCategory(locale: string): Promise<void> {
-  const categories = await readCategoriesRaw(locale);
-  const hasProductVideo = Object.values(categories).some(
-    (cat) => cat.name === '产品视频' && cat.isSystem === true
-  );
-  if (!hasProductVideo) {
-    const systemKey = 'product-video';
-    categories[systemKey] = {
-      name: '产品视频',
-      slug: 'product-video',
-      order: 0,
-      commentStatus: 'allowed',
-      isSystem: true,
-      template: '',
-      seo_keywords: '',
-      seo_title: '',
-      seo_description: '',
-    };
-    await writeCategoriesRaw(locale, categories);
-    await registerCategoryToPages(locale, systemKey, categories[systemKey]);
+  const now = Date.now();
+  if (systemCategoryChecked[locale] && now - systemCategoryChecked[locale] < SYSTEM_CHECK_TTL) {
+    return;
   }
+
+  const categories = await getCategories(locale);
+
+  // ✅ 只判断 key 是否存在，存在就跳过，不覆盖任何字段
+  if (categories['product-video']) {
+    systemCategoryChecked[locale] = now;
+    return;
+  }
+
+  // key 不存在时才创建
+  const systemKey = 'product-video';
+  categories[systemKey] = {
+    name: '产品视频',
+    slug: 'product-video',
+    order: 0,
+    commentStatus: 'allowed',
+    isSystem: true,
+    template: '',
+    seo_keywords: '',
+    seo_title: '',
+    seo_description: '',
+  };
+
+  await writeCategoriesRaw(locale, categories);
+  await registerCategoryToPages(locale, systemKey, categories[systemKey]);
+
+  systemCategoryChecked[locale] = now;
 }
 
 /**
  * 更新分类（合并更新）
- * 更新后重新注册到 pages 表
+ * 更新后重新注册到 pages 表，并清缓存
  */
 export async function updateCategory(
   locale: string,
   key: string,
   data: Partial<VideoCategory>
 ): Promise<void> {
-  const categories = await readCategoriesRaw(locale);
+  const categories = await getCategories(locale); // 已经是深拷贝
   const existing = categories[key];
   if (!existing) {
     throw new Error('分类不存在');
   }
-  // 系统分类保护
   if (existing.isSystem === true && data.isSystem === false) {
-    data.isSystem = true; // 不允许取消系统标志
+    data.isSystem = true;
   }
-  const updated = {
-    ...existing,
-    ...data,
-  };
+  const updated = { ...existing, ...data };
   categories[key] = updated;
   await writeCategoriesRaw(locale, categories);
   await registerCategoryToPages(locale, key, updated);
@@ -163,11 +240,10 @@ export async function updateCategory(
 
 /**
  * 删除分类
- * 注意：调用前需先检查是否被视频使用（由路由层处理）
- * 删除对应的 pages 记录
+ * 删除后清缓存和 pages 记录
  */
 export async function deleteCategory(locale: string, key: string): Promise<void> {
-  const categories = await readCategoriesRaw(locale);
+  const categories = await getCategories(locale); // 已经是深拷贝
   const target = categories[key];
   if (!target) {
     throw new Error('分类不存在');
@@ -188,15 +264,13 @@ export async function deleteCategory(locale: string, key: string): Promise<void>
 // ---------- 批量操作 ----------
 
 /**
- * 批量获取多个语言的分类（以 key 为键的对象）
- * 返回：{ [locale]: { [key]: VideoCategory } }
+ * 批量获取多个语言的分类（走缓存，并发生效）
  */
 export async function getCategoriesBatch(locales: string[]): Promise<Record<string, VideoCategoriesMap>> {
   const result: Record<string, VideoCategoriesMap> = {};
   await Promise.all(
     locales.map(async (loc) => {
-      const data = await getCategories(loc);
-      result[loc] = data;
+      result[loc] = await getCategories(loc);
     })
   );
   return result;
@@ -204,8 +278,6 @@ export async function getCategoriesBatch(locales: string[]): Promise<Record<stri
 
 /**
  * 复制分类（从源语言复制到目标语言）
- * 若目标已有相同 key，则覆盖；否则新增
- * 复制后注册到目标语言的 pages 表
  */
 export async function copyCategory(
   sourceLocale: string,
@@ -215,36 +287,26 @@ export async function copyCategory(
   if (sourceLocale === targetLocale) {
     throw new Error('源语言和目标语言不能相同');
   }
-
-  // 获取源分类
   const sourceData = await getCategories(sourceLocale);
   const sourceCategory = sourceData[key];
   if (!sourceCategory) {
     throw new Error('源分类不存在');
   }
-
-  // 获取目标分类
-  let targetData = await getCategories(targetLocale);
-  // 复制（保留所有字段，不改变 key）
+  const targetData = await getCategories(targetLocale);
   targetData[key] = { ...sourceCategory };
-
-  // 保存
   await saveCategories(targetLocale, targetData);
-  // 注册到目标语言 pages
   await registerCategoryToPages(targetLocale, key, targetData[key]);
 }
 
 /**
  * 创建分类（指定 key）
- * 适用于新增其他语言版本时，使用已有的 key
- * 创建后注册到 pages 表
  */
 export async function createCategoryWithKey(
   locale: string,
   key: string,
   data: Partial<VideoCategory> & { name?: string; slug?: string }
 ): Promise<void> {
-  const categories = await readCategoriesRaw(locale);
+  const categories = await getCategories(locale);
   if (categories[key]) {
     throw new Error('该分类 key 已存在，请使用更新操作');
   }
@@ -265,10 +327,7 @@ export async function createCategoryWithKey(
 }
 
 /**
- * 批量更新视频分类翻译字段（若目标语言不存在则从源语言复制）
- * @param targetLocale 目标语言
- * @param translations 翻译数据数组，每个元素包含 key, name, seo_title, seo_description, seo_keywords
- * @param sourceLocale 源语言（可选，用于创建新产品时复制非翻译字段）
+ * 批量更新视频分类翻译字段
  */
 export async function updateCategoryTranslations(
   targetLocale: string,
@@ -287,14 +346,11 @@ export async function updateCategoryTranslations(
 
   for (const trans of translations) {
     const { key, name, seo_title, seo_description, seo_keywords } = trans;
-
     try {
-      // 检查目标语言是否存在该分类
-      const targetCategories = await readCategoriesRaw(targetLocale);
+      const targetCategories = await getCategories(targetLocale);
       const existing = targetCategories[key];
 
       if (!existing) {
-        // 目标不存在，尝试从源复制
         if (!sourceLocale) {
           errors.push(`分类 ${key} 在目标语言中不存在且未提供源语言`);
           failed++;
@@ -307,8 +363,7 @@ export async function updateCategoryTranslations(
           failed++;
           continue;
         }
-        // 复制后重新读取目标分类并应用翻译字段
-        const updatedTarget = await readCategoriesRaw(targetLocale);
+        const updatedTarget = await getCategories(targetLocale);
         const updated = updatedTarget[key];
         if (!updated) {
           errors.push(`复制后无法找到分类 ${key}`);
@@ -323,7 +378,6 @@ export async function updateCategoryTranslations(
         await registerCategoryToPages(targetLocale, key, updated);
         success++;
       } else {
-        // 目标已存在，直接更新
         if (name !== undefined) existing.name = name;
         if (seo_title !== undefined) existing.seo_title = seo_title;
         if (seo_description !== undefined) existing.seo_description = seo_description;
@@ -340,3 +394,6 @@ export async function updateCategoryTranslations(
 
   return { success, failed, errors };
 }
+
+// ---------- 导出缓存清理接口（供其他模块调用） ----------
+export { invalidateCategoriesCache, invalidateAllCache };

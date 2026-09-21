@@ -1,3 +1,4 @@
+// app/admin/products/manage/components/ProductCard.tsx
 'use client';
 
 import { useState, useCallback, memo } from 'react';
@@ -13,6 +14,7 @@ interface ProductCardProps {
   isSelected: boolean;
   onSelectChange: (id: string) => void;
   categoryPath?: string;
+  isPending?: boolean; // 新增：是否处于保存中状态
 }
 
 function getPriceRange(p: any) {
@@ -40,6 +42,7 @@ export const ProductCard = memo(function ProductCard({
   isSelected,
   onSelectChange,
   categoryPath,
+  isPending = false,
 }: ProductCardProps) {
   const [expanded, setExpanded] = useState(false);
   const [children, setChildren] = useState<any[]>([]);
@@ -99,7 +102,13 @@ export const ProductCard = memo(function ProductCard({
   }, [onDelete]);
 
   return (
-    <div className="border rounded-lg bg-white shadow-sm overflow-hidden hover:shadow-md transition-shadow">
+    <div className="relative border rounded-lg bg-white shadow-sm overflow-hidden hover:shadow-md transition-shadow">
+      {isPending && (
+        <div className="absolute inset-0 bg-white/70 backdrop-blur-sm flex flex-col items-center justify-center z-10 rounded-lg">
+          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600 mb-2"></div>
+          <p className="text-sm text-gray-600">保存中...</p>
+        </div>
+      )}
       <div className="cursor-pointer" onClick={toggleExpand}>
         <div className="flex p-4 gap-4">
           <div className="flex-shrink-0 pt-2" onClick={(e) => e.stopPropagation()}>

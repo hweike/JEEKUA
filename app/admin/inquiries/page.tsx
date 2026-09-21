@@ -3,10 +3,6 @@
 import { useEffect, useState, useCallback, useMemo } from 'react';
 import {
   Mail,
-  CheckCircle,
-  Reply,
-  Building,
-  Phone,
   Calendar,
   FileText,
   Package,
@@ -18,6 +14,7 @@ import {
   ChevronRight,
   RefreshCw,
   Edit,
+  Search,
 } from 'lucide-react';
 
 // 类型定义
@@ -32,6 +29,7 @@ interface Inquiry {
   company: string;
   message: string;
   product_id: string | null;
+  product_slugs?: Record<string, string> | null;
   created_at: string;
   updated_at: string;
   customer_id: string | null;
@@ -65,7 +63,9 @@ function Toast({ message, onClose }: { message: string; onClose: () => void }) {
   return (
     <div className="fixed bottom-4 right-4 z-50 bg-gray-800 text-white px-4 py-2 rounded-lg shadow-lg flex items-center gap-2">
       <span>{message}</span>
-      <button onClick={onClose} className="ml-2 text-gray-300 hover:text-white">×</button>
+      <button onClick={onClose} className="ml-2 text-gray-300 hover:text-white">
+        ×
+      </button>
     </div>
   );
 }
@@ -94,6 +94,9 @@ function linkifyText(text: string) {
 }
 
 export default function InquiriesAdmin() {
+  // 硬编码默认语言，后台管理不需要多语言
+  const locale = 'zh'; // 或从 URL 提取：const locale = window.location.pathname.split('/')[1] || 'zh';
+
   const [inquiries, setInquiries] = useState<Inquiry[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -109,11 +112,13 @@ export default function InquiriesAdmin() {
   const [selectedCustomerId, setSelectedCustomerId] = useState('');
   const [newInquiryMessage, setNewInquiryMessage] = useState('');
   const [creating, setCreating] = useState(false);
+  const [customerSearch, setCustomerSearch] = useState('');
 
   const [expandedGroups, setExpandedGroups] = useState<Record<string, boolean>>({});
 
   const showToast = (msg: string) => setToast(msg);
 
+  // 获取所有询盘
   const fetchInquiries = async () => {
     setLoading(true);
     setError(null);
@@ -121,6 +126,7 @@ export default function InquiriesAdmin() {
       const res = await fetch('/api/admin/inquiries');
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = await res.json();
+      console.log('[fetchInquiries] 接收到的数据（前3条）:', data.slice(0, 3));
       setInquiries(data);
     } catch (err: any) {
       setError(err.message || '加载失败');
@@ -134,6 +140,7 @@ export default function InquiriesAdmin() {
     fetchInquiries();
   }, []);
 
+  // 获取单个询盘详情
   const fetchInquiryDetails = useCallback(async (id: number) => {
     try {
       const res = await fetch(`/api/admin/inquiries?id=${id}`);
@@ -141,7 +148,11 @@ export default function InquiriesAdmin() {
       const data = await res.json();
 
       if (data.inquiry && Number(data.inquiry.id) === id) {
-        setSelectedInquiry(data.inquiry);
+        const inquiryWithSlugs = {
+          ...data.inquiry,
+          product_slugs: data.product_slugs || null,
+        };
+        setSelectedInquiry(inquiryWithSlugs);
         setReplies(data.replies || []);
       } else {
         if (data.replies) {
@@ -163,6 +174,7 @@ export default function InquiriesAdmin() {
     fetchInquiryDetails(inquiry.id);
   }, [fetchInquiryDetails]);
 
+  // 发送回复
   const handleReplySubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!replyContent.trim() || !selectedInquiry) return;
@@ -201,6 +213,7 @@ export default function InquiriesAdmin() {
     }
   };
 
+  // 更新状态
   const updateStatus = async (id: number, status: string) => {
     try {
       const res = await fetch(`/api/admin/inquiries?id=${id}`, {
@@ -211,7 +224,7 @@ export default function InquiriesAdmin() {
       if (!res.ok) throw new Error();
       await fetchInquiries();
       if (selectedInquiry?.id === id) {
-        setSelectedInquiry((prev) => prev ? { ...prev, status } : null);
+        setSelectedInquiry((prev) => (prev ? { ...prev, status } : null));
       }
       showToast('状态已更新');
     } catch (err) {
@@ -219,11 +232,13 @@ export default function InquiriesAdmin() {
     }
   };
 
+  // 获取客户列表（用于发起询盘）
   const fetchCustomers = async () => {
     try {
-      const res = await fetch('/api/admin/customers?limit=50');
+      const res = await fetch('/api/admin/crm?limit=100');
       if (!res.ok) throw new Error();
       const data = await res.json();
+      console.log('[fetchCustomers] 客户列表:', data);
       setCustomers(data);
     } catch (err) {
       showToast('加载客户列表失败');
@@ -235,6 +250,7 @@ export default function InquiriesAdmin() {
     setShowCreateModal(true);
   };
 
+  // 创建询盘（管理员发起）
   const handleCreateInquiry = async () => {
     if (!selectedCustomerId || !newInquiryMessage.trim()) {
       showToast('请选择客户并填写内容');
@@ -255,6 +271,7 @@ export default function InquiriesAdmin() {
       setShowCreateModal(false);
       setSelectedCustomerId('');
       setNewInquiryMessage('');
+      setCustomerSearch('');
       await fetchInquiries();
     } catch (err) {
       showToast('创建失败');
@@ -263,6 +280,37 @@ export default function InquiriesAdmin() {
     }
   };
 
+  // ========== 产品链接（使用当前语言对应的 Slug） ==========
+  const getProductLink = (inquiry: Inquiry) => {
+    const productId = inquiry.product_id;
+    if (!productId) return null;
+    if (productId.startsWith('http://') || productId.startsWith('https://')) {
+      return productId;
+    }
+    const slugs = inquiry.product_slugs;
+    if (slugs) {
+      const slug = slugs[locale] || slugs['zh'] || Object.values(slugs)[0];
+      console.log('[getProductLink] 使用 slug:', slug, 'locale:', locale, 'product_id:', productId, 'slugs:', slugs);
+      if (slug) return `/${locale}/product/${slug}`;
+    }
+    return `/${locale}/product/${productId}`;
+  };
+
+  const getProductDisplayText = (inquiry: Inquiry) => {
+    const productId = inquiry.product_id;
+    if (!productId) return null;
+    if (productId.startsWith('http://') || productId.startsWith('https://')) {
+      return '查看产品';
+    }
+    const slugs = inquiry.product_slugs;
+    if (slugs) {
+      const slug = slugs[locale] || slugs['zh'] || Object.values(slugs)[0];
+      if (slug) return slug;
+    }
+    return productId;
+  };
+
+  // 按邮箱分组
   const groupedInquiries = useMemo(() => {
     const groups: Record<string, Inquiry[]> = {};
     inquiries.forEach((inq) => {
@@ -281,6 +329,24 @@ export default function InquiriesAdmin() {
       ...prev,
       [email]: !prev[email],
     }));
+  };
+
+  // 客户搜索过滤
+  const filteredCustomers = useMemo(() => {
+    if (!customerSearch.trim()) return customers;
+    const lower = customerSearch.toLowerCase();
+    return customers.filter(
+      (c) =>
+        (c.name && c.name.toLowerCase().includes(lower)) ||
+        (c.email && c.email.toLowerCase().includes(lower)) ||
+        (c.company_name && c.company_name.toLowerCase().includes(lower))
+    );
+  }, [customers, customerSearch]);
+
+  const selectCustomer = (id: string) => {
+    setSelectedCustomerId(id);
+    const found = customers.find((c) => c.id === id);
+    if (found) setCustomerSearch(found.name || found.email || '');
   };
 
   if (loading) return <div className="p-6 text-center">加载中...</div>;
@@ -314,6 +380,7 @@ export default function InquiriesAdmin() {
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+        {/* 左侧询盘列表 */}
         <div className="md:col-span-1">
           <div className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
             <div className="bg-gray-50 px-4 py-3 border-b border-gray-100 flex items-center justify-between">
@@ -332,7 +399,7 @@ export default function InquiriesAdmin() {
                 Object.entries(groupedInquiries).map(([email, groupItems]) => {
                   const latest = groupItems[0];
                   const isExpanded = expandedGroups[email] ?? false;
-                  const isGroupSelected = groupItems.some(item => item.id === selectedId);
+                  const isGroupSelected = groupItems.some((item) => item.id === selectedId);
                   return (
                     <div key={email} className="border-b border-gray-100 last:border-0">
                       {/* 父行 */}
@@ -381,12 +448,17 @@ export default function InquiriesAdmin() {
                                   <span className="text-sm font-medium text-gray-700">
                                     #{inquiry.inquiry_number}
                                   </span>
-                                  <span className={`text-xs px-2 py-0.5 rounded-full ${
-                                    inquiry.status === '待处理' ? 'bg-red-100 text-red-700' :
-                                    inquiry.status === '处理中' ? 'bg-yellow-100 text-yellow-700' :
-                                    inquiry.status === '已回复' ? 'bg-green-100 text-green-700' :
-                                    'bg-gray-100 text-gray-700'
-                                  }`}>
+                                  <span
+                                    className={`text-xs px-2 py-0.5 rounded-full ${
+                                      inquiry.status === '待处理'
+                                        ? 'bg-red-100 text-red-700'
+                                        : inquiry.status === '处理中'
+                                        ? 'bg-yellow-100 text-yellow-700'
+                                        : inquiry.status === '已回复'
+                                        ? 'bg-green-100 text-green-700'
+                                        : 'bg-gray-100 text-gray-700'
+                                    }`}
+                                  >
                                     {inquiry.status}
                                   </span>
                                 </div>
@@ -453,15 +525,42 @@ export default function InquiriesAdmin() {
                     </a>
                   )}
                 </div>
-                <div><span className="font-medium">邮箱：</span>{selectedInquiry.email}</div>
-                {selectedInquiry.company && <div><span className="font-medium">公司：</span>{selectedInquiry.company}</div>}
-                {selectedInquiry.phone && <div><span className="font-medium">电话：</span>{selectedInquiry.phone}</div>}
+                <div>
+                  <span className="font-medium">邮箱：</span>
+                  {selectedInquiry.email}
+                </div>
+                {selectedInquiry.company && (
+                  <div>
+                    <span className="font-medium">公司：</span>
+                    {selectedInquiry.company}
+                  </div>
+                )}
+                {selectedInquiry.phone && (
+                  <div>
+                    <span className="font-medium">电话：</span>
+                    {selectedInquiry.phone}
+                  </div>
+                )}
                 {selectedInquiry.product_id && (
-                  <div className="col-span-2">
+                  <div className="col-span-2 flex items-center gap-1">
+                    <Package className="w-4 h-4 text-gray-500" />
                     <span className="font-medium">关联产品：</span>
-                    <a href={selectedInquiry.product_id} target="_blank" className="text-blue-600 hover:underline">
-                      {selectedInquiry.product_id}
-                    </a>
+                    {(() => {
+                      const link = getProductLink(selectedInquiry);
+                      const displayText = getProductDisplayText(selectedInquiry);
+                      if (!link) return null;
+                      return (
+                        <a
+                          href={link}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="text-blue-600 hover:underline flex items-center gap-1"
+                        >
+                          {displayText}
+                          <ExternalLink className="w-3 h-3" />
+                        </a>
+                      );
+                    })()}
                   </div>
                 )}
               </div>
@@ -473,22 +572,26 @@ export default function InquiriesAdmin() {
                     key={reply.id}
                     className={`flex ${reply.sender_type === 'admin' ? 'justify-end' : 'justify-start'}`}
                   >
-                    <div className={`max-w-[80%] rounded-lg px-4 py-2 ${
-                      reply.sender_type === 'admin'
-                        ? 'bg-blue-50 text-gray-800'
-                        : reply.sender_type === 'system'
-                        ? 'bg-gray-200 text-gray-700'
-                        : 'bg-gray-100 text-gray-800'
-                    } ${reply.is_internal ? 'border-2 border-dashed border-yellow-400' : ''}`}>
+                    <div
+                      className={`max-w-[80%] rounded-lg px-4 py-2 ${
+                        reply.sender_type === 'admin'
+                          ? 'bg-blue-50 text-gray-800'
+                          : reply.sender_type === 'system'
+                          ? 'bg-gray-200 text-gray-700'
+                          : 'bg-gray-100 text-gray-800'
+                      } ${reply.is_internal ? 'border-2 border-dashed border-yellow-400' : ''}`}
+                    >
                       <div className="text-xs opacity-75 mb-1 flex items-center gap-2">
                         <span>{reply.sender_name || reply.sender_email}</span>
                         <span>·</span>
                         <span>{new Date(reply.created_at).toLocaleString()}</span>
-                        {reply.is_internal && <span className="bg-yellow-200 text-yellow-800 px-1 rounded text-[10px]">内部</span>}
+                        {reply.is_internal && (
+                          <span className="bg-yellow-200 text-yellow-800 px-1 rounded text-[10px]">
+                            内部
+                          </span>
+                        )}
                       </div>
-                      <div className="whitespace-pre-wrap break-words">
-                        {linkifyText(reply.content)}
-                      </div>
+                      <div className="whitespace-pre-wrap break-words">{linkifyText(reply.content)}</div>
                     </div>
                   </div>
                 ))}
@@ -497,7 +600,7 @@ export default function InquiriesAdmin() {
                 )}
               </div>
 
-              {/* 回复输入 - 添加 disabled 和样式 */}
+              {/* 回复输入 */}
               <div className="border-t border-gray-100 p-4 shrink-0 bg-gray-50">
                 <form onSubmit={handleReplySubmit} className="flex flex-col gap-2">
                   <div className="flex gap-2">
@@ -540,27 +643,51 @@ export default function InquiriesAdmin() {
         </div>
       </div>
 
-      {/* 发起询盘模态框 */}
+      {/* ========== 发起询盘模态框 ========== */}
       {showCreateModal && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
           <div className="bg-white rounded-xl p-6 max-w-md w-full max-h-[80vh] overflow-y-auto">
             <h3 className="text-lg font-semibold mb-4">选择客户发起询盘</h3>
             <div className="space-y-4">
+              {/* 客户搜索框 */}
               <div>
                 <label className="block text-sm font-medium mb-1">选择客户</label>
-                <select
-                  value={selectedCustomerId}
-                  onChange={(e) => setSelectedCustomerId(e.target.value)}
-                  className="w-full border rounded p-2"
-                >
-                  <option value="">请选择...</option>
-                  {customers.map((c) => (
-                    <option key={c.id} value={c.id}>
-                      {c.name || c.email} ({c.email})
-                    </option>
-                  ))}
-                </select>
+                <div className="relative">
+                  <Search className="absolute left-2 top-2.5 w-4 h-4 text-gray-400" />
+                  <input
+                    type="text"
+                    placeholder="搜索客户姓名或邮箱..."
+                    value={customerSearch}
+                    onChange={(e) => setCustomerSearch(e.target.value)}
+                    className="w-full pl-8 pr-3 py-2 border rounded-md"
+                  />
+                </div>
+                {filteredCustomers.length > 0 ? (
+                  <ul className="mt-2 border rounded-md max-h-48 overflow-y-auto divide-y divide-gray-100">
+                    {filteredCustomers.map((c) => (
+                      <li
+                        key={c.id}
+                        onClick={() => selectCustomer(c.id)}
+                        className={`px-3 py-2 cursor-pointer hover:bg-gray-50 flex items-center justify-between ${
+                          selectedCustomerId === c.id ? 'bg-blue-50' : ''
+                        }`}
+                      >
+                        <div>
+                          <div className="font-medium">{c.name || c.email}</div>
+                          <div className="text-sm text-gray-500">{c.email}</div>
+                          {c.company_name && <div className="text-xs text-gray-400">{c.company_name}</div>}
+                        </div>
+                        {selectedCustomerId === c.id && (
+                          <span className="text-blue-600 text-sm">已选</span>
+                        )}
+                      </li>
+                    ))}
+                  </ul>
+                ) : (
+                  <p className="text-sm text-gray-400 mt-2">未找到匹配的客户</p>
+                )}
               </div>
+
               <div>
                 <label className="block text-sm font-medium mb-1">询盘内容</label>
                 <textarea
@@ -579,7 +706,7 @@ export default function InquiriesAdmin() {
                 </button>
                 <button
                   onClick={handleCreateInquiry}
-                  disabled={creating}
+                  disabled={creating || !selectedCustomerId || !newInquiryMessage.trim()}
                   className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 disabled:opacity-50"
                 >
                   {creating ? '创建中...' : '发起询盘'}

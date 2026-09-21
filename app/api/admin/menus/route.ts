@@ -1,13 +1,16 @@
 // app/api/admin/menus/route.ts
 import { NextRequest, NextResponse } from 'next/server';
-import { readMenuFile, getMenuCache, setMenuCache, clearMenuCache } from '@/lib/menus/storage';
+import { readMenuFile } from '@/lib/menus/storage';
+import { supabase } from '@/lib/supabase/client';
+
+const DEFAULT_SITE_ID = '000001';
 
 export async function GET(req: NextRequest) {
   const searchParams = req.nextUrl.searchParams;
   const locale = searchParams.get('locale') || 'zh';
   const localesParam = searchParams.get('locales');
 
-  // ---- 新增：批量查询 ----
+  // ---- 批量查询（优化版） ----
   if (localesParam) {
     const locales = localesParam.split(',').filter(Boolean);
     if (locales.length === 0) {
@@ -15,62 +18,66 @@ export async function GET(req: NextRequest) {
     }
 
     try {
-      const result: Record<string, any> = {};
+      const { data, error } = await supabase
+        .from('site_configs')
+        .select('locale, id, config')
+        .eq('site_id', DEFAULT_SITE_ID)
+        .in('locale', locales)
+        .in('id', ['navigation', 'footer-menu', 'custom_menus']);
 
-      // 并行获取每个语言的数据，并复用缓存
-      await Promise.all(locales.map(async (loc) => {
-        // 先检查缓存
-        const cached = getMenuCache(loc);
-        if (cached) {
-          result[loc] = cached;
-          return;
+      if (error) {
+        console.error('Supabase query error:', error);
+        throw error;
+      }
+
+      const result: Record<string, { navigation: any; footer: any; customMenus: any[] }> = {};
+      locales.forEach(loc => {
+        result[loc] = { navigation: null, footer: null, customMenus: [] };
+      });
+
+      data?.forEach(row => {
+        const locale = row.locale;
+        const id = row.id;
+        const config = row.config;
+        if (!result[locale]) return;
+        if (id === 'navigation' || id === 'footer-menu') {
+          const targetKey = id === 'navigation' ? 'navigation' : 'footer';
+          result[locale][targetKey] = config || null;
+        } else if (id === 'custom_menus') {
+          result[locale].customMenus = Array.isArray(config) ? config : [];
         }
+      });
 
-        // 无缓存则读取文件
-        const [navigation, footer, customMenus] = await Promise.all([
-          readMenuFile(loc, 'navigation'),
-          readMenuFile(loc, 'footer'),
-          readMenuFile(loc, 'custom_menus'),
-        ]);
-
-        const data = { navigation, footer, customMenus };
-        setMenuCache(loc, data); // 存入缓存
-        result[loc] = data;
-      }));
-
-      return NextResponse.json(result);
+      return NextResponse.json(result, {
+        headers: {
+          'Cache-Control': 'no-store, no-cache, must-revalidate, proxy-revalidate',
+          'Pragma': 'no-cache',
+          'Expires': '0',
+        },
+      });
     } catch (error) {
       console.error('GET /menus batch error:', error);
       return NextResponse.json({ error: 'Failed to fetch menus' }, { status: 500 });
     }
   }
 
-  // ---- 原有单语言逻辑（完全不变） ----
-  // 1. 检查缓存
-  const cached = getMenuCache(locale);
-  if (cached) {
-    return NextResponse.json(cached);
-  }
-
+  // ---- 单语言查询 ----
   try {
-    // 2. 并发读取三个文件
     const [navigation, footer, customMenus] = await Promise.all([
       readMenuFile(locale, 'navigation'),
-      readMenuFile(locale, 'footer'),
+      readMenuFile(locale, 'footer-menu'),
       readMenuFile(locale, 'custom_menus'),
     ]);
-
     const result = { navigation, footer, customMenus };
-
-    // 3. 存入缓存
-    setMenuCache(locale, result);
-
-    return NextResponse.json(result);
+    return NextResponse.json(result, {
+      headers: {
+        'Cache-Control': 'no-store, no-cache, must-revalidate, proxy-revalidate',
+        'Pragma': 'no-cache',
+        'Expires': '0',
+      },
+    });
   } catch (error) {
     console.error('GET /menus error:', error);
     return NextResponse.json({ error: 'Failed to fetch menus' }, { status: 500 });
   }
 }
-
-// 注意：PUT 和 POST 路由需要调用 clearMenuCache(locale) 清除缓存
-// 你可以在各自的实现中调用 clearMenuCache(locale)

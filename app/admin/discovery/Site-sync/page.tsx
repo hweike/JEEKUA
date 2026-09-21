@@ -1,3 +1,4 @@
+// app/admin/discovery/Site-sync/page.tsx
 'use client';
 
 import { useEffect, useState, useCallback, useMemo } from 'react';
@@ -30,7 +31,6 @@ interface SyncPage {
   source_content_hash?: string | null;
 }
 
-// 扩展类型
 interface ProcessedPage extends SyncPage {
   level: number;
   children?: ProcessedPage[];
@@ -55,7 +55,6 @@ export default function SiteSyncPage() {
   const [totalTargetCount, setTotalTargetCount] = useState(0);
   const [showSyncDialog, setShowSyncDialog] = useState(false);
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
-  // 展开的父级 ID 集合
   const [expandedParents, setExpandedParents] = useState<Set<string>>(new Set());
 
   const currentTab = (searchParams.get('tab') as TabKey) || 'productCollection';
@@ -82,6 +81,7 @@ export default function SiteSyncPage() {
     initLocale();
   }, []);
 
+  // 加载数据
   const loadData = useCallback(async () => {
     setLoading(true);
     try {
@@ -92,21 +92,33 @@ export default function SiteSyncPage() {
       );
       if (!res.ok) throw new Error('Failed to fetch');
       const data = await res.json();
+      console.log('✅ API 响应数据:', data);
+      console.log('📦 页面数量:', data.pages?.length || 0);
+      // 确保 pages 始终为数组
       setPages(data.pages || []);
       setTotalTargetCount(data.totalTargetCount || 0);
+      // 重置选中和展开状态
       setSelectedIds(new Set());
       setExpandedParents(new Set());
+      console.log('✅ pages 状态已设置');
     } catch (error) {
-      console.error(error);
+      console.error('❌ 加载失败:', error);
       setToast({ message: '加载数据失败', type: 'error' });
+      setPages([]);
     } finally {
       setLoading(false);
     }
   }, [locale, currentTab]);
 
+  // 初次加载和参数变化时重新加载
   useEffect(() => {
     loadData();
   }, [loadData]);
+
+  // 监听 pages 变化
+  useEffect(() => {
+    console.log('📌 pages 状态变化:', pages.length, '条');
+  }, [pages]);
 
   const handleLocaleChange = (newLocale: string) => {
     if (newLocale === locale) return;
@@ -119,7 +131,7 @@ export default function SiteSyncPage() {
     router.push(`/admin/discovery/Site-sync?tab=${tab}`);
   };
 
-  // 构建层级结构（适用于 productCollection 和 product）
+  // 构建层级结构
   const buildHierarchy = useCallback((pages: SyncPage[]): ProcessedPage[] => {
     const parentMap = new Map<string, ProcessedPage>();
     const childrenMap = new Map<string, ProcessedPage[]>();
@@ -154,10 +166,11 @@ export default function SiteSyncPage() {
   }, []);
 
   const hierarchicalPages = useMemo(() => {
-    return buildHierarchy(pages);
+    const result = buildHierarchy(pages);
+    console.log('🏗️ hierarchicalPages:', result.length);
+    return result;
   }, [pages, buildHierarchy]);
 
-  // 扁平化用于渲染的列表（根据展开状态）
   const flattenedPages = useMemo(() => {
     const result: ProcessedPage[] = [];
     for (const parent of hierarchicalPages) {
@@ -166,10 +179,11 @@ export default function SiteSyncPage() {
         result.push(...(parent.children || []));
       }
     }
+    console.log('📋 flattenedPages:', result.length);
     return result;
   }, [hierarchicalPages, expandedParents]);
 
-  // 可选页面：父级且 source_locale === null（且 isEn 为 true 时才有复选框）
+  // 可选页面
   const selectableParents = useMemo(() => {
     if (!isEn) return [];
     return hierarchicalPages.filter(p => p.source_locale === null);
@@ -207,7 +221,6 @@ export default function SiteSyncPage() {
     });
   };
 
-  // 获取完整同步ID（包含子级）
   const getFullSyncIds = useCallback(() => {
     const allIds = new Set<string>(selectedIds);
     for (const page of pages) {
@@ -270,12 +283,9 @@ export default function SiteSyncPage() {
     return '';
   };
 
-  // 渲染同步进度
   const renderSyncProgress = (page: ProcessedPage) => {
     if (isEn) {
-      // 英文站：区分原始页面和翻译页面
       if (page.source_locale === null) {
-        // 原始英文页面：显示进度条
         return (
           <div className="flex items-center">
             <div className="w-32 bg-gray-200 rounded-full h-2.5 mr-2">
@@ -295,17 +305,13 @@ export default function SiteSyncPage() {
           </div>
         );
       } else {
-        // 从其他语言同步来的页面：显示来源
         const sourceLang = page.source_locale === 'zh' ? '中文' : (page.source_locale || '其他');
         return <span className="text-sm text-green-600">已从{sourceLang}站同步</span>;
       }
     } else {
-      // 非英文站：区分原始页面和从英文同步来的页面
       if (page.source_locale === null) {
-        // 原始页面：待同步（到英文）
         return <span className="text-sm text-yellow-600">待同步</span>;
       } else {
-        // 从英文同步来的：已同步
         return <span className="text-sm text-green-600">已从英文站同步</span>;
       }
     }
@@ -316,11 +322,21 @@ export default function SiteSyncPage() {
       <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 py-8">
         <div className="flex justify-between items-center mb-6">
           <h1 className="text-2xl font-bold text-gray-900">站点同步管理</h1>
-          <LanguageSelector
-            currentLocale={locale}
-            onLocaleChange={handleLocaleChange}
-            displayMode="zh"
-          />
+          <div className="flex items-center gap-4">
+            <button
+              onClick={loadData}
+              className="p-2 rounded-full hover:bg-gray-200 transition"
+              title="刷新数据"
+              disabled={loading}
+            >
+              <RefreshCw size={20} className={`text-gray-600 ${loading ? 'animate-spin' : ''}`} />
+            </button>
+            <LanguageSelector
+              currentLocale={locale}
+              onLocaleChange={handleLocaleChange}
+              displayMode="zh"
+            />
+          </div>
         </div>
 
         <div className="border-b border-gray-200 mb-6">
@@ -404,7 +420,6 @@ export default function SiteSyncPage() {
                 {flattenedPages.map((page) => {
                   const isParent = page.level === 0;
                   const isChild = page.level === 1;
-                  // 只有父级且 source_locale === null 才可选中（并且仅当 isEn）
                   const isSelectable = isEn && isParent && page.source_locale === null;
 
                   return (

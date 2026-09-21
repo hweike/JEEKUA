@@ -3,8 +3,21 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import type { GenerationStatus } from '../../../components/StatusBadge';
 import type { PageListItem, Language } from '../types';
+import { PAGE_TYPE_LABELS } from '@/lib/seo/constants';
 
 const PAGE_SIZE = 50;
+
+// 类别与具体类型映射（顺序即下拉显示顺序）
+const CATEGORY_TYPE_MAP: Record<string, string[]> = {
+  product: ['productLine', 'productCollection', 'product'],
+  blog: ['blogCategory', 'blogPost'],
+  doc: ['docLibrary', 'doc'],
+  video: ['videoCategory', 'video'],
+  page: ['home', 'page', 'inquiry', 'policy'],
+};
+
+// ✅ 需要查询 global locale 的类型列表
+const GLOBAL_LOCALE_TYPES = ['docLibrary'];
 
 interface UseSEODataOptions {
   initialLocale?: string;
@@ -13,24 +26,22 @@ interface UseSEODataOptions {
 export function useSEOData(options: UseSEODataOptions = {}) {
   const { initialLocale = 'zh' } = options;
 
-  // 数据状态
   const [pages, setPages] = useState<PageListItem[]>([]);
   const [total, setTotal] = useState(0);
   const [totalPages, setTotalPages] = useState(0);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  // 筛选与分页状态
   const [currentPage, setCurrentPage] = useState(1);
   const [selectedLocale, setSelectedLocale] = useState(initialLocale);
   const [filterStatus, setFilterStatus] = useState<GenerationStatus | 'all'>('all');
   const [filterType, setFilterType] = useState<string>('all');
   const [searchQuery, setSearchQuery] = useState('');
 
-  // 语言列表
+  const [category, setCategoryState] = useState<string | null>('product');
+
   const [languages, setLanguages] = useState<Language[]>([]);
 
-  // 加载语言列表
   const loadLanguages = useCallback(async () => {
     try {
       const res = await fetch('/api/languages/enabled');
@@ -46,17 +57,50 @@ export function useSEOData(options: UseSEODataOptions = {}) {
     }
   }, [initialLocale]);
 
-  // 加载页面列表
+  const setCategory = (newCategory: string | null) => {
+    setCategoryState(newCategory);
+    setFilterType('all');
+    setCurrentPage(1);
+  };
+
+  const handleTypeChange = (type: string) => {
+    setFilterType(type);
+    setCurrentPage(1);
+  };
+
   const loadPages = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
+      let typeParam = '';
+      if (filterType && filterType !== 'all') {
+        typeParam = filterType;
+      } else if (category) {
+        const types = CATEGORY_TYPE_MAP[category];
+        if (types && types.length > 0) {
+          typeParam = types.join(',');
+        }
+      }
+
+      // ✅ 构建 locale 参数：检查是否需要包含 global
+      let localeParam = selectedLocale;
+      if (typeParam) {
+        // 将 typeParam 拆分为数组，检查是否包含需要 global 的类型
+        const types = typeParam.split(',');
+        const needsGlobal = types.some((t) => GLOBAL_LOCALE_TYPES.includes(t));
+        if (needsGlobal) {
+          const locales = [selectedLocale, 'global'];
+          const uniqueLocales = Array.from(new Set(locales));
+          localeParam = uniqueLocales.join(',');
+        }
+      }
+
       const params = new URLSearchParams({
         page: String(currentPage),
         pageSize: String(PAGE_SIZE),
-        locale: selectedLocale,
+        locale: localeParam,
         status: filterStatus,
-        type: filterType,
+        type: typeParam,
         keyword: searchQuery,
       });
       const res = await fetch(`/api/discovery/seo/pages?${params.toString()}`);
@@ -72,15 +116,12 @@ export function useSEOData(options: UseSEODataOptions = {}) {
     } finally {
       setLoading(false);
     }
-  }, [currentPage, selectedLocale, filterStatus, filterType, searchQuery]);
+  }, [currentPage, selectedLocale, filterStatus, filterType, searchQuery, category]);
 
-  // 重置分页并刷新
   const refreshWithReset = useCallback(() => {
     setCurrentPage(1);
-    // 在 useEffect 中会触发 loadPages
   }, []);
 
-  // 当筛选条件变化时重置分页
   const handleLocaleChange = (locale: string) => {
     setSelectedLocale(locale);
     setCurrentPage(1);
@@ -88,11 +129,6 @@ export function useSEOData(options: UseSEODataOptions = {}) {
 
   const handleStatusChange = (status: GenerationStatus | 'all') => {
     setFilterStatus(status);
-    setCurrentPage(1);
-  };
-
-  const handleTypeChange = (type: string) => {
-    setFilterType(type);
     setCurrentPage(1);
   };
 
@@ -106,46 +142,37 @@ export function useSEOData(options: UseSEODataOptions = {}) {
     setCurrentPage(page);
   };
 
-  // 自动加载
   useEffect(() => {
     loadPages();
   }, [loadPages]);
 
-  // 初始化加载语言
   useEffect(() => {
     loadLanguages();
   }, [loadLanguages]);
 
-  // 类型选项
   const typeOptions = useMemo(() => {
-    const types = Array.from(new Set(pages.map((p) => p.type)));
-    return types.map((type) => ({
+    if (!category) return [];
+    const types = CATEGORY_TYPE_MAP[category] || [];
+    return types.map(type => ({
       key: type,
-      label: type,
+      label: PAGE_TYPE_LABELS[type as keyof typeof PAGE_TYPE_LABELS] || type,
     }));
-  }, [pages]);
+  }, [category]);
 
   return {
-    // 数据
     pages,
     total,
     totalPages,
     loading,
     error,
     setError,
-
-    // 筛选与分页
     currentPage,
     selectedLocale,
     filterStatus,
     filterType,
     searchQuery,
     PAGE_SIZE,
-
-    // 语言
     languages,
-
-    // 操作
     loadPages,
     refreshWithReset,
     goToPage,
@@ -153,9 +180,8 @@ export function useSEOData(options: UseSEODataOptions = {}) {
     handleStatusChange,
     handleTypeChange,
     handleSearchChange,
-
-    // 工具
+    category,
+    setCategory,
     typeOptions,
-    setSelectedIds: () => {}, // 由父组件管理
   };
 }

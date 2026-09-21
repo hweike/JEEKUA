@@ -1,5 +1,6 @@
-// app/api/admin/menus/init/route.ts
 import { NextRequest, NextResponse } from 'next/server';
+import { menuService } from '@/lib/menus/menu-service';
+import { clearMenuCache } from '@/lib/menus/storage';
 import { getPrivateStorage } from '@/lib/storage/factory';
 
 export async function POST(req: NextRequest) {
@@ -11,14 +12,17 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Only zh and en support initialization' }, { status: 400 });
     }
 
-    // 允许的菜单类型
+    // 允许的菜单类型（前端传递的是 'navigation' 或 'footer'）
     if (menuType !== 'navigation' && menuType !== 'footer') {
       return NextResponse.json({ error: 'Only navigation and footer can be initialized' }, { status: 400 });
     }
 
-    // 构建预设文件的存储 Key
+    // ✅ 确定数据库中的实际菜单 ID：底部菜单映射为 'footer-menu'
+    const storeId = menuType === 'footer' ? 'footer-menu' : menuType;
+
+    // 构建预设文件的存储 Key（文件名仍使用 'footer'，与菜单类型一致）
     const presetFileName = `${locale}_${menuType}_menus.json`;
-    const presetKey = `data/menus/Preset/${presetFileName}`;
+    const presetKey = `menus/Preset/${presetFileName}`;
 
     const storage = getPrivateStorage();
 
@@ -34,13 +38,14 @@ export async function POST(req: NextRequest) {
 
     const presetMenu = JSON.parse(presetContent);
 
-    // 目标文件存储 Key
-    const targetKey = `data/menus/${locale}/${menuType}.json`;
+    // ✅ 确保 presetMenu 的 id 与 storeId 一致
+    presetMenu.id = storeId;
 
-    // 写入目标文件
-    await storage.write(targetKey, JSON.stringify(presetMenu, null, 2), {
-      contentType: 'application/json',
-    });
+    // ✅ 使用服务层保存菜单到数据库
+    await menuService.saveMenu(storeId, locale, presetMenu);
+
+    // ✅ 清除该菜单的内存缓存（clearMenuCache 内部会将 'footer' 映射为 'footer-menu'）
+    clearMenuCache(locale, menuType);
 
     return NextResponse.json({ success: true });
   } catch (error) {

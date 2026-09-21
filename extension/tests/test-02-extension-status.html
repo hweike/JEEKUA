@@ -1,0 +1,384 @@
+<!-- tests/test-02-extension-status.html -->
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>测试2：插件状态检测</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #f0f2f5; padding: 24px; }
+    .container { max-width: 960px; margin: 0 auto; }
+    h1 { font-size: 24px; margin-bottom: 4px; color: #1a1a2e; display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+    h1 .version { font-size: 12px; font-weight: 400; color: #adb5bd; background: #e9ecef; padding: 2px 12px; border-radius: 12px; }
+    .subtitle { color: #6c757d; font-size: 14px; margin-bottom: 20px; }
+    .card { background: white; border-radius: 12px; padding: 20px; margin-bottom: 16px; box-shadow: 0 2px 8px rgba(0,0,0,0.06); }
+    .card h3 { font-size: 14px; font-weight: 600; color: #495057; margin-bottom: 12px; display: flex; align-items: center; gap: 8px; }
+    .card h3 .badge { font-size: 10px; font-weight: 400; background: #e9ecef; padding: 2px 10px; border-radius: 12px; color: #495057; }
+
+    .step {
+      display: flex;
+      gap: 12px;
+      padding: 8px 0;
+      border-bottom: 1px solid #f1f3f5;
+      font-size: 14px;
+      align-items: flex-start;
+    }
+    .step:last-child { border-bottom: none; }
+    .step .num {
+      background: #1a73e8;
+      color: white;
+      border-radius: 50%;
+      width: 24px;
+      height: 24px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 12px;
+      font-weight: 600;
+      flex-shrink: 0;
+      margin-top: 1px;
+    }
+    .step .content { color: #495057; line-height: 1.6; }
+    .step .content strong { color: #1a1a2e; }
+    .step .content kbd {
+      background: #e9ecef;
+      padding: 1px 8px;
+      border-radius: 4px;
+      font-size: 12px;
+      font-family: inherit;
+    }
+
+    .code-block {
+      background: #1e1e2e;
+      color: #cdd6f4;
+      border-radius: 8px;
+      padding: 16px;
+      font-family: 'Courier New', monospace;
+      font-size: 12px;
+      line-height: 1.8;
+      overflow: auto;
+      max-height: 480px;
+      white-space: pre-wrap;
+      word-break: break-all;
+      position: relative;
+    }
+    .code-block .comment { color: #6c7086; }
+    .code-block .keyword { color: #cba6f7; }
+    .code-block .string { color: #a6e3a1; }
+    .code-block .func { color: #89b4fa; }
+    .code-block .num { color: #fab387; }
+
+    .btn {
+      padding: 8px 20px;
+      border: none;
+      border-radius: 6px;
+      cursor: pointer;
+      font-size: 13px;
+      font-weight: 500;
+      transition: all 0.2s;
+    }
+    .btn-primary { background: #1a73e8; color: white; }
+    .btn-primary:hover { background: #1557b0; }
+    .btn-success { background: #34a853; color: white; }
+    .btn-success:hover { background: #2d9248; }
+    .btn-secondary { background: #e9ecef; color: #495057; }
+    .btn-secondary:hover { background: #dee2e6; }
+    .btn-group { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 12px; }
+
+    .tip {
+      background: #fff3cd;
+      border: 1px solid #ffc107;
+      border-radius: 6px;
+      padding: 12px 16px;
+      font-size: 13px;
+      color: #856404;
+      margin-bottom: 12px;
+    }
+    .tip strong { color: #664d03; }
+    .tip .highlight { background: #ffeeba; padding: 1px 6px; border-radius: 4px; font-weight: 600; }
+
+    .expected {
+      background: #d4edda;
+      border: 1px solid #c3e6cb;
+      border-radius: 6px;
+      padding: 12px 16px;
+      margin-top: 10px;
+      font-size: 13px;
+      color: #155724;
+    }
+    .expected .title { font-weight: 600; margin-bottom: 6px; }
+    .expected pre {
+      background: #f8f9fa;
+      padding: 12px;
+      border-radius: 6px;
+      font-size: 12px;
+      font-family: monospace;
+      color: #495057;
+      overflow: auto;
+      margin-top: 6px;
+    }
+
+    .log-box {
+      background: #1e1e2e;
+      color: #cdd6f4;
+      border-radius: 8px;
+      padding: 14px;
+      font-family: monospace;
+      font-size: 12px;
+      max-height: 150px;
+      overflow: auto;
+      white-space: pre-wrap;
+      line-height: 1.7;
+      margin-top: 10px;
+    }
+    .log-box .ok { color: #a6e3a1; }
+    .log-box .err { color: #f38ba8; }
+    .log-box .warn { color: #f9e2af; }
+    .log-box .info { color: #89b4fa; }
+
+    .toast {
+      position: fixed;
+      bottom: 30px;
+      left: 50%;
+      transform: translateX(-50%);
+      background: #1e1e2e;
+      color: #cdd6f4;
+      padding: 12px 24px;
+      border-radius: 8px;
+      font-size: 14px;
+      opacity: 0;
+      transition: opacity 0.3s ease;
+      z-index: 999;
+      pointer-events: none;
+    }
+    .toast.show { opacity: 1; }
+  </style>
+</head>
+<body>
+<div class="container">
+  <h1>🧪 插件状态检测 <span class="version">v2.1</span></h1>
+  <p class="subtitle">在商品页 Console 中执行检测代码，验证插件各模块状态</p>
+
+  <!-- 重要说明 -->
+  <div class="tip">
+    <strong>⚠️ 重要说明：</strong>
+    <br>
+    1. 此检测代码 <strong>必须在商品页的 Console 中执行</strong>（普通网页无法访问 <code>chrome.runtime</code> API）
+    <br>
+    2. 请先在插件中点击 <span class="highlight">「加载适配器」</span>，否则适配器相关状态会显示为「未加载」
+  </div>
+
+  <!-- 步骤 -->
+  <div class="card">
+    <h3>📋 测试步骤</h3>
+    <div class="step">
+      <div class="num">1</div>
+      <div class="content"><strong>打开商品页</strong><br>在浏览器中打开阿里国际站或1688的商品详情页</div>
+    </div>
+    <div class="step">
+      <div class="num">2</div>
+      <div class="content"><strong>加载适配器（必须）</strong><br>点击插件图标 → 点击 <span class="highlight">「加载适配器」</span>，等待加载完成</div>
+    </div>
+    <div class="step">
+      <div class="num">3</div>
+      <div class="content"><strong>打开开发者工具</strong><br>按 <kbd>F12</kbd> 或 <kbd>⌘+⌥+I</kbd>，切换到 <strong>Console</strong> 标签</div>
+    </div>
+    <div class="step">
+      <div class="num">4</div>
+      <div class="content"><strong>复制并执行检测代码</strong><br>点击下方「📋 复制检测代码」，在 Console 中粘贴并回车</div>
+    </div>
+  </div>
+
+  <!-- 检测代码 -->
+  <div class="card">
+    <h3>
+      📝 检测代码
+      <span class="badge">复制 → 粘贴到 Console</span>
+    </h3>
+    <div class="code-block" id="codeBlock">
+      <span class="comment">// ============================================================</span>
+      <span class="comment">// 插件状态检测代码 - 在商品页 Console 中执行</span>
+      <span class="comment">// ⚠️ 请先在插件中点击「加载适配器」</span>
+      <span class="comment">// ============================================================</span>
+
+      <span class="keyword">console</span>.<span class="func">log</span>(<span class="string">'🔍 ===== 插件状态检测 ====='</span>);
+
+      <span class="comment">// 1. 检测 chrome.runtime</span>
+      <span class="keyword">const</span> hasRuntime = <span class="keyword">typeof</span> chrome !== <span class="string">'undefined'</span> && chrome.runtime;
+      <span class="keyword">console</span>.<span class="func">log</span>(<span class="string">'1. chrome.runtime 可用:'</span>, hasRuntime);
+
+      <span class="keyword">if</span> (!hasRuntime) {
+        <span class="keyword">console</span>.<span class="func">log</span>(<span class="string">'❌ 当前页面不在插件上下文中，请在商品页执行'</span>);
+      } <span class="keyword">else</span> {
+        <span class="comment">// 2. Ping 测试</span>
+        chrome.runtime.<span class="func">sendMessage</span>({ action: <span class="string">'ping'</span> }, (response) => {
+          <span class="keyword">console</span>.<span class="func">log</span>(<span class="string">'2. ping 响应:'</span>, response);
+          <span class="keyword">console</span>.<span class="func">log</span>(<span class="string">'   lastError:'</span>, chrome.runtime.lastError);
+        });
+
+        <span class="comment">// 3. 获取详细状态</span>
+        chrome.runtime.<span class="func">sendMessage</span>({ action: <span class="string">'getStatus'</span> }, (status) => {
+          <span class="keyword">console</span>.<span class="func">log</span>(<span class="string">'3. getStatus 响应:'</span>, status);
+          <span class="keyword">if</span> (status && status.success) {
+            <span class="keyword">console</span>.<span class="func">log</span>(<span class="string">'   平台:'</span>, status.platformId);
+            <span class="keyword">console</span>.<span class="func">log</span>(<span class="string">'   支持采集:'</span>, status.isSupported);
+            <span class="keyword">console</span>.<span class="func">log</span>(<span class="string">'   适配器已加载:'</span>, status.isLoaded);
+            <span class="keyword">console</span>.<span class="func">log</span>(<span class="string">'   连接状态:'</span>, status.connectionStatus);
+          }
+        });
+      }
+
+      <span class="comment">// 4. 检测 window.__adapters</span>
+      <span class="keyword">console</span>.<span class="func">log</span>(<span class="string">'4. window.__adapters:'</span>, window.__adapters);
+      <span class="keyword">if</span> (window.__adapters) {
+        <span class="keyword">console</span>.<span class="func">log</span>(<span class="string">'   已加载:'</span>, <span class="func">Object.keys</span>(window.__adapters));
+      }
+
+      <span class="comment">// 5. 检测悬浮窗</span>
+      <span class="keyword">const</span> hasFloatBtn = !!document.<span class="func">querySelector</span>(<span class="string">'.jeekua-float-btn'</span>);
+      <span class="keyword">console</span>.<span class="func">log</span>(<span class="string">'5. 悬浮窗:'</span>, hasFloatBtn ? <span class="string">'✅ 已存在'</span> : <span class="string">'⏳ 未加载'</span>);
+
+      <span class="comment">// 6. 页面信息</span>
+      <span class="keyword">console</span>.<span class="func">log</span>(<span class="string">'6. 页面 URL:'</span>, window.location.href);
+      <span class="keyword">console</span>.<span class="func">log</span>(<span class="string">'🔍 ===== 检测完成 ====='</span>);
+    </div>
+    <div class="btn-group">
+      <button class="btn btn-primary" id="copyBtn">📋 复制检测代码</button>
+      <button class="btn btn-secondary" id="copyAllBtn">📋 复制完整命令</button>
+    </div>
+  </div>
+
+  <!-- 预期结果 -->
+  <div class="card">
+    <h3>✅ 预期结果</h3>
+    <div class="expected">
+      <div class="title">正常输出示例（加载适配器后）：</div>
+      <pre>
+🔍 ===== 插件状态检测 =====
+1. chrome.runtime 可用: true
+2. ping 响应: {success: true, message: 'pong'}
+   lastError: undefined
+3. getStatus 响应: {success: true, isSupported: true, platformId: 'alibaba', isLoaded: true}
+   平台: alibaba
+   支持采集: true
+   适配器已加载: true
+   连接状态: connected
+4. window.__adapters: {BaseAdapter: ƒ, AlibabaAdapter: ƒ}
+   已加载: ['BaseAdapter', 'AlibabaAdapter']
+5. 悬浮窗: ✅ 已存在
+6. 页面 URL: https://www.alibaba.com/product-detail/...
+🔍 ===== 检测完成 =====</pre>
+    </div>
+  </div>
+
+  <!-- 日志 -->
+  <div class="card">
+    <h3>📝 操作日志</h3>
+    <div class="log-box" id="log">
+      <span class="info">▶ 测试页面已加载</span>
+    </div>
+  </div>
+</div>
+
+<!-- Toast -->
+<div class="toast" id="toast"></div>
+
+<script>
+function showToast(msg) {
+  const el = document.getElementById('toast');
+  el.textContent = msg;
+  el.classList.add('show');
+  clearTimeout(el._timer);
+  el._timer = setTimeout(() => el.classList.remove('show'), 2000);
+}
+
+const logEl = document.getElementById('log');
+function log(msg, type = 'info') {
+  const time = new Date().toLocaleTimeString();
+  const cls = type === 'ok' ? 'ok' : type === 'err' ? 'err' : type === 'warn' ? 'warn' : 'info';
+  logEl.innerHTML += `<div class="${cls}">[${time}] ${msg}</div>`;
+  logEl.scrollTop = logEl.scrollHeight;
+  console.log('[Test]', msg);
+}
+
+function copyToClipboard(text, successMsg = '✅ 已复制') {
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    navigator.clipboard.writeText(text).then(() => showToast(successMsg)).catch(() => fallbackCopy(text));
+  } else {
+    fallbackCopy(text);
+  }
+}
+
+function fallbackCopy(text) {
+  const textarea = document.createElement('textarea');
+  textarea.value = text;
+  textarea.style.position = 'fixed';
+  textarea.style.opacity = '0';
+  document.body.appendChild(textarea);
+  textarea.select();
+  try {
+    document.execCommand('copy');
+    showToast('✅ 已复制');
+  } catch (e) {
+    showToast('❌ 复制失败，请手动选择');
+  }
+  document.body.removeChild(textarea);
+}
+
+document.getElementById('copyBtn').addEventListener('click', function() {
+  const code = document.getElementById('codeBlock').textContent;
+  copyToClipboard(code, '✅ 检测代码已复制');
+  log('📋 检测代码已复制', 'ok');
+});
+
+document.getElementById('copyAllBtn').addEventListener('click', function() {
+  const fullCommand = `
+// ============================================================
+// 插件状态检测 - 直接复制到 Console 执行
+// ⚠️ 请先在插件中点击「加载适配器」
+// ============================================================
+
+console.log('🔍 ===== 插件状态检测 =====');
+const hasRuntime = typeof chrome !== 'undefined' && chrome.runtime;
+console.log('1. chrome.runtime 可用:', hasRuntime);
+
+if (!hasRuntime) {
+  console.log('❌ 当前页面不在插件上下文中，请在商品页执行');
+} else {
+  chrome.runtime.sendMessage({ action: 'ping' }, (response) => {
+    console.log('2. ping 响应:', response);
+    console.log('   lastError:', chrome.runtime.lastError);
+  });
+
+  chrome.runtime.sendMessage({ action: 'getStatus' }, (status) => {
+    console.log('3. getStatus 响应:', status);
+    if (status && status.success) {
+      console.log('   平台:', status.platformId);
+      console.log('   支持采集:', status.isSupported);
+      console.log('   适配器已加载:', status.isLoaded);
+      console.log('   连接状态:', status.connectionStatus);
+    }
+  });
+}
+
+console.log('4. window.__adapters:', window.__adapters);
+if (window.__adapters) {
+  console.log('   已加载的适配器:', Object.keys(window.__adapters));
+}
+
+const hasFloatBtn = !!document.querySelector('.jeekua-float-btn');
+console.log('5. 悬浮窗:', hasFloatBtn ? '✅ 已存在' : '⏳ 未加载');
+
+console.log('6. 页面 URL:', window.location.href);
+console.log('🔍 ===== 检测完成 =====');
+`;
+  copyToClipboard(fullCommand, '✅ 完整命令已复制');
+  log('📋 完整命令已复制', 'ok');
+});
+
+log('🚀 测试页面已加载', 'info');
+log('💡 1. 先在插件中点击「加载适配器」', 'info');
+log('💡 2. 再点击「复制检测代码」在商品页 Console 中执行', 'info');
+</script>
+</body>
+</html>

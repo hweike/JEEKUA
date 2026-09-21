@@ -3,7 +3,7 @@ import type { ComponentConfig } from '@puckeditor/core';
 import type { Components } from '../types';
 
 export const config: ComponentConfig<Components['VideoCategoryBlock']> = {
-  label: '视频分类展示',
+  label: '视频合集落地页',
   defaultProps: {
     showSidebar: true,
     videosPerRow: 3,

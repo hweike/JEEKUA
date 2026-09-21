@@ -28,7 +28,7 @@ export default function MenuSelectPopup({ value, onChange, locale, label }: Menu
     const fetchMenus = async () => {
       setLoading(true);
       try {
-        const res = await fetch(`/api/admin/menus/list?locale=${locale}`);
+        const res = await fetch(`/api/admin/menus?locale=${locale}`);
         if (!res.ok) throw new Error('获取菜单失败');
         const data = await res.json();
         // 实例中返回的是直接数组，如 [{ id, name, type }, ...]

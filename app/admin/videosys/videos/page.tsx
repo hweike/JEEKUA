@@ -3,11 +3,12 @@
 import React, { useEffect, useState, useCallback, useMemo, useRef } from 'react';
 import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
-import { ChevronDown, ChevronRight, Plus, Pencil, Trash2, Search } from 'lucide-react';
+import { ChevronDown, ChevronRight, Plus, Pencil, Trash2 } from 'lucide-react';
 import LanguageSelector from '@/components/common/LanguageSelector';
 import { useToast } from '@/contexts/ToastContext';
 import { getLanguageDisplayName } from '@/lib/languages/config';
 import AiHelperVideoModal from './components/AiHelperVideoModal';
+import VideoPreviewModal from '@/components/videosys-admin/VideoPreviewModal';
 
 interface Video {
   id: string;
@@ -26,6 +27,40 @@ interface VideoGroup {
   versions: Record<string, Video | null>;
 }
 
+// ---------- sessionStorage 缓存工具 ----------
+const CACHE_PREFIX = 'videosys_';
+const CACHE_TTL = 5 * 60 * 1000; // 5 分钟
+
+function readCache<T>(key: string): T | null {
+  try {
+    const raw = sessionStorage.getItem(CACHE_PREFIX + key);
+    if (!raw) return null;
+    const { data, timestamp } = JSON.parse(raw);
+    if (Date.now() - timestamp > CACHE_TTL) {
+      sessionStorage.removeItem(CACHE_PREFIX + key);
+      return null;
+    }
+    return data as T;
+  } catch {
+    return null;
+  }
+}
+
+function writeCache<T>(key: string, data: T): void {
+  try {
+    sessionStorage.setItem(
+      CACHE_PREFIX + key,
+      JSON.stringify({ data, timestamp: Date.now() })
+    );
+  } catch {}
+}
+
+function clearCache(key: string): void {
+  try {
+    sessionStorage.removeItem(CACHE_PREFIX + key);
+  } catch {}
+}
+
 export default function VideosList() {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -42,11 +77,24 @@ export default function VideosList() {
   const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set());
   const [showAiHelper, setShowAiHelper] = useState(false);
   const [selectedVideo, setSelectedVideo] = useState<{ id: string; title: string } | null>(null);
+  const [playModalOpen, setPlayModalOpen] = useState(false);
+  const [playingVideo, setPlayingVideo] = useState<{
+    source_type: 'youtube' | 'vimeo' | 'bilibili';
+    video_id: string;
+    title: string;
+  } | null>(null);
 
   const initialLoadRef = useRef(false);
 
-  // 获取所有启用的语言
+  // ---------- 语言列表 ----------
   const fetchAvailableLocales = useCallback(async () => {
+    // 先读缓存
+    const cached = readCache<string[]>('available_locales');
+    if (cached && Array.isArray(cached) && cached.length > 0) {
+      setAvailableLocales(cached);
+      return;
+    }
+
     try {
       const res = await fetch('/api/languages/enabled');
       const data = await res.json();
@@ -60,15 +108,24 @@ export default function VideosList() {
       } else if (data && Array.isArray(data.locales)) {
         locales = data.locales;
       }
-      setAvailableLocales(locales.length > 0 ? locales : ['zh', 'en']);
+      const finalLocales = locales.length > 0 ? locales : ['zh', 'en'];
+      setAvailableLocales(finalLocales);
+      writeCache('available_locales', finalLocales);
     } catch (error) {
       console.error('获取语言列表失败:', error);
       setAvailableLocales(['zh', 'en']);
     }
   }, []);
 
-  // 加载分类列表
+  // ---------- 分类列表 ----------
   const loadCategories = useCallback(async () => {
+    const cacheKey = `categories_${locale}`;
+    const cached = readCache<{ key: string; name: string }[]>(cacheKey);
+    if (cached) {
+      setCategories(cached);
+      return;
+    }
+
     try {
       const res = await fetch(`/api/admin/videosys-categories?locale=${locale}`);
       const data = await res.json();
@@ -77,32 +134,58 @@ export default function VideosList() {
         name: cat.name,
       }));
       setCategories(items);
+      writeCache(cacheKey, items);
     } catch (error) {
       console.error('加载分类失败:', error);
     }
   }, [locale]);
 
-  // 加载所有语言的视频数据
+  // ---------- 所有语言视频数据 ----------
+  const fetchAndUpdateVideos = useCallback(
+    async (cacheKey: string) => {
+      try {
+        const res = await fetch(
+          `/api/admin/videosys-videos?locales=${availableLocales.join(',')}`
+        );
+        if (!res.ok) throw new Error('加载失败');
+        const data = await res.json();
+        const cleaned: Record<string, Video[]> = {};
+        Object.keys(data).forEach((loc) => {
+          cleaned[loc] = Array.isArray(data[loc]) ? data[loc] : [];
+        });
+        setAllData(cleaned);
+        writeCache(cacheKey, cleaned);
+      } catch (error) {
+        showToast('加载视频失败', 'error');
+      }
+    },
+    [availableLocales, showToast]
+  );
+
   const loadAllVideos = useCallback(async () => {
     if (availableLocales.length === 0) return;
+    const cacheKey = `videos_${availableLocales.slice().sort().join(',')}`;
+    const cached = readCache<Record<string, Video[]>>(cacheKey);
+
+    // 先用缓存渲染，避免白屏
+    if (cached) {
+      setAllData(cached);
+      setLoading(false);
+      // 后台静默刷新
+      fetchAndUpdateVideos(cacheKey);
+      return;
+    }
+
+    // 无缓存，走正常请求
     setLoading(true);
     try {
-      const res = await fetch(`/api/admin/videosys-videos?locales=${availableLocales.join(',')}`);
-      if (!res.ok) throw new Error('加载失败');
-      const data = await res.json();
-      const cleaned: Record<string, Video[]> = {};
-      Object.keys(data).forEach(loc => {
-        cleaned[loc] = Array.isArray(data[loc]) ? data[loc] : [];
-      });
-      setAllData(cleaned);
-    } catch (error) {
-      showToast('加载视频失败', 'error');
+      await fetchAndUpdateVideos(cacheKey);
     } finally {
       setLoading(false);
     }
-  }, [availableLocales, showToast]);
+  }, [availableLocales, fetchAndUpdateVideos]);
 
-  // 初始化
+  // ---------- 初始化 ----------
   useEffect(() => {
     if (!initialLoadRef.current) {
       initialLoadRef.current = true;
@@ -120,14 +203,13 @@ export default function VideosList() {
     if (availableLocales.length > 0) {
       loadAllVideos();
     }
-  }, [availableLocales]);
+  }, [availableLocales, loadAllVideos]);
 
-  // 聚合分组
+  // ---------- 聚合分组 ----------
   useEffect(() => {
-    const allLocaleCodes = Array.from(new Set([
-      ...availableLocales,
-      ...Object.keys(allData)
-    ]));
+    const allLocaleCodes = Array.from(
+      new Set([...availableLocales, ...Object.keys(allData)])
+    );
 
     const idMap: Record<string, VideoGroup> = {};
 
@@ -136,7 +218,9 @@ export default function VideosList() {
       list.forEach((video) => {
         if (!idMap[video.id]) {
           idMap[video.id] = { id: video.id, versions: {} };
-          allLocaleCodes.forEach((l) => { idMap[video.id].versions[l] = null; });
+          allLocaleCodes.forEach((l) => {
+            idMap[video.id].versions[l] = null;
+          });
         }
         idMap[video.id].versions[loc] = video;
       });
@@ -162,13 +246,13 @@ export default function VideosList() {
     let result = groups;
     if (searchTerm.trim()) {
       const lower = searchTerm.toLowerCase();
-      result = result.filter(group => {
+      result = result.filter((group) => {
         const current = group.versions[locale];
         return current && current.title.toLowerCase().includes(lower);
       });
     }
     if (selectedCategory) {
-      result = result.filter(group => {
+      result = result.filter((group) => {
         const current = group.versions[locale];
         return current && current.category_key === selectedCategory;
       });
@@ -184,22 +268,37 @@ export default function VideosList() {
     let result = currentLocaleVideos;
     if (searchTerm.trim()) {
       const lower = searchTerm.toLowerCase();
-      result = result.filter(v => v.title.toLowerCase().includes(lower));
+      result = result.filter((v) => v.title.toLowerCase().includes(lower));
     }
     if (selectedCategory) {
-      result = result.filter(v => v.category_key === selectedCategory);
+      result = result.filter((v) => v.category_key === selectedCategory);
     }
     return result;
   }, [currentLocaleVideos, searchTerm, selectedCategory]);
 
-  const handleDelete = async (id: string, locale: string, title: string) => {
-    if (!confirm(`确定删除视频“${title}” (${locale}) 吗？`)) return;
+  // ---------- 播放视频 ----------
+  const handleTitleClick = (video: Video) => {
+    setPlayingVideo({
+      source_type: video.source_type,
+      video_id: video.video_id,
+      title: video.title,
+    });
+    setPlayModalOpen(true);
+  };
+
+  // ---------- 删除 ----------
+  const handleDelete = async (id: string, loc: string, title: string) => {
+    if (!confirm(`确定删除视频“${title}” (${loc}) 吗？`)) return;
     try {
-      const res = await fetch(`/api/admin/videosys-videos?locale=${locale}&id=${id}`, {
+      const res = await fetch(`/api/admin/videosys-videos?locale=${loc}&id=${id}`, {
         method: 'DELETE',
       });
       if (!res.ok) throw new Error('删除失败');
       showToast('删除成功', 'success');
+
+      // 清除缓存后再加载
+      const cacheKey = `videos_${availableLocales.slice().sort().join(',')}`;
+      clearCache(cacheKey);
       await loadAllVideos();
     } catch (error) {
       showToast('删除失败', 'error');
@@ -221,7 +320,7 @@ export default function VideosList() {
   const isCollapsibleMode = locale === 'zh' || locale === 'en';
 
   const getCategoryName = (key: string) => {
-    const cat = categories.find(c => c.key === key);
+    const cat = categories.find((c) => c.key === key);
     return cat ? cat.name : key;
   };
 
@@ -230,6 +329,11 @@ export default function VideosList() {
     const date = new Date(dateStr);
     if (isNaN(date.getTime())) return dateStr;
     return date.toISOString().split('T')[0];
+  };
+
+  // 语言站标签
+  const getLocaleStationLabel = (loc: string) => {
+    return `${getLanguageDisplayName(loc, 'zh')}站`;
   };
 
   if (loading) return <div className="p-6 text-center">加载中...</div>;
@@ -254,30 +358,31 @@ export default function VideosList() {
       </div>
 
       {/* 搜索与分类筛选 */}
-      <div className="mb-6 flex flex-wrap items-center gap-3">
-        <input
-          type="text"
-          placeholder="搜索当前语言视频标题..."
-          value={searchTerm}
-          onChange={(e) => setSearchTerm(e.target.value)}
-          className="border rounded-lg px-3 py-2 w-64 focus:outline-none focus:ring-2 focus:ring-blue-500"
-        />
-        <select
-          value={selectedCategory}
-          onChange={(e) => setSelectedCategory(e.target.value)}
-          className="border rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
-        >
-          <option value="">全部分类</option>
-          {categories.map(cat => (
-            <option key={cat.key} value={cat.key}>{cat.name}</option>
-          ))}
-        </select>
-        <button className="bg-gray-100 hover:bg-gray-200 px-4 py-2 rounded-lg flex items-center gap-1">
-          <Search size={16} /> 搜索
-        </button>
+      <div className="mb-6 w-full">
+        <div className="flex flex-wrap items-center gap-3 w-full">
+          <input
+            type="text"
+            placeholder="搜索当前语言视频标题..."
+            value={searchTerm}
+            onChange={(e) => setSearchTerm(e.target.value)}
+            className="border rounded-lg px-3 py-2 flex-1 focus:outline-none focus:ring-2 focus:ring-blue-500"
+          />
+          <select
+            value={selectedCategory}
+            onChange={(e) => setSelectedCategory(e.target.value)}
+            className="border rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500 flex-shrink-0"
+          >
+            <option value="">全部分类</option>
+            {categories.map((cat) => (
+              <option key={cat.key} value={cat.key}>
+                {cat.name}
+              </option>
+            ))}
+          </select>
+        </div>
       </div>
 
-      {/* 表格 - 使用 table-fixed 控制宽度 */}
+      {/* 表格 */}
       <div className="bg-white shadow overflow-hidden sm:rounded-md overflow-x-hidden">
         <table className="w-full table-fixed divide-y divide-gray-200">
           <thead className="bg-gray-50">
@@ -301,8 +406,10 @@ export default function VideosList() {
               filteredGroups.map((group) => {
                 const current = getCurrentVideo(group);
                 const isExpanded = expandedIds.has(group.id);
-                const hasChildren = Object.values(group.versions).some(v => v !== null);
-                const otherLocales = Array.from(new Set([...availableLocales, ...Object.keys(allData)])).filter(loc => loc !== locale);
+                const hasChildren = Object.values(group.versions).some((v) => v !== null);
+                const otherLocales = Array.from(
+                  new Set([...availableLocales, ...Object.keys(allData)])
+                ).filter((loc) => loc !== locale);
 
                 return (
                   <React.Fragment key={group.id}>
@@ -318,11 +425,19 @@ export default function VideosList() {
                               {isExpanded ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
                             </button>
                           )}
-                          <span
-                            className="font-medium text-gray-900 truncate"
-                            title={current?.title || ''}
-                          >
-                            {current?.title || `${getLanguageDisplayName(locale, 'zh')}（未设置）`}
+                          <span className="text-sm truncate min-w-0" title={current?.title || ''}>
+                            <span className="font-bold text-gray-900 flex-shrink-0">
+                              {getLocaleStationLabel(locale)}
+                            </span>{' '}
+                            <span
+                              className="text-gray-900 cursor-pointer hover:text-blue-600"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                if (current) handleTitleClick(current);
+                              }}
+                            >
+                              {current?.title || '（未设置）'}
+                            </span>
                           </span>
                         </div>
                       </td>
@@ -355,7 +470,10 @@ export default function VideosList() {
                               <Pencil size={16} className="inline" /> 编辑
                             </Link>
                             <button
-                              onClick={(e) => { e.stopPropagation(); handleDelete(group.id, locale, current.title); }}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleDelete(group.id, locale, current.title);
+                              }}
                               className="text-red-600 hover:text-red-800 whitespace-nowrap"
                             >
                               <Trash2 size={16} className="inline" /> 删除
@@ -384,12 +502,20 @@ export default function VideosList() {
                           <tr key={`${group.id}-${loc}`} className="bg-gray-50 hover:bg-gray-100">
                             <td className="px-6 py-3 pl-12 w-[50%] min-w-0 overflow-hidden">
                               <div className="flex items-center gap-2 min-w-0">
-                                <span className="text-sm font-medium text-gray-500 w-16 flex-shrink-0">
-                                  {getLanguageDisplayName(loc, 'zh')}
+                                <span className="text-sm font-bold text-gray-700 w-20 flex-shrink-0">
+                                  {getLocaleStationLabel(loc)}
                                 </span>
                                 <span
-                                  className={`text-sm ${exists ? 'text-gray-900' : 'text-gray-400'} truncate`}
+                                  className={`text-sm ${
+                                    exists
+                                      ? 'text-gray-900 cursor-pointer hover:text-blue-600'
+                                      : 'text-gray-400'
+                                  } truncate`}
                                   title={exists ? video.title : ''}
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    if (video) handleTitleClick(video);
+                                  }}
                                 >
                                   {exists ? video.title : '（未设置）'}
                                 </span>
@@ -428,16 +554,14 @@ export default function VideosList() {
                                     <Trash2 size={14} className="inline" /> 删除
                                   </button>
                                 </div>
-                              ) : (
-                                isZhOrEn ? (
-                                  <Link
-                                    href={`/admin/videosys/videos/new?locale=${loc}&id=${group.id}`}
-                                    className="text-blue-600 hover:text-blue-800 text-sm whitespace-nowrap"
-                                  >
-                                    <Plus size={14} className="inline" /> 新增
-                                  </Link>
-                                ) : null
-                              )}
+                              ) : isZhOrEn ? (
+                                <Link
+                                  href={`/admin/videosys/videos/new?locale=${loc}&id=${group.id}`}
+                                  className="text-blue-600 hover:text-blue-800 text-sm whitespace-nowrap"
+                                >
+                                  <Plus size={14} className="inline" /> 新增
+                                </Link>
+                              ) : null}
                             </td>
                           </tr>
                         );
@@ -450,8 +574,16 @@ export default function VideosList() {
               filteredSimple.map((video) => (
                 <tr key={video.id} className="hover:bg-gray-50">
                   <td className="px-6 py-4 w-[50%] min-w-0 overflow-hidden">
-                    <span className="font-medium text-gray-900 truncate block" title={video.title}>
-                      {video.title}
+                    <span className="text-sm truncate block" title={video.title}>
+                      <span className="font-bold text-gray-900">
+                        {getLocaleStationLabel(locale)}
+                      </span>{' '}
+                      <span
+                        className="text-gray-900 cursor-pointer hover:text-blue-600"
+                        onClick={() => handleTitleClick(video)}
+                      >
+                        {video.title}
+                      </span>
                     </span>
                   </td>
                   <td className="px-6 py-4 text-sm text-gray-700 truncate">
@@ -517,9 +649,23 @@ export default function VideosList() {
           videoTitle={selectedVideo.title}
           onClose={() => setShowAiHelper(false)}
           onImportSuccess={() => {
+            // 清除缓存并刷新
+            const cacheKey = `videos_${availableLocales.slice().sort().join(',')}`;
+            clearCache(cacheKey);
             loadAllVideos();
             setShowAiHelper(false);
           }}
+        />
+      )}
+
+      {/* 视频播放模态框 */}
+      {playModalOpen && playingVideo && (
+        <VideoPreviewModal
+          isOpen={playModalOpen}
+          onClose={() => setPlayModalOpen(false)}
+          source={playingVideo.source_type}
+          videoId={playingVideo.video_id}
+          title={playingVideo.title}
         />
       )}
     </div>

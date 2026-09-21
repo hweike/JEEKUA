@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { ChevronLeft, ChevronRight } from 'lucide-react';
 import { getImageUrl } from '@/lib/files/url';
 import { DEFAULT_MULTICOLUMN } from '@/lib/webbuilder/defaults/Multicolumn';
@@ -21,6 +21,10 @@ const IMAGE_WIDTH_MAP = {
   third: 'w-1/3',
 } as const;
 
+// ✅ 动画参数（硬编码）
+const ANIMATION_DURATION_MS = 600;
+const ANIMATION_DELAY_STEP_MS = 80;
+
 export function Multicolumn(props: any) {
   const isEditMode = !!props.puck?.isEditing;
 
@@ -34,7 +38,6 @@ export function Multicolumn(props: any) {
   const spacingGroup = { ...DEFAULT_MULTICOLUMN.spacingGroup, ...props.spacingGroup };
   const mergedItems = props.items ?? DEFAULT_MULTICOLUMN.items;
 
-  // ✅ 解构 buttonGroup，包含所有字段
   const buttonGroup = { ...DEFAULT_MULTICOLUMN.buttonGroup, ...props.buttonGroup };
   const {
     buttonText,
@@ -48,7 +51,6 @@ export function Multicolumn(props: any) {
 
   const mobileScaleFactor = spacingGroup.mobileScaleFactor ?? 0.7;
 
-  // Alt 自动生成
   const __runtime = props.__runtime || {};
   const seoTitle = __runtime.seoTitle || '';
   const locale = __runtime.locale || 'zh';
@@ -64,6 +66,39 @@ export function Multicolumn(props: any) {
     window.addEventListener('resize', checkMobile);
     return () => window.removeEventListener('resize', checkMobile);
   }, []);
+
+  // ✅ 滚动进入动画状态
+  const containerRef = useRef<HTMLDivElement>(null);
+  const [visible, setVisible] = useState(false);
+
+  useEffect(() => {
+    // 编辑模式：直接显示（不做动画，避免干扰编辑）
+    if (isEditMode) {
+      setVisible(true);
+      return;
+    }
+
+    const el = containerRef.current;
+    if (!el) {
+      setVisible(true);
+      return;
+    }
+
+    const observer = new IntersectionObserver(
+      (entries) => {
+        entries.forEach((entry) => {
+          if (entry.isIntersecting) {
+            setVisible(true);
+            observer.unobserve(entry.target);
+          }
+        });
+      },
+      { threshold: 0.15 }
+    );
+
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [isEditMode]);
 
   const useCarousel = isMobile && layoutGroup.mobileCarousel && mergedItems.length > layoutGroup.columnsMobile;
 
@@ -141,7 +176,6 @@ export function Multicolumn(props: any) {
     alignItems: layoutGroup.columnsAlign === 'center' ? 'center' : 'flex-start',
   };
 
-  // ✅ 使用解构出的按钮样式字段
   const buttonStyle: React.CSSProperties = {
     fontSize: buttonFontClamp,
     backgroundColor: buttonColor,
@@ -177,57 +211,76 @@ export function Multicolumn(props: any) {
     justifyContent: layoutGroup.columnsAlign === 'center' ? 'center' : 'flex-start',
   };
 
-  const renderColumns = () => {
-    const columnElements = mergedItems.map((item: any, idx: number) => {
-      const alt = seoTitle ? `${seoTitle} - ${suffix} ${idx + 1}` : `${suffix} ${idx + 1}`;
-      const displayImageUrl = getDisplayImageUrl(item.imageUrl, isEditMode);
+  // ✅ 单个列的动画包装
+  const renderAnimatedColumn = (item: any, idx: number, keyPrefix: string = 'col') => {
+    const alt = seoTitle ? `${seoTitle} - ${suffix} ${idx + 1}` : `${suffix} ${idx + 1}`;
+    const displayImageUrl = getDisplayImageUrl(item.imageUrl, isEditMode);
 
-      return (
-        <div key={idx} style={{ display: 'flex', justifyContent: 'center', width: '100%' }}>
-          <div style={columnStyle}>
-            {item.imageUrl && (
-              <div className={`${imageWidthClass} mb-4 ${layoutGroup.columnsAlign === 'center' ? 'mx-auto' : 'ml-0 mr-auto'}`}>
-                {displayImageUrl ? (
-                  <img
-                    src={displayImageUrl}
-                    alt={alt}
-                    className={imageClassName}
-                    loading="lazy"
-                  />
-                ) : (
-                  <div className="w-full h-48 flex items-center justify-center bg-gray-100 text-gray-400 rounded-lg">
-                    图片加载失败
-                  </div>
-                )}
-              </div>
-            )}
-            {item.title && (
-              <h3 className="text-xl font-semibold mb-2 w-full" style={{ color: styleGroup.columnTitleColor }}>
-                {item.title}
-              </h3>
-            )}
-            {item.description && (
-              <p className="text-sm mb-4 flex-grow w-full" style={{ color: styleGroup.columnDescColor }}>
-                {item.description}
-              </p>
-            )}
-            {item.buttonLabel && item.buttonLink && (
-              <a
-                href={item.buttonLink}
-                className="inline-flex items-center gap-1 mt-2 hover:opacity-70 transition"
-                style={{ color: styleGroup.columnDescColor, textDecoration: 'none' }}
-                target="_blank"
-                rel="noopener noreferrer"
-              >
-                {item.buttonLabel}
-                <ChevronRight size={14} />
-              </a>
-            )}
-          </div>
+    // 编辑模式：不做动画（用户操作时不能延迟响应）
+    const showThisColumn = isEditMode || visible;
+
+    return (
+      <div
+        key={`${keyPrefix}-${idx}`}
+        style={{
+          display: 'flex',
+          justifyContent: 'center',
+          width: '100%',
+          // ✅ 动画：从下方 24px + 透明 → 原位 + 不透明
+          opacity: showThisColumn ? 1 : 0,
+          transform: showThisColumn ? 'translateY(0)' : 'translateY(24px)',
+          transition: `opacity ${ANIMATION_DURATION_MS}ms ease-out ${
+            idx * ANIMATION_DELAY_STEP_MS
+          }ms, transform ${ANIMATION_DURATION_MS}ms ease-out ${
+            idx * ANIMATION_DELAY_STEP_MS
+          }ms`,
+        }}
+      >
+        <div style={columnStyle}>
+          {item.imageUrl && (
+            <div className={`${imageWidthClass} mb-4 ${layoutGroup.columnsAlign === 'center' ? 'mx-auto' : 'ml-0 mr-auto'}`}>
+              {displayImageUrl ? (
+                <img
+                  src={displayImageUrl}
+                  alt={alt}
+                  className={imageClassName}
+                  loading="lazy"
+                />
+              ) : (
+                <div className="w-full h-48 flex items-center justify-center bg-gray-100 text-gray-400 rounded-lg">
+                  图片加载失败
+                </div>
+              )}
+            </div>
+          )}
+          {item.title && (
+            <h3 className="text-xl font-semibold mb-2 w-full" style={{ color: styleGroup.columnTitleColor }}>
+              {item.title}
+            </h3>
+          )}
+          {item.description && (
+            <p className="text-sm mb-4 flex-grow w-full" style={{ color: styleGroup.columnDescColor }}>
+              {item.description}
+            </p>
+          )}
+          {item.buttonLabel && item.buttonLink && (
+            <a
+              href={item.buttonLink}
+              className="inline-flex items-center gap-1 mt-2 hover:opacity-70 transition"
+              style={{ color: styleGroup.columnDescColor, textDecoration: 'none' }}
+              target="_blank"
+              rel="noopener noreferrer"
+            >
+              {item.buttonLabel}
+              <ChevronRight size={14} />
+            </a>
+          )}
         </div>
-      );
-    });
+      </div>
+    );
+  };
 
+  const renderColumns = () => {
     if (useCarousel) {
       const slidesCount = Math.ceil(mergedItems.length / layoutGroup.columnsMobile);
       const startIdx = currentSlide * layoutGroup.columnsMobile;
@@ -237,7 +290,7 @@ export function Multicolumn(props: any) {
       return (
         <div className="relative">
           <div style={mobileGridStyle} className="md:hidden">
-            {visibleIndices.map((idx: number) => columnElements[idx])}
+            {visibleIndices.map((idx: number) => renderAnimatedColumn(mergedItems[idx], idx, 'carousel'))}
           </div>
           {slidesCount > 1 && (
             <div className="flex justify-center items-center gap-4 mt-6 md:hidden">
@@ -251,26 +304,43 @@ export function Multicolumn(props: any) {
             </div>
           )}
           <div style={gridStyle} className="hidden md:grid">
-            {columnElements}
+            {mergedItems.map((item: any, idx: number) => renderAnimatedColumn(item, idx, 'desktop'))}
           </div>
         </div>
       );
     }
 
     if (isMobile) {
-      return <div style={mobileGridStyle}>{columnElements}</div>;
+      return (
+        <div style={mobileGridStyle}>
+          {mergedItems.map((item: any, idx: number) => renderAnimatedColumn(item, idx, 'mobile'))}
+        </div>
+      );
     }
 
-    return <div style={gridStyle}>{columnElements}</div>;
+    return (
+      <div style={gridStyle}>
+        {mergedItems.map((item: any, idx: number) => renderAnimatedColumn(item, idx, 'grid'))}
+      </div>
+    );
   };
 
   return (
     <div ref={props.puck?.dragRef} className={outerClasses} style={outerStyle}>
       <div className="relative w-full">
         <div style={contentStyle}>
-          <div className="w-full">
+          {/* ✅ 用 containerRef 监听整个内容区域进入视口 */}
+          <div className="w-full" ref={containerRef}>
             {globalGroup.globalTitle && (
-              <div className="text-center mb-12">
+              <div
+                className="text-center mb-12"
+                style={{
+                  // ✅ 标题也跟着淡入
+                  opacity: isEditMode || visible ? 1 : 0,
+                  transform: isEditMode || visible ? 'translateY(0)' : 'translateY(24px)',
+                  transition: `opacity ${ANIMATION_DURATION_MS}ms ease-out, transform ${ANIMATION_DURATION_MS}ms ease-out`,
+                }}
+              >
                 <h2
                   className="font-bold"
                   style={{
@@ -284,7 +354,19 @@ export function Multicolumn(props: any) {
             )}
             {renderColumns()}
             {buttonText && (
-              <div className="text-center mt-12">
+              <div
+                className="text-center mt-12"
+                style={{
+                  // ✅ 按钮也延迟淡入（在所有列之后）
+                  opacity: isEditMode || visible ? 1 : 0,
+                  transform: isEditMode || visible ? 'translateY(0)' : 'translateY(24px)',
+                  transition: `opacity ${ANIMATION_DURATION_MS}ms ease-out ${
+                    mergedItems.length * ANIMATION_DELAY_STEP_MS
+                  }ms, transform ${ANIMATION_DURATION_MS}ms ease-out ${
+                    mergedItems.length * ANIMATION_DELAY_STEP_MS
+                  }ms`,
+                }}
+              >
                 {buttonLink ? (
                   <a
                     href={buttonLink}

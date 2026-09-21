@@ -40,13 +40,14 @@ export interface BlankBlockProps {
 }
 
 export interface HeadingProps {
-  level: 1 | 2 | 3;
+  level: 1 | 2 | 3 | 4 | 5 | 6;
   title: string;
   textAlign: 'left' | 'center' | 'right';
   bold: boolean;
   italic: boolean;
   underline: boolean;
   link?: string;
+  color?: string;   
   fontSize: 'sm' | 'base' | 'lg' | 'xl' | '2xl' | '3xl' | '4xl' | '5xl';
   spacingGroup: {
     mobileScaleFactor: number;
@@ -56,17 +57,25 @@ export interface HeadingProps {
 }
 
 export interface ParagraphProps {
-  text: string;
+  // ✅ 富文本 HTML
+  content?: string;
+
+  // 全局样式
   fontSize: number;
-  textAlign: 'left' | 'center' | 'right';
-  bold: boolean;
-  italic: boolean;
-  underline: boolean;
   color: string;
-  link?: string;
+  textAlign: 'left' | 'center' | 'right';
+
   spacingGroup: {
     mobileScaleFactor: number;
   };
+
+  // ✅ 兼容旧数据（渲染时回退）
+  text?: string;
+  bold?: boolean;
+  italic?: boolean;
+  underline?: boolean;
+  link?: string;
+
   puck?: { dragRef: (el: HTMLElement | null) => void; isEditing?: boolean };
 }
 
@@ -82,8 +91,8 @@ export interface ButtonProps {
   buttonAlign: 'left' | 'center' | 'right';
   link?: string;
   borderRadius: string;
-   paddingX: number;   // 新增
-  paddingY: number;   // 新增
+  paddingX: number;
+  paddingY: number;
   spacingGroup: {
     mobileScaleFactor: number;
   };
@@ -121,8 +130,6 @@ export interface DividingLineProps {
   align: 'left' | 'center' | 'right';
   puck?: { dragRef: (el: HTMLElement | null) => void; isEditing?: boolean };
 }
-
-
 
 // ==================== 富文本组件 ====================
 export interface RichtextProps {
@@ -171,7 +178,6 @@ export interface RichtextProps {
     mobileScaleFactor: number;
   };
 }
-
 
 // ==================== 视频组件 ====================
 export interface VideoProps {
@@ -263,7 +269,6 @@ export interface PicwithTextProps {
 }
 
 // ==================== 图片横幅 ====================
-
 export interface ImageBannerProps {
   bannerType: 'standard' | 'fullwidth';
   // 原有扁平字段（保留，兼容旧数据）
@@ -271,7 +276,6 @@ export interface ImageBannerProps {
   image2Url?: string;
   overlayOpacity?: number;
   heightPreset?: 'auto' | 'small' | 'medium' | 'large';
-  // ❌ animation 字段已移除（组件不再支持 fixed/scale 动效）
   title?: string;
   titleFontSize?: number;
   titleColor?: string;
@@ -300,7 +304,6 @@ export interface ImageBannerProps {
     image2Url: string;
     overlayOpacity: number;
     heightPreset: 'auto' | 'small' | 'medium' | 'large';
-    // ❌ animation 字段已移除
   };
   contentSettings?: {
     title: string;
@@ -356,9 +359,9 @@ export interface MulticolumnProps {
     buttonFontSize: number;
     buttonColor: string;
     buttonLink: string;
-    buttonPaddingX: number;      // ✅ 新增
-    buttonPaddingY: number;      // ✅ 新增
-    buttonBorderRadius: number;  // ✅ 新增
+    buttonPaddingX: number;
+    buttonPaddingY: number;
+    buttonBorderRadius: number;
   };
 
   layoutGroup: {
@@ -440,29 +443,25 @@ export interface CollapsibleItem {
 }
 
 export interface CollapsibleProps {
-  // 通栏设置
   bannerGroup: {
     bannerType: 'standard' | 'fullwidth';
     backgroundColor: string;
   };
 
-  // 折叠栏设置
   titleGroup: {
     globalTitle: string;
     globalTitleFontSize: number;
     globalTitleColor: string;
     globalTitleAlign: 'left' | 'center' | 'right';
-    rowBackgroundColor: string;  // ✅ 新增
+    rowBackgroundColor: string;
   };
 
-  // 图片设置
   imageGroup: {
     imageUrl: string;
     imageRatio: 'adapt' | 'small' | 'large';
     imagePlacement: 'left' | 'right';
   };
 
-  // 内容列表设置
   contentGroup: {
     rowTitleFontSize: number;
     rowTitleColor: string;
@@ -470,24 +469,20 @@ export interface CollapsibleProps {
     rowContentColor: string;
   };
 
-  // 内容容器
   containerGroup: {
     containerType: 'none' | 'row' | 'section';
     containerBgColor: string;
   };
 
-  // 填充设置
   paddingGroup: {
     paddingTop: number;
     paddingBottom: number;
   };
 
-  // 间距（内部使用，不暴露）
   spacingGroup: {
     mobileScaleFactor: number;
   };
 
-  // 动态项
   items: CollapsibleItem[];
 }
 
@@ -495,14 +490,14 @@ export interface CollapsibleProps {
 export interface AccordionContentItem {
   id: string;
   imageUrl: string;
-  title: string;          // 单语言
-  paragraph: string;      // 单语言
+  title: string;
+  paragraph: string;
   link: string;
 }
 
 export interface AccordionItem {
   id: string;
-  title: string;          // 单语言
+  title: string;
   contents: AccordionContentItem[];
 }
 
@@ -576,10 +571,8 @@ export interface SectionProps {
 
 // ==================== 产品线专用组件 ====================
 export interface ProductLineBlockProps {
-  // 设计者可配置的 UI 选项
   showSidebar?: boolean;
   productsPerRow?: 1 | 2 | 3 | 4;
-  // 运行时注入的数据（设计者不可见，不会保存到模板）
   __runtime?: {
     productLine: any;
     categoryTree: any[];
@@ -589,17 +582,33 @@ export interface ProductLineBlockProps {
     currentSlug?: string;
     currentSeriesId?: string;
   };
-  puck?: { dragRef: (el: HTMLElement | null) => void };  
+  puck?: { dragRef: (el: HTMLElement | null) => void };
+}
+
+// ===== 工业产品线组件（折叠表格） =====
+export interface IndustrialProductLineBlockProps {
+  showSidebar?: boolean;
+  __runtime?: {
+    productLine: {
+      id: string;
+      name: string;
+      slug: string;
+      seoTitle?: string;
+    };
+    categories: CategoryNode[];
+    products: Product[];
+    currentSlug?: string;
+    locale: string;
+    urlPattern: string;
+  };
 }
 
 // ==================== 产品分类专用组件 ====================
 export interface ProductCollectionsBlockProps {
-  // 设计者可配置的属性（可选，如每行产品数）
   productsPerRow?: 1 | 2 | 3 | 4;
-  // 运行时注入的数据（由服务端填充）
   __runtime?: {
     entityType: 'collection';
-    collection: any;        // 分类对象（包含 id, name, description, slug 等）
+    collection: any;
     products: any[];
     urlPattern: string;
     locale: string;
@@ -609,25 +618,328 @@ export interface ProductCollectionsBlockProps {
 
 // ==================== 产品详情页专用组件 ====================
 export interface ProductDetailsBlockProps {
-  // 设计者可配置的属性（如布局方向、图片比例等，可扩展）
-  layout?: 'left-right' | 'top-bottom';    // 布局方向，默认左右
-  imageSize?: 'small' | 'medium' | 'large'; // 图片尺寸
-  // 运行时注入的数据（由服务端填充）
+  layout?: 'left-right' | 'top-bottom';
+  imageSize?: 'small' | 'medium' | 'large';
   __runtime?: {
-    product: any;        // 完整的产品数据（包含所有字段）
+    product: any;
     locale: string;
     urlPattern: string;
   };
   puck?: { dragRef: (el: HTMLElement | null) => void };
 }
 
+// ==================== 产品展示组件 ====================
+export interface ShowcaseProduct {
+  productId: string;
+  productName: string;
+  sku: string;
+  mainImage: string;
+  price?: number;
+}
+
+export interface ProductShowcaseBlockProps {
+  bannerType: 'standard' | 'fullwidth';
+  backgroundColor: string;
+
+  titleGroup: {
+    title: string;
+    subtitle: string;
+    titleColor: string;
+    titleFontSize: number;
+    subtitleColor: string;
+    subtitleFontSize: number;
+    titleAlign: 'left' | 'center' | 'right';
+  };
+
+  layoutGroup: {
+    columns: 2 | 3 | 4;
+    gap: number;
+    cardRadius: number;
+    cardBgColor: string;
+    cardBorderColor: string;
+    cardHoverShadow: boolean;
+  };
+
+  nameGroup: {
+    nameColor: string;
+    nameFontSize: number;
+    nameAlign: 'left' | 'center';
+  };
+
+  skuGroup: {
+    skuColor: string;
+    skuFontSize: number;
+    skuVisible: boolean;
+  };
+
+  imageGroup: {
+    aspectRatio: '1:1' | '4:3' | '16:9';
+    objectFit: 'cover' | 'contain';
+    hoverZoom: boolean;
+  };
+
+  animationGroup: {
+    enabled: boolean;
+    duration: number;
+    delayStep: number;
+  };
+
+  paddingGroup: {
+    paddingTop: number;
+    paddingBottom: number;
+  };
+
+  // ✅ 用对象一次性保存 ids + locale
+  productSelection: {
+    ids: string[];
+    locale: string;
+  };
+
+  linkPattern: string;
+  openInNewTab: boolean;
+  // ✅ 运行时字段（由 TemplateRenderer 注入）
+  locale?: string;
+  __runtime?: { locale?: string };
+  puck?: { dragRef: (el: HTMLElement | null) => void; isEditing?: boolean };
+}
+
+// ==================== 产品轮播组件 ====================
+export interface ProductCarouselBlockProps {
+  // ✅ 复用 Showcase 的数据结构
+  productSelection: {
+    ids: string[];
+    locale: string;
+  };
+
+  bannerType: 'standard' | 'fullwidth';
+  backgroundColor: string;
+
+  // 标题
+  titleGroup: {
+    title: string;
+    subtitle: string;
+    titleColor: string;
+    titleFontSize: number;
+    subtitleColor: string;
+    subtitleFontSize: number;
+    titleAlign: 'left' | 'center' | 'right';
+  };
+
+  // 轮播配置
+  carouselGroup: {
+    slidesPerView: 1 | 2 | 3 | 4;
+    slidesPerViewMobile: 1 | 2;
+    gap: number;
+    loop: boolean;
+    autoplay: boolean;
+    autoplayInterval: number;
+    pauseOnHover: boolean;
+    showArrows: boolean;
+    arrowColor: string;
+    arrowBgColor: string;
+    arrowPosition: 'inside' | 'outside' | 'overlay';
+    showDots: boolean;
+    dotColor: string;
+    dotActiveColor: string;
+    draggable: boolean;
+  };
+
+  // 卡片样式
+  layoutGroup: {
+    cardRadius: number;
+    cardBgColor: string;
+    cardBorderColor: string;
+    cardHoverShadow: boolean;
+    cardHoverLift: boolean;
+  };
+
+  nameGroup: {
+    nameColor: string;
+    nameFontSize: number;
+    nameAlign: 'left' | 'center';
+  };
+
+  skuGroup: {
+    skuColor: string;
+    skuFontSize: number;
+    skuVisible: boolean;
+  };
+
+  imageGroup: {
+    aspectRatio: '1:1' | '4:3' | '16:9';
+    objectFit: 'cover' | 'contain';
+    hoverZoom: boolean;
+  };
+
+  animationGroup: {
+    enabled: boolean;
+    duration: number;
+    delayStep: number;
+  };
+
+  paddingGroup: {
+    paddingTop: number;
+    paddingBottom: number;
+  };
+
+  // 运行时字段
+  locale?: string;
+  __runtime?: { locale?: string };
+  puck?: any;
+}
+
+// ==================== 产品榜单组件 ====================
+export interface ProductRankingBlockProps {
+  productSelection: {
+    ids: string[];
+    locale: string;
+  };
+
+  bannerType: 'standard' | 'fullwidth';
+  backgroundColor: string;
+
+  titleGroup: {
+    title: string;
+    subtitle: string;
+    titleColor: string;
+    titleFontSize: number;
+    subtitleColor: string;
+    subtitleFontSize: number;
+    titleAlign: 'left' | 'center' | 'right';
+  };
+
+  rankingGroup: {
+    columns: 1 | 2;
+    gap: number;
+    showRanking: boolean;
+    rankingStyle: 'number' | 'medal' | 'both';
+    rankingNumberColor: string;
+    rankingNumberBgColor: string;
+    rankingNumberSize: number;
+    medalGoldColor: string;
+    medalSilverColor: string;
+    medalBronzeColor: string;
+    cardLayout: 'horizontal' | 'vertical';
+    imageWidth: number;
+    imageAspectRatio: '1:1' | '4:3' | '16:9';
+    linkPattern: string;
+  };
+
+  layoutGroup: {
+    cardRadius: number;
+    cardBgColor: string;
+    cardBorderColor: string;
+    cardHoverShadow: boolean;
+    cardHoverLift: boolean;
+  };
+
+  nameGroup: {
+    nameColor: string;
+    nameFontSize: number;
+    nameAlign: 'left' | 'center';
+  };
+
+  skuGroup: {
+    skuColor: string;
+    skuFontSize: number;
+    skuVisible: boolean;
+  };
+
+  imageGroup: {
+    aspectRatio: '1:1' | '4:3' | '16:9';
+    objectFit: 'cover' | 'contain';
+    hoverZoom: boolean;
+  };
+
+  animationGroup: {
+    enabled: boolean;
+    duration: number;
+    delayStep: number;
+  };
+
+  paddingGroup: {
+    paddingTop: number;
+    paddingBottom: number;
+  };
+  linkPattern: string;
+  openInNewTab?: boolean; 
+
+  locale?: string;
+  __runtime?: { locale?: string };
+  puck?: any;
+}
+
+// ==================== 产品分类组件 ====================
+export interface ProductCategoriesBlockProps {
+  categorySelection: {
+    ids: string[];
+    locale: string;
+  };
+
+  bannerType: 'standard' | 'fullwidth';
+  backgroundColor: string;
+
+  titleGroup: {
+    title: string;
+    subtitle: string;
+    titleColor: string;
+    titleFontSize: number;
+    subtitleColor: string;
+    subtitleFontSize: number;
+    titleAlign: 'left' | 'center' | 'right';
+  };
+
+  layoutGroup: {
+    columns: 2 | 3 | 4;
+    gap: number;
+    cardRadius: number;
+    cardBgColor: string;
+    cardBorderColor: string;
+    cardHoverShadow: boolean;
+    cardHoverLift: boolean;
+  };
+
+  imageGroup: {
+    aspectRatio: '1:1' | '4:3' | '16:9';
+    objectFit: 'cover' | 'contain';
+    hoverZoom: boolean;
+  };
+
+  textGroup: {
+    nameColor: string;
+    nameFontSize: number;
+    nameAlign: 'left' | 'center';
+    descColor: string;
+    descFontSize: number;
+    descVisible: boolean;
+    showArrow: boolean;
+    arrowColor: string;
+  };
+
+  linkPattern: string;
+
+  animationGroup: {
+    enabled: boolean;
+    duration: number;
+    delayStep: number;
+  };
+
+  paddingGroup: {
+    paddingTop: number;
+    paddingBottom: number;
+  };
+
+  locale?: string;
+  __runtime?: { locale?: string };
+  puck?: any;
+}
+
 // ==================== 文档库专用组件 ====================
 export interface DocumentLibraryBlockProps {
-  // 设计者可配置的属性（可扩展，如默认显示宽度等）
-  showTree?: boolean;          // 是否显示文档树（默认 true）
+  showTree?: boolean;
   __runtime?: {
-    tree: any[];               // 文档树结构（包含 id, title, slug, children）
-    initialDoc: any;           // 初始文档（根据 URL 匹配，若无则取第一个）
+    tree: any[];
+    initialDoc: any;
     locale: string;
   };
   puck?: { dragRef: (el: HTMLElement | null) => void };
@@ -635,10 +947,8 @@ export interface DocumentLibraryBlockProps {
 
 // ==================== 博客组件 ====================
 export interface BlogBlockProps {
-  // 设计者可配置属性
   showSidebar?: boolean;
   postsPerRow?: 1 | 2 | 3;
-  // 运行时注入数据（由服务端填充）
   __runtime?: {
     entityType: 'blog';
     categories: { slug: string; name: string }[];
@@ -664,6 +974,95 @@ export interface BlogCollectionBlockProps {
   puck?: { dragRef: (el: HTMLElement | null) => void };
 }
 
+// ==================== 博客文章组件 ====================
+export interface ShowcaseBlogPost {
+  id: string;
+  slug: string;
+  title: string;
+  excerpt: string;
+  featuredImage: string;
+  categoryId: string;
+  author: string;
+  updatedAt: string;
+}
+
+export interface BlogPostsBlockProps {
+  // ✅ 文章选择
+  blogSelection: {
+    ids: string[];
+    locale: string;
+  };
+
+  bannerType: 'standard' | 'fullwidth';
+  backgroundColor: string;
+
+  // 标题
+  titleGroup: {
+    title: string;
+    subtitle: string;
+    titleColor: string;
+    titleFontSize: number;
+    subtitleColor: string;
+    subtitleFontSize: number;
+    titleAlign: 'left' | 'center' | 'right';
+  };
+
+  // 布局
+  layoutGroup: {
+    columns: 2 | 3 | 4;
+    gap: number;
+    cardRadius: number;
+    cardBgColor: string;
+    cardBorderColor: string;
+    cardHoverShadow: boolean;
+    cardHoverLift: boolean;
+    cardLayout: 'vertical' | 'horizontal';   // 竖排/横排
+    imageWidth: number;                       // 横排时图片宽度
+  };
+
+  // 图片
+  imageGroup: {
+    aspectRatio: '1:1' | '4:3' | '16:9';
+    objectFit: 'cover' | 'contain';
+    hoverZoom: boolean;
+  };
+
+  // 文本
+  textGroup: {
+    titleColor: string;
+    titleFontSize: number;
+    excerptColor: string;
+    excerptFontSize: number;
+    dateColor: string;
+    dateFontSize: number;
+    excerptLines: 1 | 2 | 3;                 // 摘要行数
+    dateVisible: boolean;
+    dateFormat: 'YYYY-MM-DD' | 'YYYY/MM/DD' | 'relative';
+  };
+
+  // 跳转
+  linkPattern: string;
+  openInNewTab: boolean;
+
+  // 动画
+  animationGroup: {
+    enabled: boolean;
+    duration: number;
+    delayStep: number;
+  };
+
+  // 填充
+  paddingGroup: {
+    paddingTop: number;
+    paddingBottom: number;
+  };
+
+  // 运行时
+  locale?: string;
+  __runtime?: { locale?: string };
+  puck?: any;
+}
+
 // ==================== 视频分类组件 ====================
 export interface VideoCategoryBlockProps {
   showSidebar?: boolean;
@@ -678,11 +1077,16 @@ export interface VideoCategoryBlockProps {
   };
 }
 
+// ==================== 询盘组件 ====================
+export interface InquiryBlockProps {
+  __runtime?: any;
+  puck?: any;
+}
+
 // ==================== 全屏通栏幻灯片组件 ====================
-// 专用于 FullwidthSlider 的幻灯片项（单语言）
 export interface FullwidthSlideItem {
   imageUrl: string;
-  title: string;                     // 单语言
+  title: string;
   subtitle: string;
   buttonText: string;
   buttonLink: string;
@@ -699,11 +1103,11 @@ export interface FullwidthSlideItem {
 }
 
 export interface FullwidthSliderProps {
-  bannerType: 'standard' | 'fullwidth';   // 新增
-  backgroundColor?: string;      // 新增
-  paddingTop?: number;           // 新增
-  paddingBottom?: number;        // 新增
-  height: number;                         // 改为 number
+  bannerType: 'standard' | 'fullwidth';
+  backgroundColor?: string;
+  paddingTop?: number;
+  paddingBottom?: number;
+  height: number;
   autoplay: 'none' | '5s' | '10s';
   images: FullwidthSlideItem[];
 }
@@ -727,17 +1131,189 @@ export interface SlideItem {
   subtitleColor: string;
 }
 
+// ✅ 只保留一处 WidthSliderProps 定义
 export interface WidthSliderProps {
   height: '550' | '650';
   autoplay: 'none' | '5s' | '10s';
-  images: SlideItem[];   // 保持原有多语言 SlideItem
+  images: SlideItem[];
 }
 
-// ==================== 非全屏幻灯片组件 ====================
-export interface WidthSliderProps {
-  height: '550' | '650';
-  autoplay: 'none' | '5s' | '10s';
-  images: SlideItem[];  // SlideItem 已在 FullwidthSlider 中定义，复用
+// ==================== 卡片价格组件 ====================
+export interface PricingCard {
+  id: string;
+  title: string;
+  description: string;
+  badge: string;
+  badgeColor: string;
+  rightsTitle: string;
+  rights: string[];
+  price: string;
+  priceFontSize: number;
+  priceColor: string;
+  buttonText: string;
+  buttonLink: string;
+  buttonVisible: boolean;
+  buttonColor: string;
+  isRecommended: boolean;
+  contactText: string;
+  contactLink: string;
+}
+
+export interface PricingBlockProps {
+  bannerType: 'standard' | 'fullwidth';
+  backgroundColor: string;
+  cardBgColor: string;
+  cardBorderColor: string;
+  cardHoverBorderColor: string;
+  recommendedBorderColor: string;
+  recommendedBgColor: string;
+  titleColor: string;
+  titleFontSize: number;
+  descColor: string;
+  descFontSize: number;
+  rightsTitleColor: string;
+  rightsTitleFontSize: number;
+  rightsTextColor: string;
+  rightsTextFontSize: number;
+  checkIconColor: string;
+  columns: 2 | 3 | 4;
+  cardGap: number;
+  headerImageUrl: string;
+  headerImageHeight: number;
+  headerOverlayColor: string;
+  headerTitle: string;
+  headerTitleColor: string;
+  headerTitleFontSize: number;
+  headerSubtitle: string;
+  headerSubtitleColor: string;
+  headerSubtitleFontSize: number;
+  paddingTop: number;
+  paddingBottom: number;
+  cards: PricingCard[];
+}
+
+// ==================== 详细对比表格组件 ====================
+export interface ComparisonRow {
+  id: string;
+  label: string;
+  values: string[];
+}
+
+export interface ComparisonGroup {
+  id: string;
+  title: string;
+  rows: ComparisonRow[];
+}
+
+export interface ComparisonTableBlockProps {
+  bannerType: 'standard' | 'fullwidth';
+  backgroundColor: string;
+  columns: 2 | 3 | 4;
+  columnTitles: string[];
+  groups: ComparisonGroup[];
+  headerBgColor: string;
+  headerTextColor: string;
+  groupBgColor: string;
+  groupTextColor: string;
+  rowBgColor: string;
+  rowAltBgColor: string;
+  rowTextColor: string;
+  borderColor: string;
+  checkIconColor: string;
+  crossIconColor: string;
+  cellFontSize: number;
+  labelFontSize: number;
+  labelColumnWidth: number;
+  tableTitle: string;
+  tableTitleColor: string;
+  tableTitleFontSize: number;
+  tableTitleAlign: 'left' | 'center' | 'right';
+  paddingTop: number;
+  paddingBottom: number;
+}
+
+// ==================== 标签图文切换组件 ====================
+export interface TabContentItem {
+  id: string;
+  title: string;
+  description: string;
+  tag: string;
+  tagColor: string;
+}
+
+export interface TabItem {
+  id: string;
+  label: string;
+  items: TabContentItem[];
+  primaryButtonText: string;
+  primaryButtonLink: string;
+  outlineButtonText: string;
+  outlineButtonLink: string;
+  imageUrl: string;
+  floatingIcons: any[];
+}
+
+export interface TabbedContentBlockProps {
+  bannerType: 'standard' | 'fullwidth';
+  backgroundColor: string;
+
+  tabGroup: {
+    tabTextColor: string;
+    tabActiveColor: string;
+    tabActiveBorderColor: string;
+    tabFontSize: number;
+    tabAlign: 'left' | 'center' | 'right';
+    tabBgColor: string;
+    tabActiveBgColor: string;
+    tabBorderRadius: number;
+    tabPaddingX: number;
+    tabPaddingY: number;
+    tabBorderColor: string;
+    tabActiveBorderColorValue: string;
+    tabShowBorder: boolean;
+  };
+
+  contentGroup: {
+    itemTitleColor: string;
+    itemTitleFontSize: number;
+    itemDescColor: string;
+    itemDescFontSize: number;
+    itemGap: number;
+  };
+
+  buttonGroup: {
+    primaryButtonColor: string;
+    primaryButtonTextColor: string;
+    outlineButtonColor: string;
+    buttonFontSize: number;
+    buttonPaddingX: number;
+    buttonPaddingY: number;
+    buttonBorderRadius: number;
+  };
+
+  imageGroup: {
+    imageWidth: 'small' | 'medium' | 'large';
+    imageRadius: number;
+    showFloatingIcons: boolean;
+    floatingIconWidth: number;
+    imageHoverZoom: boolean;
+  };
+
+  layoutGroup: {
+    contentPosition: 'left' | 'right';
+    verticalAlign: 'top' | 'center' | 'bottom';
+  };
+
+  paddingGroup: {
+    paddingTop: number;
+    paddingBottom: number;
+  };
+
+  spacingGroup: {
+    mobileScaleFactor: number;
+  };
+
+  tabs: TabItem[];
 }
 
 // ==================== 所有组件联合类型 ====================
@@ -747,16 +1323,17 @@ export type Components = {
 
   BlankBlock: BlankBlockProps;
   Section: SectionProps;
-  ProductLineBlock: ProductLineBlockProps;   // 新增
-  ProductCollectionsBlock: ProductCollectionsBlockProps;   // 新增
-  ProductDetailsBlock: ProductDetailsBlockProps;   // 新增
-  DocumentLibraryBlock: DocumentLibraryBlockProps;   // 新增
-  BlogBlock: BlogBlockProps;   // 新增
-  BlogCollectionBlock: BlogCollectionBlockProps;   // 新增
-  VideoCategoryBlock: VideoCategoryBlockProps;   // 新增
-  FullwidthSlider: FullwidthSliderProps;   // 新增
-  WidthSlider: WidthSliderProps;   // 新增
-  Button: ButtonProps;   // 新增
+  ProductLineBlock: ProductLineBlockProps;
+  IndustrialProductLineBlock: IndustrialProductLineBlockProps;
+  ProductCollectionsBlock: ProductCollectionsBlockProps;
+  ProductDetailsBlock: ProductDetailsBlockProps;
+  DocumentLibraryBlock: DocumentLibraryBlockProps;
+  BlogBlock: BlogBlockProps;
+  BlogCollectionBlock: BlogCollectionBlockProps;
+  VideoCategoryBlock: VideoCategoryBlockProps;
+  FullwidthSlider: FullwidthSliderProps;
+  WidthSlider: WidthSliderProps;
+  Button: ButtonProps;
   List: ListProps;
   DividingLine: DividingLineProps;
   ImageBanner: ImageBannerProps;
@@ -767,4 +1344,12 @@ export type Components = {
   PicwithText: PicwithTextProps;
   Collapsible: CollapsibleProps;
   Multirow: MultirowProps;
+  InquiryBlock: InquiryBlockProps;
+  PricingBlock: PricingBlockProps;
+  ComparisonTableBlock: ComparisonTableBlockProps;
+  TabbedContentBlock: TabbedContentBlockProps;
+  ProductShowcaseBlock: ProductShowcaseBlockProps;
+  ProductRankingBlock: ProductRankingBlockProps;
+  ProductCategoriesBlock: ProductCategoriesBlockProps;
+  BlogPostsBlock: BlogPostsBlockProps;
 };

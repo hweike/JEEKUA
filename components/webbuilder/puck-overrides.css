@@ -2,8 +2,9 @@
    WebBuilder 左侧栏样式
    ============================================ */
 
-/* --- 隐藏抓手图标（三个点） --- */
-[class*="DragIcon"] {
+/* --- 只隐藏侧边栏组件库的抓手（不影响大纲） --- */
+[class*="DrawerItem"] [class*="DragIcon"],
+[class*="ComponentList"] [class*="DragIcon"] {
   display: none !important;
 }
 
@@ -18,7 +19,7 @@
   text-transform: uppercase !important;
   letter-spacing: 0.5px !important;
   color: #6b7280 !important;
-  border-bottom: 1px solid #e5e7eb !important; /* ✅ 保留分割线 */
+  border-bottom: 1px solid #e5e7eb !important;
   border-top: none !important;
   border-left: none !important;
   border-right: none !important;
@@ -70,4 +71,111 @@
   font-size: 15px !important;
   font-weight: 500 !important;
   color: #1f2937 !important;
+}
+
+/* ============================================
+   大纲面板抓手（保持显示，用于拖动排序）
+   ============================================ */
+
+/* ✅ 大纲面板的抓手：保持显示并美化 */
+[class*="Outline"] [class*="DragIcon"],
+[class*="Layer"] [class*="DragIcon"],
+[class*="Outline"] [class*="dragIcon"],
+[class*="Outline"] [class*="drag-icon"] {
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  opacity: 0.5 !important;
+  cursor: grab !important;
+  transition: opacity 0.2s !important;
+  padding: 2px 4px !important;
+}
+[class*="Outline"] [class*="DragIcon"]:hover,
+[class*="Layer"] [class*="DragIcon"]:hover {
+  opacity: 1 !important;
+}
+[class*="Outline"] [class*="DragIcon"]:active,
+[class*="Layer"] [class*="DragIcon"]:active {
+  cursor: grabbing !important;
+}
+
+/* ============================================
+   大纲面板（Outline）—— 隐藏重复标题
+   ============================================ */
+
+/* ✅ 隐藏 Puck 0.23 内置的 OutlineHeader 里的 "Outline" 标题 */
+[class*="OutlineHeader"] {
+  display: none !important;
+}
+
+/* ✅ 隐藏内置的 "折叠全部" 按钮（如想保留，删除此段） */
+[class*="CollapseAll"] {
+  display: none !important;
+}
+
+/* ============================================
+   DropZone 拖拽插入区样式
+   ============================================ */
+
+/* ✅ 用 Puck 原生 CSS 变量控制空 DropZone 最小高度 */
+[data-puck-dropzone]:not([data-puck-dropzone="root:default-zone"]) {
+  --min-empty-height: 100px !important;
+  min-height: 100px !important;
+}
+
+/* --- DropZone 基础样式：高度 100px + 虚线边框 --- */
+[data-puck-dropzone],
+[class*="DropZone"] {
+  min-height: 100px !important;
+  border: 2px dashed #3b82f6 !important;
+  border-radius: 8px !important;
+  background-color: rgba(59, 130, 246, 0.05) !important;
+  margin: 8px !important;
+  transition: all 0.15s ease !important;
+  box-sizing: border-box !important;
+}
+
+/* --- DropZone 拖到上方时高亮 --- */
+[data-puck-dropzone]:hover,
+[class*="DropZone"]:hover,
+[data-puck-dropzone][class*="isActive"],
+[class*="DropZone"][class*="isActive"],
+[class*="DropZone"][class*="isOver"],
+[class*="DropZone"][class*="isEnabled"] {
+  background-color: rgba(59, 130, 246, 0.15) !important;
+  border-color: #2563eb !important;
+}
+
+/* --- 隐藏 Puck 默认的蓝色细线指示器 --- */
+[class*="DropZone-indicator"],
+[class*="DropZoneIndicator"] {
+  display: none !important;
+}
+
+/* --- 拖拽过程中的整体覆盖层（可选） --- */
+[class*="DraggableComponent-overlay"],
+[class*="overlay"] {
+  border: 2px dashed #3b82f6 !important;
+  border-radius: 8px !important;
+  background-color: rgba(59, 130, 246, 0.08) !important;
+}
+
+/* ============================================
+   左侧栏底部留白
+   ============================================ */
+
+/* ✅ 左侧栏滚动容器底部留白 */
+[class*="Sidebar"] > div[style*="overflow-y"],
+[class*="Sidebar"] [style*="overflow-y: auto"] {
+  padding-bottom: 40px !important;
+}
+
+/* ✅ 大纲列表容器底部留白 */
+[class*="LayerTree"]:last-child {
+  padding-bottom: 40px !important;
+}
+
+/* ✅ 最后一个 SidebarSection-content 底部留白 */
+[class*="SidebarSection-content"]:last-child {
+  padding-bottom: 40px !important;
 }

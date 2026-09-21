@@ -10,16 +10,13 @@ import {
   getMediaFileById,
 } from '@/lib/files/db';
 
-// TODO: 在此处添加您的 JWT 鉴权逻辑，例如：
-// const auth = await authenticateJWT(req);
-// if (!auth.isAdmin) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-
 export async function POST(req: NextRequest) {
   const formData = await req.formData();
   const file = formData.get('file') as File;
   const referenceType = formData.get('referenceType') as string | null;
-  const referenceId = formData.get('referenceId') ? parseInt(formData.get('referenceId') as string) : null;
+  const referenceId = formData.get('referenceId') as string | null;
   const altText = formData.get('altText') as string | null;
+  const categoryId = formData.get('categoryId') as string | null;
 
   if (!file) {
     return NextResponse.json({ error: 'No file provided' }, { status: 400 });
@@ -31,7 +28,6 @@ export async function POST(req: NextRequest) {
   const size = buffer.length;
   const displayName = file.name;
 
-  // 查重
   let existingFile = await findMediaFileByHash(fileHash);
   let mediaFileId: string;
 
@@ -48,6 +44,7 @@ export async function POST(req: NextRequest) {
       if (dims) { width = dims.width; height = dims.height; }
     }
 
+    // ✅ 添加 category_id 支持
     const newFile = await createMediaFile({
       storage_key: storageKey,
       display_name: displayName,
@@ -56,12 +53,21 @@ export async function POST(req: NextRequest) {
       file_hash: fileHash,
       width,
       height,
+      source_url: null,
     });
+    
+    // ✅ 如果有 categoryId，更新文件
+    if (categoryId) {
+      await supabase
+        .from('media_files')
+        .update({ category_id: categoryId })
+        .eq('id', newFile.id);
+    }
+    
     mediaFileId = newFile.id;
   }
 
-  // 创建引用（如果提供了）
-  if (referenceType && referenceId !== null) {
+  if (referenceType && referenceId !== null && referenceId !== '') {
     await createFileReference({
       file_id: mediaFileId,
       reference_type: referenceType,
@@ -84,17 +90,37 @@ export async function POST(req: NextRequest) {
 }
 
 export async function GET(req: NextRequest) {
-  const searchParams = req.nextUrl.searchParams;
-  const page = parseInt(searchParams.get('page') || '1');
-  const search = searchParams.get('search') || '';
+  try {
+    const searchParams = req.nextUrl.searchParams;
+    const page = parseInt(searchParams.get('page') || '1');
+    const pageSize = parseInt(searchParams.get('size') || '20');
+    const search = searchParams.get('search') || '';
+    const categoryId = searchParams.get('categoryId') || null;
+    const referenced = searchParams.get('referenced') || null;
 
-  const { files, total } = await listMediaFiles(page, 20, search);
-  const storage = getPublicStorage();
-  const filesWithUrl = files.map((file: any) => ({
-    ...file,
-    url: storage.getPublicUrl(file.storage_key),
-    referenceCount: file.references?.length || 0,
-  }));
+    console.log('📂 查询参数:', { page, pageSize, search, categoryId, referenced });
 
-  return NextResponse.json({ files: filesWithUrl, total, page, pageSize: 20 });
+    // ✅ listMediaFiles 已经包含 site_id 过滤
+    const { files, total } = await listMediaFiles(page, pageSize, search, categoryId, referenced);
+    
+    const storage = getPublicStorage();
+    const filesWithUrl = files.map((file: any) => ({
+      ...file,
+      url: storage.getPublicUrl(file.storage_key),
+      referenceCount: file.referenceCount || 0,
+    }));
+
+    return NextResponse.json({ 
+      files: filesWithUrl, 
+      total, 
+      page, 
+      size: pageSize 
+    });
+  } catch (error: any) {
+    console.error('GET /api/admin/files error:', error);
+    return NextResponse.json(
+      { error: error.message || '获取文件列表失败' }, 
+      { status: 500 }
+    );
+  }
 }

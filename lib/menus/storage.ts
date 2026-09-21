@@ -1,120 +1,167 @@
 // lib/menus/storage.ts
-import { getPrivateStorage } from '@/lib/storage/factory';
-
-const STORAGE_PREFIX = 'menus';
+import { menuService } from './menu-service';
 
 // ---------- 缓存 ----------
 const cache = new Map<string, { data: any; timestamp: number }>();
-const CACHE_TTL = 60 * 1000; // 60 秒
+const CACHE_TTL = 300 * 1000;
 
-function getCacheKey(locale: string): string {
-  return `menus_${locale}`;
+function getCacheKey(locale: string, menuType: string): string {
+  return `menus_${locale}_${menuType}`;
 }
 
-/**
- * 获取缓存的菜单数据
- */
-export function getMenuCache(locale: string): any | null {
-  const key = getCacheKey(locale);
+function getCache(locale: string, menuType: string): any | undefined {
+  const key = getCacheKey(locale, menuType);
   const cached = cache.get(key);
   if (cached && Date.now() - cached.timestamp < CACHE_TTL) {
     return cached.data;
   }
-  return null;
+  return undefined;
 }
 
-/**
- * 设置菜单缓存
- */
-export function setMenuCache(locale: string, data: any): void {
-  const key = getCacheKey(locale);
+function setCache(locale: string, menuType: string, data: any): void {
+  const key = getCacheKey(locale, menuType);
   cache.set(key, { data, timestamp: Date.now() });
 }
 
-/**
- * 清除菜单缓存（可指定 locale）
- */
-export function clearMenuCache(locale?: string): void {
-  if (locale) {
-    cache.delete(getCacheKey(locale));
+function clearCache(locale?: string, menuType?: string): void {
+  if (locale && menuType) {
+    cache.delete(getCacheKey(locale, menuType));
+  } else if (locale) {
+    for (const key of cache.keys()) {
+      if (key.startsWith(`menus_${locale}`)) cache.delete(key);
+    }
   } else {
     cache.clear();
   }
 }
 
-// ---------- 存储操作 ----------
-function getMenuKey(locale: string, menuType: string): string {
-  return `${STORAGE_PREFIX}/${locale}/${menuType}.json`;
+export function clearMenuCache(locale?: string, menuType?: string): void {
+  const actualMenuType = menuType === 'footer' ? 'footer-menu' : menuType;
+  clearCache(locale, actualMenuType);
 }
 
+// ---------- 存储操作 ----------
 export async function readMenuFile(locale: string, menuType: string): Promise<any> {
-  const storage = getPrivateStorage();
-  const key = getMenuKey(locale, menuType);
-  try {
-    const content = await storage.read(key, 'utf8');
-    const parsed = JSON.parse(content as string);
-    if (menuType === 'custom_menus') {
-      return Array.isArray(parsed) ? parsed : [];
-    }
-    if (menuType === 'navigation' || menuType === 'footer') {
-      if (!parsed.items) parsed.items = [];
-      if (typeof parsed.isEditable !== 'boolean') parsed.isEditable = false;
-      return parsed;
-    }
-    return parsed;
-  } catch (error: any) {
-    const isNotFound =
-      error?.code === 'NoSuchKey' ||
-      error?.Code === 'NoSuchKey' ||
-      error?.message?.includes('NoSuchKey') ||
-      error?.message?.includes('not found');
-    if (isNotFound) {
-      if (menuType === 'custom_menus') return [];
-      return {
-        id: menuType,
-        name: menuType === 'navigation' ? '主导航' : '底部菜单',
-        isEditable: false,
-        items: [],
-      };
-    }
-    console.error(`[readMenuFile] 读取失败 Key: ${key}`, error);
-    if (menuType === 'custom_menus') return [];
-    return {
-      id: menuType,
-      name: menuType === 'navigation' ? '主导航' : '底部菜单',
-      isEditable: false,
-      items: [],
-    };
+  const actualMenuType = menuType === 'footer' ? 'footer-menu' : menuType;
+  const cached = getCache(locale, actualMenuType);
+  if (cached !== undefined) return cached;
+
+  let data: any;
+  if (actualMenuType === 'custom_menus') {
+    data = await menuService.getCustomMenus(locale);
+  } else {
+    data = await menuService.getMenu(actualMenuType, locale);
   }
+  setCache(locale, actualMenuType, data);
+  return data;
 }
 
 export async function writeMenuFile(locale: string, menuType: string, data: any): Promise<void> {
-  const storage = getPrivateStorage();
-  const key = getMenuKey(locale, menuType);
-  await storage.write(key, JSON.stringify(data, null, 2), {
-    contentType: 'application/json',
-  });
-  // 写入后清除该 locale 的缓存（包括组合缓存）
-  clearMenuCache(locale);
+  const actualMenuType = menuType === 'footer' ? 'footer-menu' : menuType;
+  
+  // 支持删除：如果 data 为 null，删除菜单记录
+  if (data === null) {
+    if (actualMenuType === 'custom_menus') {
+      await menuService.saveCustomMenus(locale, []);
+    } else {
+      await menuService.saveMenu(actualMenuType, locale, null);
+    }
+    clearCache(locale, actualMenuType);
+    return;
+  }
+  
+  if (actualMenuType === 'custom_menus') {
+    await menuService.saveCustomMenus(locale, data);
+  } else {
+    await menuService.saveMenu(actualMenuType, locale, data);
+  }
+  clearCache(locale, actualMenuType);
 }
 
 export async function getAvailableLocales(): Promise<string[]> {
-  const storage = getPrivateStorage();
-  try {
-    const keys = await storage.list(STORAGE_PREFIX);
-    const locales = new Set<string>();
-    for (const key of keys) {
-      const parts = key.split('/');
-      if (parts.length >= 3) {
-        locales.add(parts[2]);
+  return await menuService.getAvailableMenuLocales();
+}
+
+/**
+ * 批量更新菜单翻译
+ */
+export async function updateMenuTranslations(
+  targetLocale: string,
+  translations: Array<{
+    menuId: string;
+    config: any;
+  }>,
+  sourceLocale?: string
+): Promise<{ success: number; failed: number; errors: string[] }> {
+  let success = 0;
+  let failed = 0;
+  const errors: string[] = [];
+
+  for (const trans of translations) {
+    const { menuId, config: translatedConfig } = trans;
+    try {
+      let targetData = await readMenuFile(targetLocale, menuId);
+
+      if (targetData === null && sourceLocale) {
+        const sourceData = await readMenuFile(sourceLocale, menuId);
+        if (sourceData !== null) {
+          targetData = sourceData;
+        } else {
+          targetData = menuService.getDefaultMenu(menuId);
+        }
+      } else if (targetData === null) {
+        targetData = menuService.getDefaultMenu(menuId);
       }
+
+      if (targetData === null) {
+        const msg = `菜单 ${menuId} 在目标语言中不存在且无法创建`;
+        errors.push(msg);
+        failed++;
+        continue;
+      }
+
+      // 按 id 合并数组
+      function mergeLabels(original: any, translated: any): any {
+        if (original === null || typeof original !== 'object') return translated !== undefined ? translated : original;
+
+        if (Array.isArray(original) && Array.isArray(translated)) {
+          const translatedMap = new Map(translated.map(item => [item.id, item]));
+          const originalMap = new Map(original.map(item => [item.id, item]));
+          const mergedArray = translated.map(tItem => {
+            const oItem = originalMap.get(tItem.id);
+            if (oItem) {
+              return mergeLabels(oItem, tItem);
+            } else {
+              return { ...tItem };
+            }
+          });
+          return mergedArray;
+        }
+
+        const result = { ...original };
+        for (const key in translated) {
+          if (key === 'items' || key === 'children') {
+            if (Array.isArray(original[key]) && Array.isArray(translated[key])) {
+              result[key] = mergeLabels(original[key], translated[key]);
+            } else {
+              result[key] = translated[key];
+            }
+          } else {
+            result[key] = translated[key];
+          }
+        }
+        return result;
+      }
+
+      const merged = mergeLabels(targetData, translatedConfig);
+      await writeMenuFile(targetLocale, menuId, merged);
+      success++;
+    } catch (err: any) {
+      const msg = `菜单 ${menuId} 导入失败: ${err.message}`;
+      errors.push(msg);
+      failed++;
     }
-    if (locales.size === 0) {
-      return ['zh', 'en'];
-    }
-    return Array.from(locales).sort();
-  } catch (error) {
-    console.error('[getAvailableLocales] 获取失败:', error);
-    return ['zh', 'en'];
   }
+
+  return { success, failed, errors };
 }

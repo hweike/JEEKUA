@@ -35,15 +35,16 @@ export default function AiHelperProductModal({
 
   // 加载已开通的语言列表（默认不选中任何语言）
   useEffect(() => {
+    console.log('[AI Helper Modal] 加载语言列表...');
     fetch('/api/languages/enabled')
       .then(res => res.json())
       .then(data => {
+        console.log('[AI Helper Modal] 语言列表加载成功:', data);
         setLanguages(data);
-        // 默认不选中任何语言
         setTargetLocales([]);
       })
       .catch(err => {
-        console.error('获取语言列表失败:', err);
+        console.error('[AI Helper Modal] 获取语言列表失败:', err);
         setToast({ message: '获取语言列表失败', type: 'error' });
       });
   }, [sourceLocale]);
@@ -52,7 +53,6 @@ export default function AiHelperProductModal({
     languages.map(l => [l.code, l.zhName || l.nativeName || l.code])
   );
 
-  // 全选（排除源语言）
   const handleSelectAll = () => {
     const all = languages
       .filter(l => l.code !== sourceLocale)
@@ -60,13 +60,13 @@ export default function AiHelperProductModal({
     setTargetLocales(all);
   };
 
-  // 取消全选
   const handleDeselectAll = () => {
     setTargetLocales([]);
   };
 
   // 生成提示词
   const generatePrompt = async () => {
+    console.log('[AI Helper Modal] generatePrompt 开始');
     if (targetLocales.length === 0) {
       setToast({ message: '请至少选择一个目标语言', type: 'error' });
       return;
@@ -78,36 +78,45 @@ export default function AiHelperProductModal({
     }
 
     setLoading(true);
+    console.log('[AI Helper Modal] 设置 loading 为 true');
+
     try {
-      const exportRes = await fetch(
-        `/api/admin/AiHelper/export?type=product&locale=${sourceLocale}&ids=${selectedProductIds.join(',')}`
-      );
+      const exportUrl = `/api/admin/AiHelper/export?type=product&locale=${sourceLocale}&ids=${selectedProductIds.join(',')}`;
+      console.log('[AI Helper Modal] 请求导出数据:', exportUrl);
+      const exportRes = await fetch(exportUrl);
       const exportData = await exportRes.json();
+      console.log('[AI Helper Modal] 导出响应:', exportData);
       if (!exportData.success) throw new Error(exportData.error);
 
       setProducts(exportData.data.products || []);
+      console.log('[AI Helper Modal] 设置 products，数量:', exportData.data.products?.length);
 
+      const promptPayload = {
+        type: 'product',
+        sourceLocale,
+        targetLocales,
+        sourceData: exportData.data,
+        languageNames,
+      };
+      console.log('[AI Helper Modal] 请求生成提示词 payload:', promptPayload);
       const promptRes = await fetch('/api/admin/AiHelper/generate-prompt', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          type: 'product',
-          sourceLocale,
-          targetLocales,
-          sourceData: exportData.data,
-          languageNames,
-        }),
+        body: JSON.stringify(promptPayload),
       });
       const promptResult = await promptRes.json();
+      console.log('[AI Helper Modal] 生成提示词响应:', promptResult);
       if (!promptResult.success) throw new Error(promptResult.error);
 
       setPromptText(promptResult.prompt);
       setStep('prompt');
       setToast({ message: '提示词生成成功', type: 'success' });
     } catch (err: any) {
+      console.error('[AI Helper Modal] generatePrompt 出错:', err);
       setToast({ message: err.message || '生成失败', type: 'error' });
     } finally {
       setLoading(false);
+      console.log('[AI Helper Modal] 设置 loading 为 false');
     }
   };
 
@@ -149,6 +158,7 @@ export default function AiHelperProductModal({
 
   // 导入翻译结果
   const handleImport = async (jsonText: string) => {
+    console.log('[AI Helper Modal] handleImport 开始');
     const validation = validateJson(jsonText);
     if (!validation.valid) {
       setToast({ message: validation.error!, type: 'error' });
@@ -160,17 +170,19 @@ export default function AiHelperProductModal({
       setImporting(true);
       setImportResult(null);
 
+      const importPayload = {
+        type: 'product',
+        sourceLanguage: parsed.sourceLanguage || sourceLocale,
+        translations: parsed.translations,
+      };
+      console.log('[AI Helper Modal] 导入请求 payload:', importPayload);
       const res = await fetch('/api/admin/AiHelper/import', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          type: 'product',
-          sourceLanguage: parsed.sourceLanguage || sourceLocale,
-          translations: parsed.translations,
-        }),
+        body: JSON.stringify(importPayload),
       });
-
       const data = await res.json();
+      console.log('[AI Helper Modal] 导入响应:', data);
       if (!data.success) throw new Error(data.error || '导入失败');
 
       setImportResult({
@@ -189,9 +201,11 @@ export default function AiHelperProductModal({
         setToast({ message: `导入完成，成功 ${data.imported} 条，失败 ${data.failed} 条`, type: 'error' });
       }
     } catch (err: any) {
+      console.error('[AI Helper Modal] 导入出错:', err);
       setToast({ message: '导入失败: ' + err.message, type: 'error' });
     } finally {
       setImporting(false);
+      console.log('[AI Helper Modal] 设置 importing 为 false');
     }
   };
 

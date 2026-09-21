@@ -1,0 +1,13 @@
+{
+  "version": "1.0.3",
+  "release_date": "2026-08-19T10:00:00Z",
+  "description": "优化阿里SKU提取逻辑，修复1688价格解析问题",
+  "files": {
+    "config.json": "plugin-adapters/config.json",
+    "platform-adapter.js": "plugin-adapters/platform-adapter.js",
+    "content.js": "plugin-adapters/content.js",
+    "alibaba.js": "plugin-adapters/alibaba.js",
+    "_1688.js": "plugin-adapters/_1688.js"
+  },
+  "changelog": "初始版本：支持阿里国际站和1688商品采集"
+}

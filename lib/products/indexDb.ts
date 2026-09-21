@@ -42,6 +42,12 @@ const LIST_SELECT_FIELDS = `
   main_image_url, slug, status, templateId, updatedAt, createdAt
 `.replace(/\s+/g, ' ').trim();
 
+// ========== 新增：辅助函数判断是否使用全文搜索 ==========
+function shouldUseFullText(keyword: string): boolean {
+  // 如果关键词包含特殊字符（非字母数字、非中文、非空格），则使用全文搜索
+  return /[^a-zA-Z0-9\u4e00-\u9fa5\s]/.test(keyword);
+}
+
 // 解析数据库行（完整字段）
 function parseProductRow(row: any): ProductIndexItem {
   return {
@@ -202,7 +208,7 @@ export async function searchProducts(
 ): Promise<{ items: ProductIndexItem[]; total: number }> {
   let query = supabase
     .from('products')
-    .select(LIST_SELECT_FIELDS, { count: 'exact' })
+    .select(LIST_SELECT_FIELDS, { count: 'planned' })
     .eq('site_id', DEFAULT_SITE_ID)
     .eq('locale', locale)
     .is('parent_product_id', null);  // 修正：只查父产品
@@ -211,7 +217,18 @@ export async function searchProducts(
     query = query.eq('status', status);
   }
   if (keyword) {
-    query = query.or(`product_name.ilike.%${keyword}%,sku.ilike.%${keyword}%`);
+    // ★ 新增全文搜索分支
+    if (shouldUseFullText(keyword)) {
+      // 使用全文搜索（自动处理特殊字符）
+      const tsquery = keyword.trim().split(/\s+/).filter(Boolean).join(' & ');
+      query = query.textSearch('search_vector', tsquery, {
+        config: 'simple',
+        type: 'websearch',
+      });
+    } else {
+      // 普通模糊匹配（性能高）
+      query = query.or(`product_name.ilike.%${keyword}%,sku.ilike.%${keyword}%`);
+    }
   }
   if (categoryId) {
     query = query.eq('categoryId', categoryId);
@@ -254,12 +271,21 @@ export async function searchAllProducts(
 ): Promise<{ items: ProductIndexItem[]; total: number }> {
   let query = supabase
     .from('products')
-    .select(LIST_SELECT_FIELDS, { count: 'exact' })
+    .select(LIST_SELECT_FIELDS, { count: 'planned' })
     .eq('site_id', DEFAULT_SITE_ID)
     .eq('locale', locale);
 
   if (keyword) {
-    query = query.or(`product_name.ilike.%${keyword}%,sku.ilike.%${keyword}%`);
+    // ★ 新增全文搜索分支
+    if (shouldUseFullText(keyword)) {
+      const tsquery = keyword.trim().split(/\s+/).filter(Boolean).join(' & ');
+      query = query.textSearch('search_vector', tsquery, {
+        config: 'simple',
+        type: 'websearch',
+      });
+    } else {
+      query = query.or(`product_name.ilike.%${keyword}%,sku.ilike.%${keyword}%`);
+    }
   }
   if (categoryId) {
     query = query.eq('categoryId', categoryId);
@@ -484,4 +510,83 @@ export async function getAllProductIds(locale: string): Promise<string[]> {
     .eq('locale', locale);
   if (error) throw new Error(`getAllProductIds failed: ${error.message}`);
   return (data || []).map(row => row.productId);
+}
+
+// 获取子产品（变体）—— 包含完整字段（attributes 等）
+export async function getChildrenProductsFull(parentId: string, locale: string): Promise<ProductIndexItem[]> {
+  const { data, error } = await supabase
+    .from('products')
+    .select('*')
+    .eq('site_id', DEFAULT_SITE_ID)
+    .eq('parent_product_id', parentId)
+    .eq('locale', locale)
+    .order('updatedAt', { ascending: false });
+  if (error) throw new Error(`getChildrenProductsFull failed: ${error.message}`);
+  return (data || []).map(row => parseProductRow(row));
+}
+
+// ==================== 新增：批量获取子产品（变体）解决 N+1 查询 ====================
+
+/**
+ * 批量获取子产品（变体）- 解决 N+1 查询问题
+ * @param parentIds 父产品 ID 数组
+ * @param locale 语言
+ * @returns 按 parentId 分组的子产品 Map
+ */
+export async function getChildrenProductsFullBatch(
+  parentIds: string[],
+  locale: string
+): Promise<Map<string, ProductIndexItem[]>> {
+  if (!parentIds || parentIds.length === 0) {
+    return new Map();
+  }
+
+  const { data, error } = await supabase
+    .from('products')
+    .select('*')
+    .eq('site_id', DEFAULT_SITE_ID)
+    .eq('locale', locale)
+    .in('parent_product_id', parentIds)
+    .order('updatedAt', { ascending: false });
+
+  if (error) {
+    console.error('[getChildrenProductsFullBatch] 查询失败:', error);
+    return new Map();
+  }
+
+  // 按 parent_product_id 分组
+  const grouped = new Map<string, ProductIndexItem[]>();
+  for (const row of data || []) {
+    const parentId = row.parent_product_id;
+    if (!grouped.has(parentId)) {
+      grouped.set(parentId, []);
+    }
+    grouped.get(parentId)!.push(parseProductRow(row));
+  }
+
+  return grouped;
+}
+
+/**
+ * 批量查询产品索引（一次查多个 productId）
+ * 用于 ProductShowcaseBlock 等需要按 id 数组批量查询的场景
+ */
+export async function getProductIndexesBatch(
+  productIds: string[],
+  locale: string
+): Promise<any[]> {
+  if (!productIds || productIds.length === 0) return [];
+
+  const { data, error } = await supabase
+    .from('products')
+    .select('*')
+    .eq('site_id', DEFAULT_SITE_ID)
+    .eq('locale', locale)
+    .in('productId', productIds);
+
+  if (error) {
+    console.error('[getProductIndexesBatch] 查询失败:', error);
+    return [];
+  }
+  return data || [];
 }

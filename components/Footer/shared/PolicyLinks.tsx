@@ -1,30 +1,56 @@
-'use client';
-
+// components/Footer/shared/PolicyLinks.tsx
 import Link from 'next/link';
-import { useLocale } from 'next-intl';
+import { getLocale } from 'next-intl/server';
+import { unstable_cache } from 'next/cache';
+import { supabase } from '@/lib/supabase/client';
 
-// 政策链接列表（可根据需要扩展或从配置读取）
-const policyLinks = [
-  { key: 'privacy', label: 'Privacy Policy', path: '/privacy' },
-  { key: 'terms', label: 'Terms of Service', path: '/terms' },
-  { key: 'shipping', label: 'Shipping Policy', path: '/shipping' },
-  { key: 'returns', label: 'Returns Policy', path: '/returns' },
-];
+const SITE_ID = '000001';
+const POLICY_PAGE_IDS = ['10000002', '10000003', '10000004', '10000005', '10000007', '10000006'];
 
-export default function PolicyLinks() {
-  const locale = useLocale();
-  
+const getPolicyPages = unstable_cache(
+  async (locale: string) => {
+    const { data, error } = await supabase
+      .from('site_pages')
+      .select('id, title, slug')
+      .eq('site_id', SITE_ID)
+      .eq('locale', locale)
+      .in('id', POLICY_PAGE_IDS)
+      .eq('visible', 'visible')
+      .order('created_at', { ascending: true });
+
+    if (error) return [];
+    return data;
+  },
+  ['policy-pages'],
+  { revalidate: 3600 }
+);
+
+export default async function PolicyLinks() {
+  const locale = await getLocale();
+  const pages = await getPolicyPages(locale);
+
+  if (!pages || pages.length === 0) return null;
+
   return (
-    <div className="flex flex-wrap items-center justify-center gap-x-6 gap-y-2">
-      {policyLinks.map((link) => (
-        <Link
-          key={link.key}
-          href={`/${locale}${link.path}`}
-          className="text-xs text-muted-foreground hover:text-foreground transition-colors"
-        >
-          {link.label}
-        </Link>
-      ))}
+    <div
+      className="flex flex-wrap items-center justify-center"
+      style={{
+        columnGap: 'var(--spacing-6, 1.5rem)',
+        rowGap: 'var(--spacing-2, 0.5rem)',
+      }}
+    >
+      {pages.map((page) => {
+        const href = `/${locale}/${page.slug}`;
+        return (
+          <Link
+            key={page.id}
+            href={href}
+            className="policy-link"
+          >
+            {page.title}
+          </Link>
+        );
+      })}
     </div>
   );
 }

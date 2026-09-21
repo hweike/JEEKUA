@@ -4,7 +4,7 @@ import type { ComponentConfig } from '@puckeditor/core';
 import type { Components } from '../types';
 
 export const config: ComponentConfig<Components['BlogBlock']> = {
-  label: '博客展示',
+  label: '博客合集落地页',
   category: 'Blog',
   defaultProps: {
     showSidebar: true,

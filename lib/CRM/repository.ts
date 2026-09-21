@@ -1,3 +1,4 @@
+// lib/CRM/repository.ts
 import { supabase } from '@/lib/supabase/client';
 import type { Customer, CustomerStage, CustomerScale } from './types';
 
@@ -163,9 +164,10 @@ export async function createInquiryWithCustomer(data: {
   message: string;
   product_id?: string;
   customer_id?: string;
+  product_locale?: string;   // 新增
+  product_slug?: string;     // 新增
 }) {
   const siteId = data.site_id || DEFAULT_SITE_ID;
-  console.log('[createInquiry] siteId:', siteId, 'customer_id:', data.customer_id, 'email:', data.email);
 
   let customerId = data.customer_id || null;
   let customerName = data.name || '';
@@ -190,12 +192,10 @@ export async function createInquiryWithCustomer(data: {
       .maybeSingle();
 
     if (custErr) {
-      console.error('[createInquiry] 查询客户失败:', custErr);
       throw new Error(`获取客户信息失败: ${custErr.message}`);
     }
 
     if (customer) {
-      console.log('[createInquiry] 找到客户:', customer);
       const fullName = getFullName(customer.first_name, customer.last_name, customer.name, customer.email);
       customerName = data.name || fullName || '';
       customerEmail = data.email || customer.email || '';
@@ -211,7 +211,6 @@ export async function createInquiryWithCustomer(data: {
           .eq('email', data.email)
           .maybeSingle();
         if (!emailErr && byEmail) {
-          console.log('[createInquiry] 通过 email 找到客户:', byEmail);
           const fullName = getFullName(byEmail.first_name, byEmail.last_name, byEmail.name, byEmail.email);
           customerName = data.name || fullName || '';
           customerEmail = data.email || byEmail.email || '';
@@ -248,7 +247,6 @@ export async function createInquiryWithCustomer(data: {
       customerEmail = data.email;
       customerPhone = data.phone || existing.phone || '';
       customerCompany = data.company || existing.company_name || '';
-      console.log('[createInquiry] 已存在的客户:', existing);
     } else {
       // 自动注册新客户
       const newId = `cust_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
@@ -272,7 +270,6 @@ export async function createInquiryWithCustomer(data: {
       customerEmail = data.email;
       customerPhone = data.phone || '';
       customerCompany = data.company || '';
-      console.log('[createInquiry] 新注册客户:', { id: newId, email: data.email });
     }
   } else {
     // 未提供 customer_id 也未提供 email
@@ -281,13 +278,6 @@ export async function createInquiryWithCustomer(data: {
 
   // ---- 2. 最终校验 ----
   if (!customerEmail) {
-    console.error('[createInquiry] customerEmail 为空，当前状态:', {
-      customerId,
-      customerName,
-      customerEmail,
-      customerPhone,
-      customerCompany,
-    });
     throw new Error('无法获取客户邮箱，请检查客户信息');
   }
 
@@ -315,6 +305,8 @@ export async function createInquiryWithCustomer(data: {
       subject: subject,
       message: data.message,
       product_id: data.product_id || null,
+      product_locale: data.product_locale || null,   // 新增
+      product_slug: data.product_slug || null,       // 新增
       status: '待处理',
       created_at: new Date().toISOString(),
     })
@@ -322,7 +314,6 @@ export async function createInquiryWithCustomer(data: {
     .single();
 
   if (insErr) {
-    console.error('[createInquiry] 插入询盘失败:', insErr);
     throw new Error(`创建询盘失败: ${insErr.message}`);
   }
 
@@ -342,11 +333,9 @@ export async function createInquiryWithCustomer(data: {
     });
 
   if (replyErr) {
-    console.error('[createInquiry] 插入回复失败:', replyErr);
     throw new Error(`创建回复失败: ${replyErr.message}`);
   }
 
-  console.log('[createInquiry] 询盘创建成功:', inquiry.id);
   return inquiry;
 }
 
@@ -363,7 +352,7 @@ async function getCustomerName(customerId: string | null, siteId: string): Promi
   return data.name || null;
 }
 
-// ---- 获取单个询盘（含回复和客户信息） ----
+// ---- 获取单个询盘（含回复、客户信息和 product_slugs） ----
 export async function getInquiryWithDetails(inquiryId: number) {
   const { data: inquiry, error: inqErr } = await supabase
     .from('inquiries')
@@ -392,10 +381,26 @@ export async function getInquiryWithDetails(inquiryId: number) {
     if (!custErr) customer = cust;
   }
 
-  return { inquiry, replies, customer };
+  // ★ 新增：查询 product_slugs（旧数据兼容）
+  let product_slugs: Record<string, string> | null = null;
+  const productId = inquiry.product_id;
+  if (productId && !productId.startsWith('http://') && !productId.startsWith('https://')) {
+    const { data: products, error: prodErr } = await supabase
+      .from('products')
+      .select('locale, slug')
+      .eq('product_name', productId);
+    if (!prodErr && products && products.length > 0) {
+      product_slugs = products.reduce((acc, p) => {
+        acc[p.locale] = p.slug;
+        return acc;
+      }, {} as Record<string, string>);
+    }
+  }
+
+  return { inquiry, replies, customer, product_slugs };
 }
 
-// ---- 获取所有询盘（含关联客户简要信息） ----
+// ---- 获取所有询盘（含关联客户和产品 slugs） ----
 export async function getAllInquiriesWithCustomer() {
   // 1. 获取所有询盘
   const { data: inquiries, error: inqErr } = await supabase
@@ -425,38 +430,59 @@ export async function getAllInquiriesWithCustomer() {
     customersMap = new Map(customers.map(c => [c.id, c]));
   }
 
-  // 3. 组合结果（将 customers 附加到每个 inquiry）
-  return inquiries.map(inquiry => ({
+  // 3. ★ 提取所有非空、非 URL 的 product_id（存储的是产品名称）
+  const productNames = inquiries
+    .map(inq => inq.product_id)
+    .filter(id => id && !id.startsWith('http://') && !id.startsWith('https://'));
+
+  let nameSlugMap = new Map<string, Record<string, string>>();
+
+  if (productNames.length > 0) {
+    const { data: products, error: prodErr } = await supabase
+      .from('products')
+      .select('product_name, locale, slug')
+      .in('product_name', productNames);
+
+    if (!prodErr && products && products.length > 0) {
+      const grouped = products.reduce((acc, p) => {
+        if (!acc[p.product_name]) acc[p.product_name] = {};
+        acc[p.product_name][p.locale] = p.slug;
+        return acc;
+      }, {} as Record<string, Record<string, string>>);
+      nameSlugMap = new Map(Object.entries(grouped));
+    }
+  }
+
+  // 4. 组合结果
+  const result = inquiries.map(inquiry => ({
     ...inquiry,
     customers: inquiry.customer_id ? customersMap.get(inquiry.customer_id) || null : null,
+    product_slugs: nameSlugMap.get(inquiry.product_id) || null,
   }));
+
+  return result;
 }
 
 // ---- 更新询盘状态 ----
 export async function updateInquiryStatus(id: number, status: string, siteId?: string): Promise<boolean> {
   const effectiveSiteId = siteId || DEFAULT_SITE_ID;
-  console.log('[updateInquiryStatus] 更新条件:', { siteId: effectiveSiteId, id, status });
 
   const { data, error } = await supabase
     .from('inquiries')
-    .update({ 
-      status, 
-      updated_at: new Date().toISOString() 
+    .update({
+      status,
+      updated_at: new Date().toISOString(),
     })
     .eq('site_id', effectiveSiteId)
     .eq('id', id)
-    .select('id'); // 选择至少一个字段以返回更新的行
+    .select('id');
 
   if (error) {
-    console.error('[updateInquiryStatus] Supabase 错误:', error);
     throw new Error(`updateInquiryStatus failed: ${error.message}`);
   }
 
-  const updated = data && data.length > 0;
-  console.log('[updateInquiryStatus] 更新结果:', updated, '影响行数:', data?.length || 0);
-  return updated;
+  return data && data.length > 0;
 }
-
 
 // ---- 添加回复（管理员/用户/系统） ----
 export async function addReply(data: {
@@ -502,7 +528,6 @@ export async function createAdminInquiry(data: {
 }) {
   const siteId = data.site_id || DEFAULT_SITE_ID;
 
-  // 获取客户信息
   const { data: customer, error: custErr } = await supabase
     .from('customers')
     .select('*')
@@ -511,7 +536,6 @@ export async function createAdminInquiry(data: {
     .single();
   if (custErr) throw new Error(`客户不存在: ${custErr.message}`);
 
-  // 生成编号
   const { data: existingNumbers, error: numErr } = await supabase
     .from('inquiries')
     .select('inquiry_number')
@@ -522,7 +546,6 @@ export async function createAdminInquiry(data: {
 
   const subject = `Inquiry No.: #${inquiryNumber}-${customer.name || customer.email || 'Customer'}`;
 
-  // 插入询盘
   const { data: inquiry, error: insErr } = await supabase
     .from('inquiries')
     .insert({
@@ -543,7 +566,6 @@ export async function createAdminInquiry(data: {
     .single();
   if (insErr) throw new Error(`创建询盘失败: ${insErr.message}`);
 
-  // 添加管理员的首条回复（作为初始消息）
   await addReply({
     inquiry_id: inquiry.id,
     site_id: siteId,

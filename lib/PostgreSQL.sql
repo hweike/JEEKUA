@@ -67,41 +67,52 @@ CREATE INDEX IF NOT EXISTS "idx_site_domains_domain" ON "site_domains" ("domain"
 -- ========== 产品表 ==========
 DROP TABLE IF EXISTS "products" CASCADE;
 CREATE TABLE IF NOT EXISTS "products" (
-    "site_id"         TEXT NOT NULL,
-    "productId"       TEXT NOT NULL,
-    "locale"          TEXT NOT NULL,          -- 新增 locale 作为主键的一部分
-    "productLineId"   TEXT,
-    "categoryId"      TEXT NOT NULL,
-    "seriesId"        TEXT,
-    "parent_product_id" TEXT,
-    "sku"             TEXT NOT NULL,
-    "product_name"    TEXT NOT NULL,
-    "brand"           TEXT,
-    "price_tiers"     TEXT,
-    "currency"        TEXT DEFAULT 'USD',
-    "availability"    TEXT DEFAULT 'in_stock',
-    "min_order_quantity" INTEGER DEFAULT 1,
-    "main_image_url"  TEXT,
-    "attributes"      TEXT,
-    "slug"            TEXT,
-    "status"          TEXT DEFAULT 'published',
-    "templateId"      TEXT DEFAULT '',
-    "updatedAt"       TEXT NOT NULL,
-    "createdAt"       TEXT NOT NULL,
-    -- 复合主键：支持同一产品多语言版本
+    "site_id"              TEXT NOT NULL,
+    "productId"            TEXT NOT NULL,
+    "locale"               TEXT NOT NULL,
+    "productLineId"        TEXT,
+    "categoryId"           TEXT NOT NULL,
+    "seriesId"             TEXT,
+    "parent_product_id"    TEXT,
+    "sku"                  TEXT NOT NULL,
+    "product_name"         TEXT NOT NULL,
+    "brand"                TEXT,
+    "price_tiers"          TEXT,
+    "currency"             TEXT DEFAULT 'USD',
+    "availability"         TEXT DEFAULT 'in_stock',
+    "min_order_quantity"   INTEGER DEFAULT 1,
+    "main_image_url"       TEXT,
+    "attributes"           TEXT,
+    "slug"                 TEXT,
+    "status"               TEXT DEFAULT 'published',
+    "templateId"           TEXT DEFAULT '',
+    "updatedAt"            TEXT NOT NULL,
+    "createdAt"            TEXT NOT NULL,
+    -- ========== 新增同步字段 ==========
+    "source_locale"        TEXT,                     -- 来源语言（如 'en'）
+    "source_product_id"    TEXT,                     -- 源产品ID（用于追溯）
+    "source_content_hash"  TEXT,                     -- 源内容的哈希（用于判断变更）
+    "last_sync_time"       TEXT,                     -- 最后同步时间（ISO字符串）
+    "last_sync_operator"   TEXT,                     -- 操作人
+    -- =====================================
+    -- 全文搜索向量列（自动生成）
+    "search_vector"        TSVECTOR GENERATED ALWAYS AS (
+        setweight(to_tsvector('simple', coalesce(product_name, '')), 'A') ||
+        setweight(to_tsvector('simple', coalesce(sku, '')), 'B')
+    ) STORED,
     PRIMARY KEY ("site_id", "productId", "locale"),
     FOREIGN KEY ("site_id") REFERENCES "sites"("site_id") ON DELETE CASCADE
 );
 
--- ========== 索引（保持不变） ==========
-CREATE INDEX IF NOT EXISTS "idx_products_site_locale" ON "products" ("site_id", "locale");
-CREATE INDEX IF NOT EXISTS "idx_products_site_productLine" ON "products" ("site_id", "productLineId");
-CREATE INDEX IF NOT EXISTS "idx_products_site_category" ON "products" ("site_id", "categoryId");
-CREATE INDEX IF NOT EXISTS "idx_products_site_parent" ON "products" ("site_id", "parent_product_id");
-CREATE INDEX IF NOT EXISTS "idx_products_site_status" ON "products" ("site_id", "status");
-CREATE INDEX IF NOT EXISTS "idx_products_site_updated" ON "products" ("site_id", "updatedAt");
+-- 原有索引
+CREATE INDEX IF NOT EXISTS "idx_products_site_locale"          ON "products" ("site_id", "locale");
+CREATE INDEX IF NOT EXISTS "idx_products_site_productLine"    ON "products" ("site_id", "productLineId");
+CREATE INDEX IF NOT EXISTS "idx_products_site_category"       ON "products" ("site_id", "categoryId");
+CREATE INDEX IF NOT EXISTS "idx_products_site_parent"         ON "products" ("site_id", "parent_product_id");
+CREATE INDEX IF NOT EXISTS "idx_products_site_status"         ON "products" ("site_id", "status");
+CREATE INDEX IF NOT EXISTS "idx_products_site_updated"        ON "products" ("site_id", "updatedAt");
 
--- ========== 复合索引（优化查询） ==========
+-- 复合索引
 CREATE INDEX IF NOT EXISTS "idx_products_list" ON "products" 
     ("site_id", "locale", "parent_product_id", "status", "categoryId", "updatedAt" DESC);
 
@@ -111,10 +122,94 @@ CREATE INDEX IF NOT EXISTS "idx_products_uncategorized" ON "products"
 CREATE INDEX IF NOT EXISTS "idx_products_sku" ON "products" ("sku");
 CREATE INDEX IF NOT EXISTS "idx_products_parent_id" ON "products" ("parent_product_id");
 
+CREATE INDEX IF NOT EXISTS "idx_products_lookup" 
+ON "products" ("site_id", "locale", "productId");
+
+-- ========== 新增：针对 searchProducts 的复合索引 ==========
+-- 1. status='all' 时的通用查询（无 status 过滤，有 categoryId）
+CREATE INDEX IF NOT EXISTS "idx_products_search_all" ON "products" 
+    ("site_id", "locale", "parent_product_id", "categoryId", "updatedAt" DESC);
+
+-- 2. 带 seriesId 的查询
+CREATE INDEX IF NOT EXISTS "idx_products_search_series" ON "products" 
+    ("site_id", "locale", "parent_product_id", "categoryId", "seriesId", "updatedAt" DESC);
+
+-- 3. 带 status 的查询
+CREATE INDEX IF NOT EXISTS "idx_products_search_status" ON "products" 
+    ("site_id", "locale", "parent_product_id", "status", "categoryId", "updatedAt" DESC);
+
+-- 4. 无 categoryId、无 seriesId、无 status 的通用列表（可选但推荐）
+CREATE INDEX IF NOT EXISTS "idx_products_search_basic" ON "products" 
+    ("site_id", "locale", "parent_product_id", "updatedAt" DESC);
+-- ============================================================
+
+-- 全文搜索 GIN 索引
+CREATE INDEX IF NOT EXISTS "idx_products_search_vector" ON "products" USING GIN ("search_vector");
+
+-- ========== 新增：同步状态查询索引 ==========
+CREATE INDEX IF NOT EXISTS "idx_products_source" ON "products" ("source_locale", "source_product_id");
+
 -- （可选）如果需要唯一 SKU 约束，可启用：
 -- CREATE UNIQUE INDEX IF NOT EXISTS "idx_unique_sku_site_locale" ON "products" ("site_id", "locale", "sku");
 
+-- ========== 产品保存异步任务表 ==========
+CREATE TABLE IF NOT EXISTS product_tasks (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  status TEXT NOT NULL DEFAULT 'pending',
+  result JSONB,
+  error TEXT,
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW()
+);
 
+-- 索引
+CREATE INDEX IF NOT EXISTS idx_product_tasks_status ON product_tasks(status);
+CREATE INDEX IF NOT EXISTS idx_product_tasks_created_at ON product_tasks(created_at);
+
+-- ========== 产品价格表（内部价格，非销售价格） ==========
+CREATE TABLE product_prices (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    model TEXT NOT NULL UNIQUE,
+    product_line TEXT,                          -- 产品线
+    moq INTEGER,                                -- 最小起订量（整数）
+    lpp_price NUMERIC(10,4),
+    pp_price NUMERIC(10,4),
+    exchange_rate NUMERIC(10,6),
+    price_moq_20 NUMERIC(10,4),
+    price_moq_100 NUMERIC(10,4),
+    price_moq_500 NUMERIC(10,4),
+    price_A NUMERIC(10,4),
+    price_B NUMERIC(10,4),
+    parent_model TEXT,
+    created_at TIMESTAMPTZ DEFAULT now(),
+    updated_at TIMESTAMPTZ DEFAULT now()
+);
+
+
+-- 索引（可按需添加）
+CREATE INDEX idx_product_prices_model ON product_prices(model);
+CREATE INDEX idx_product_prices_parent_model ON product_prices(parent_model);
+CREATE INDEX idx_product_prices_product_line ON product_prices(product_line);
+CREATE INDEX idx_product_prices_moq ON product_prices(moq);
+
+
+-- ========== 产品价格表同步到Product表 ==========
+
+UPDATE products p
+SET 
+    price_tiers = (
+        SELECT jsonb_build_array(
+            jsonb_build_object('min_qty', 20, 'max_qty', NULL, 'price', pp.price_moq_20),
+            jsonb_build_object('min_qty', 100, 'max_qty', NULL, 'price', pp.price_moq_100),
+            jsonb_build_object('min_qty', 500, 'max_qty', NULL, 'price', pp.price_moq_500)
+        )
+        FROM product_prices pp
+        WHERE pp.model = p.sku
+    ),
+    min_order_quantity = 20
+WHERE EXISTS (
+    SELECT 1 FROM product_prices pp WHERE pp.model = p.sku
+);
 
 -- ========== 产品与资源关联表 ==========
 DROP TABLE IF EXISTS "resource_product" CASCADE;
@@ -134,8 +229,14 @@ CREATE INDEX IF NOT EXISTS "idx_resource_product_site_lookup" ON "resource_produ
 CREATE INDEX IF NOT EXISTS "idx_product_resources_site" ON "resource_product" ("site_id", "product_id");
 
 
--- ========== 网站页面表（复合主键，包含 template_hash） ==========
+-- ============================================================
+-- 文件名: 01_create_site_pages.sql
+-- 用途: 全新建库时执行，包含表结构 + 索引 + 初始化数据
+-- ============================================================
+
+-- ========== 1. 网站页面表（复合主键，包含 template_hash） ==========
 DROP TABLE IF EXISTS site_pages CASCADE;
+
 CREATE TABLE site_pages (
   site_id          TEXT NOT NULL,
   id               TEXT NOT NULL,
@@ -157,17 +258,141 @@ CREATE TABLE site_pages (
   PRIMARY KEY (site_id, id, locale)
 );
 
--- 唯一约束：同一站点、同一语言下 slug 唯一
-CREATE UNIQUE INDEX idx_site_pages_site_locale_slug ON site_pages (site_id, locale, slug);
+-- ========== 2. 索引 ==========
 
--- 索引：按语言查询
-CREATE INDEX idx_site_pages_locale ON site_pages (locale);
+-- 唯一约束：同一站点、同一语言下 slug 唯一
+CREATE UNIQUE INDEX idx_site_pages_site_locale_slug 
+ON site_pages (site_id, locale, slug);
 
 -- 索引：通过模板 ID 查找所有引用页面（模板同步时使用）
-CREATE INDEX idx_site_pages_template ON site_pages (template);
+CREATE INDEX idx_site_pages_template 
+ON site_pages (site_id, template);
 
--- 索引：按模板哈希查询（用于快速比对，可选，但可加速某些场景）
-CREATE INDEX idx_site_pages_template_hash ON site_pages (template_hash);
+-- 索引：按模板哈希查询（用于快速比对）
+CREATE INDEX idx_site_pages_template_hash 
+ON site_pages (template_hash);
+
+-- 索引：按 site_id + locale + type 组合查询（加速固定页面布局查找）
+CREATE INDEX idx_site_pages_site_locale_type 
+ON site_pages (site_id, locale, type);
+
+-- 说明：以下索引已删除，因为它们被主键或上面的索引覆盖：
+-- idx_site_pages_locale  → 主键 (site_id, id, locale) 已覆盖
+-- idx_site_pages_type    → idx_site_pages_site_locale_type 已覆盖
+
+
+-- ========== 3. 初始化固定布局记录（仅 LAYOUT_CATEGORIES） ==========
+-- 说明：
+--   1. 仅初始化需要"共享布局"的分类（product / blog / document 等）
+--   2. template_data 和 template_hash 初始为 NULL，等模板发布时由 syncTemplateToPages 填充
+--   3. home / custom / page / policy 等"实例页面"不在此初始化，它们使用页面自身的 ID
+
+WITH layouts (id, title, type, template) AS (
+  VALUES
+    -- 产品相关
+    ('product_layout', '产品详情页布局', 'product', 'default_product_published'),
+    ('product_category_layout', '产品分类页布局', 'product_category', 'default_product_category_published'),
+    ('product_line_layout', '产品线页布局', 'product_line', 'default_product_line_published'),
+    ('product_line_PSU_layout', '工业电源产品线布局', 'product_line', 'default_product_line_psu_published'),
+    
+    -- 文档相关
+    ('document_layout', '文档详情页布局', 'document', 'default_document_published'),
+    ('document_library_layout', '文档库页布局', 'document_library', 'default_document_library_published'),
+    
+    -- 博客相关
+    ('blog_layout', '博客列表页布局', 'blog', 'default_blog_published'),
+    ('blog_post_layout', '博客详情页布局', 'blog_post', 'default_blog_post_published'),
+    ('news_layout', '新闻频道布局', 'blog_collection', 'default_news_published'),
+    
+    -- 视频相关
+    ('video_category_layout', '视频分类页布局', 'video_category', 'default_video_category_published'),
+    ('video_layout', '视频详情页布局', 'video', 'default_video_published')
+)
+INSERT INTO site_pages (
+    site_id,
+    id,
+    locale,
+    title,
+    type,
+    preset,
+    visible,
+    template,
+    template_data,      -- ✅ 初始为 NULL
+    template_hash,      -- ✅ 初始为 NULL
+    slug,
+    created_at,
+    updated_at
+)
+SELECT
+    '000001',
+    id,
+    'base',
+    title,
+    type,
+    true,
+    'visible',
+    template,
+    NULL,               -- ✅ 初始为 NULL，等模板发布时填充
+    NULL,               -- ✅ 初始为 NULL
+    id,
+    NOW(),
+    NOW()
+FROM layouts
+ON CONFLICT (site_id, id, locale) DO NOTHING;
+
+
+-- ========== 4. 初始化首页记录（zh / en 两个站点） ==========
+-- 说明：
+--   home 是"实例页面"，不是"布局类型"，使用页面自身的 ID（10000001）
+--   每个语言一条记录，通过 locale 区分
+
+WITH home_pages (locale, title, slug) AS (
+  VALUES
+    ('zh', '首页', 'home'),
+    ('en', 'Home', 'home')
+)
+INSERT INTO site_pages (
+    site_id,
+    id,
+    locale,
+    title,
+    type,
+    preset,
+    visible,
+    template,
+    template_data,
+    template_hash,
+    slug,
+    created_at,
+    updated_at
+)
+SELECT
+    '000001',
+    '10000001',             -- ✅ home 使用固定 ID
+    locale,
+    title,
+    'home',
+    true,                   -- preset = true，防止误删
+    'visible',
+    'default_homepage_published',  -- 关联首页模板
+    NULL,                   -- ✅ 初始为 NULL
+    NULL,
+    slug,
+    NOW(),
+    NOW()
+FROM home_pages
+ON CONFLICT (site_id, id, locale) DO NOTHING;
+
+
+-- ========== 5. 注释说明 ==========
+
+COMMENT ON TABLE site_pages IS '网站页面表 - 存储所有页面的元数据、SEO 和布局配置';
+COMMENT ON COLUMN site_pages.locale IS '语言代码（如 en/zh/base），base 表示全局布局模板（不区分语言）';
+COMMENT ON COLUMN site_pages.type IS '页面类型: page | product | product_category | product_line | document | document_library | blog | blog_post | blog_collection | video_category | video | home | custom | policy';
+COMMENT ON COLUMN site_pages.preset IS '是否为系统预设页面（true 时不可删除）';
+COMMENT ON COLUMN site_pages.template IS '关联的模板 ID（来自 webbuilder/templates）';
+COMMENT ON COLUMN site_pages.template_hash IS '当前嵌入模板数据的哈希值，用于快速比对版本变化';
+COMMENT ON COLUMN site_pages.template_data IS '完整的 Puck 布局数据（JSONB），存储页面组件的完整配置';
 
 
 -- ========== 博客文章表 ==========
@@ -372,6 +597,8 @@ CREATE TABLE "inquiries" (
     "subject"           TEXT DEFAULT '',          -- 邮件主题（如 'Inquiry No.: #000001-Vic huang'）
     "message"           TEXT NOT NULL,
     "product_id"        TEXT,
+    "product_locale"    TEXT,                     -- 产品所属语言（如 'zh', 'en'）
+    "product_slug"      TEXT,                     -- 产品在该语言下的友好 URL 名称
     
     -- 状态（应用层管理有效值）
     "status"            TEXT DEFAULT '待处理' 
@@ -390,6 +617,9 @@ CREATE INDEX "idx_inquiries_site_status" ON "inquiries" ("site_id", "status");
 CREATE INDEX "idx_inquiries_site_created" ON "inquiries" ("site_id", "created_at");
 CREATE INDEX "idx_inquiries_customer" ON "inquiries" ("site_id", "customer_id");
 CREATE INDEX "idx_inquiries_number" ON "inquiries" ("inquiry_number");
+-- 新增索引：按 product_locale 和 product_slug 查询（可选）
+CREATE INDEX "idx_inquiries_product_locale" ON "inquiries" ("product_locale");
+CREATE INDEX "idx_inquiries_product_slug" ON "inquiries" ("product_slug");
 
 -- ============================================================
 -- 3. 询盘回复表（对话记录）
@@ -445,6 +675,7 @@ CREATE INDEX "idx_verification_codes_email" ON "verification_codes" ("email");
 
 -- ========== 组件文本表 ==========
 -- 原表已有 site_id，且唯一约束已包含 site_id，直接添加外键并调整索引即可
+-- 这个表已经放弃了，不需要了
 DROP TABLE IF EXISTS "component_texts" CASCADE;
 CREATE TABLE IF NOT EXISTS "component_texts" (
     "id"          SERIAL PRIMARY KEY,
@@ -469,7 +700,7 @@ CREATE INDEX IF NOT EXISTS "idx_component_texts_site_lookup"
 --     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 -- );
 
--- ========== 2. pages 表 ==========
+-- ========== 1. 创建 pages 表 ==========
 DROP TABLE IF EXISTS "pages" CASCADE;
 CREATE TABLE IF NOT EXISTS "pages" (
     "id"                   TEXT NOT NULL,
@@ -495,25 +726,31 @@ CREATE TABLE IF NOT EXISTS "pages" (
     "last_sync_time"       TEXT,
     "last_sync_operator"   TEXT,
     "translated_by_ai"     INTEGER DEFAULT 0,
-    "updatedAt"            TEXT NOT NULL,   -- 注意列名是混合大小写
+    "updatedAt"            TEXT NOT NULL,
     "createdAt"            TEXT DEFAULT (CURRENT_TIMESTAMP)::TEXT,
     PRIMARY KEY ("id", "site_id", "locale"),
     FOREIGN KEY ("site_id") REFERENCES "sites"("site_id") ON DELETE CASCADE
 );
 
--- ========== 索引优化 ==========
--- 基础索引
+-- ========== 2. 索引优化（加速筛选、排序、搜索） ==========
+-- 基础查询索引（站点 + 语言）
 CREATE INDEX IF NOT EXISTS "idx_pages_site_locale" ON "pages" ("site_id", "locale");
+
+-- 类型筛选索引（类型 + 站点）
 CREATE INDEX IF NOT EXISTS "idx_pages_type_site" ON "pages" ("type", "site_id");
+
+-- URL 查询索引
 CREATE INDEX IF NOT EXISTS "idx_pages_url_site" ON "pages" ("url", "site_id");
+
+-- 翻译/同步相关索引
 CREATE INDEX IF NOT EXISTS "idx_pages_source" ON "pages" ("source_locale", "source_content_hash");
 CREATE INDEX IF NOT EXISTS "idx_pages_id_source_locale" ON "pages" ("id", "source_locale") WHERE source_locale IS NOT NULL;
 
--- 新增复合索引：加速分页查询（注意列名加双引号保持大小写一致）
+-- 复合索引：加速分页查询（最常用查询：site_id + locale + type + updatedAt 排序）
 CREATE INDEX IF NOT EXISTS "idx_pages_site_locale_type_updated" 
 ON "pages" ("site_id", "locale", "type", "updatedAt" DESC);
 
--- 新增 GIN 索引：加速标题模糊搜索
+-- 标题全文搜索（使用 pg_trgm）
 CREATE EXTENSION IF NOT EXISTS "pg_trgm";
 CREATE INDEX IF NOT EXISTS "idx_pages_title_trgm" 
 ON "pages" USING GIN ("title" gin_trgm_ops);
@@ -564,40 +801,85 @@ CREATE INDEX IF NOT EXISTS "idx_sync_logs_created" ON "sync_logs" ("created_at")
 -- CREATE UNIQUE INDEX idx_sync_logs_unique ON sync_logs (source_id, source_locale, target_locale, source_hash);
 
 
--- ========== 文件管理表 ==========
--- 1. 创建文件主表（移除 file_hash 的唯一约束）
-CREATE TABLE media_files (
+-- ========== 完整文件管理表结构 ==========
+
+-- 1. 文件分类表
+CREATE TABLE IF NOT EXISTS file_categories (
   id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  site_id       TEXT NOT NULL,
+  name          TEXT NOT NULL,
+  slug          TEXT NOT NULL,
+  parent_id     UUID NULL REFERENCES file_categories(id) ON DELETE SET NULL,
+  "order"       INT DEFAULT 0,
+  description   TEXT DEFAULT '',
+  icon          TEXT DEFAULT 'folder',
+  color         TEXT DEFAULT '#3b82f6',
+  created_at    TIMESTAMPTZ DEFAULT NOW(),
+  updated_at    TIMESTAMPTZ DEFAULT NOW(),
+  deleted_at    TIMESTAMPTZ,
+  CONSTRAINT unique_site_slug UNIQUE (site_id, slug),
+  CONSTRAINT unique_site_name UNIQUE (site_id, name)
+);
+
+-- 2. 文件主表（已包含 site_id 和 category_id）
+CREATE TABLE IF NOT EXISTS media_files (
+  id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  site_id       TEXT NOT NULL DEFAULT '000001',
   storage_key   TEXT UNIQUE NOT NULL,
   display_name  TEXT NOT NULL,
   mime_type     TEXT NOT NULL,
   size          BIGINT NOT NULL,
-  file_hash     TEXT NOT NULL,                -- 已移除 UNIQUE 约束，变为普通字段
+  file_hash     TEXT NOT NULL,
   width         INT,
   height        INT,
-  source_url    TEXT,                         -- 原始图片URL（外部导入时记录）
-  created_at    TIMESTAMPTZ DEFAULT now(),
+  source_url    TEXT,
+  category_id   UUID NULL REFERENCES file_categories(id) ON DELETE SET NULL,
+  created_at    TIMESTAMPTZ DEFAULT NOW(),
+  updated_at    TIMESTAMPTZ DEFAULT NOW(),
   deleted_at    TIMESTAMPTZ
 );
 
--- 2. 创建文件引用关系表
-CREATE TABLE file_references (
+-- 3. 文件引用关系表
+CREATE TABLE IF NOT EXISTS file_references (
   id             SERIAL PRIMARY KEY,
+  site_id        TEXT NOT NULL DEFAULT '000001',
   file_id        UUID NOT NULL REFERENCES media_files(id) ON DELETE CASCADE,
   reference_type VARCHAR(50) NOT NULL,
   reference_id   VARCHAR(255) NOT NULL,
   alt_text       TEXT,
   sort_order     INT DEFAULT 0,
-  created_at     TIMESTAMPTZ DEFAULT now(),
+  created_at     TIMESTAMPTZ DEFAULT NOW(),
   UNIQUE(file_id, reference_type, reference_id)
 );
 
--- 索引（保持性能）
-CREATE INDEX idx_media_files_hash ON media_files(file_hash);
-CREATE INDEX idx_media_files_created ON media_files(created_at DESC);
-CREATE INDEX idx_media_files_source_url ON media_files(source_url);  -- 加速基于 source_url 的去重查询
-CREATE INDEX idx_file_ref_target ON file_references(reference_type, reference_id);
-CREATE INDEX idx_file_ref_file ON file_references(file_id);
+-- 4. 索引
+CREATE INDEX IF NOT EXISTS idx_media_files_hash ON media_files(file_hash);
+CREATE INDEX IF NOT EXISTS idx_media_files_created ON media_files(created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_media_files_source_url ON media_files(source_url);
+CREATE INDEX IF NOT EXISTS idx_media_files_category ON media_files(category_id);
+CREATE INDEX IF NOT EXISTS idx_media_files_site_id ON media_files(site_id);
+CREATE INDEX IF NOT EXISTS idx_file_categories_parent ON file_categories(parent_id);
+CREATE INDEX IF NOT EXISTS idx_file_categories_order ON file_categories("order");
+CREATE INDEX IF NOT EXISTS idx_file_categories_site ON file_categories(site_id);
+CREATE INDEX IF NOT EXISTS idx_file_ref_target ON file_references(reference_type, reference_id);
+CREATE INDEX IF NOT EXISTS idx_file_ref_file ON file_references(file_id);
+CREATE INDEX IF NOT EXISTS idx_file_ref_site ON file_references(site_id);
+
+-- 5. 插入默认分类（注意 site_id）
+INSERT INTO file_categories (id, site_id, name, slug, "order", description)
+VALUES (
+  '00000000-0000-0000-0000-000000000000',
+  '000001',
+  '未分类',
+  'uncategorized',
+  0,
+  '系统默认分类，存放尚未分类的文件'
+) ON CONFLICT (id) DO NOTHING;
+
+-- 6. 将现有未分类的文件关联到默认分类
+UPDATE media_files 
+SET category_id = '00000000-0000-0000-0000-000000000000'
+WHERE category_id IS NULL;
 
 
 
@@ -618,10 +900,30 @@ CREATE TABLE IF NOT EXISTS "site_configs" (
     PRIMARY KEY ("id", "site_id", "locale"),
     FOREIGN KEY ("site_id") REFERENCES "sites"("site_id") ON DELETE CASCADE
 );
--- 为 site_configs 表创建索引（保持原有）
+
+-- 复合索引：按 site_id, locale, id 顺序，用于批量查询多个语言的菜单
+CREATE INDEX IF NOT EXISTS "idx_site_configs_lookup" ON "site_configs" ("site_id", "locale", "id");
+
+-- 保留原有索引（site_id, locale），覆盖其他查询场景
 CREATE INDEX IF NOT EXISTS "idx_configs_site_locale" ON "site_configs" ("site_id", "locale");
 
+-- ========== 已开通语言站点设置表 ==========
 
+-- 创建语言设置表（只有一行记录）
+CREATE TABLE IF NOT EXISTS language_settings (
+    id INTEGER PRIMARY KEY DEFAULT 1 CHECK (id = 1),
+    enabled JSON NOT NULL,
+    default_language TEXT NOT NULL DEFAULT 'zh',
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+
+-- 插入初始数据（所有语言启用，默认中文）
+INSERT INTO language_settings (enabled, default_language)
+VALUES (
+    (SELECT json_object_agg(code, true) FROM unnest(ARRAY['en','zh','es','de','ja','fr','ar','ko','pt','it','nl','pl','ru','tr','id','vi','th','he','sv','no','da','fi','el','cs','hu','ro','bg','hr','sk','sl','lt','lv','et','ms','hi','ta','uk','sr','mk','sq','ca','eu']) AS code),
+    'zh'
+)
+ON CONFLICT (id) DO NOTHING;
 
 -- =====================================================
 -- SEO 智能生成系统 - 完整建库脚本
@@ -1195,10 +1497,7 @@ SELECT
 WHERE NOT EXISTS (SELECT 1 FROM admin_users LIMIT 1);
 
 
-
-
--- ========== 网站基本设置表 ==========
-
+-- ========== 站点基本设置表 ==========
 CREATE TABLE IF NOT EXISTS sites_settings (
   id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
   site_id TEXT NOT NULL DEFAULT '000001',
@@ -1215,12 +1514,18 @@ CREATE TABLE IF NOT EXISTS sites_settings (
   province TEXT,
   postal_code TEXT,
   brand JSONB DEFAULT '[]'::jsonb,
+  social_share_image TEXT,                           -- 社交分享图片
+  logo TEXT,                                         -- 企业 Logo
   created_at TIMESTAMP WITH TIME ZONE DEFAULT now(),
   updated_at TIMESTAMP WITH TIME ZONE DEFAULT now()
 );
 
 -- 为 site_id 创建唯一索引，确保每个站点只有一条记录
 CREATE UNIQUE INDEX IF NOT EXISTS idx_sites_settings_site_id ON sites_settings (site_id);
+
+-- 可选：添加注释说明
+COMMENT ON COLUMN sites_settings.logo IS '企业Logo图片URL';
+COMMENT ON COLUMN sites_settings.social_share_image IS '社交媒体分享图片URL（建议尺寸1200×628px）';
 
 
 
@@ -1443,3 +1748,726 @@ CREATE INDEX IF NOT EXISTS idx_user_platform_credentials_user_platform ON user_p
 
 4. 所有业务表查询必须添加 WHERE site_id = ? 条件，或启用 RLS。
 */
+
+
+-- ============================================================
+-- 以下为产品采集相关表（crawler_configs、crawler_products）
+-- ============================================================
+
+-- ============================================================
+-- 1. crawler_configs 表（选择器配置）
+-- ============================================================
+CREATE TABLE IF NOT EXISTS crawler_configs (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    site_id TEXT NOT NULL DEFAULT '000001',
+    config JSONB NOT NULL,
+    version TEXT NOT NULL DEFAULT '1.0.0',
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    updated_by TEXT,
+    UNIQUE(site_id)
+);
+
+-- ============================================================
+-- 2. crawler_products 表（采集数据临时表）
+-- ============================================================
+CREATE TABLE IF NOT EXISTS crawler_products (
+    -- ========== 主键和基础字段 ==========
+    crawler_id TEXT PRIMARY KEY,
+    site_id TEXT NOT NULL DEFAULT '000001',
+    locale TEXT NOT NULL DEFAULT 'en',
+
+    -- ========== 商品核心字段 ==========
+    product_id TEXT NOT NULL,
+    product_line_id TEXT,              -- ✅ 允许为空
+    category_id TEXT,                  -- ✅ 允许为空（采集时无法自动归类）
+    series_id TEXT,                    -- ✅ 允许为空
+    parent_product_id TEXT,
+    sku TEXT NOT NULL,
+    product_name TEXT NOT NULL,
+    brand TEXT,
+    price_tiers JSONB,
+    currency TEXT DEFAULT 'USD',
+    availability TEXT DEFAULT 'in_stock',
+    min_order_quantity INTEGER DEFAULT 1,
+    main_image_url TEXT,
+    additional_images JSONB,
+    description TEXT,
+    short_description TEXT,
+    attributes JSONB,
+    spec_text TEXT,
+    slug TEXT,
+    status TEXT DEFAULT 'draft',
+    template_id TEXT DEFAULT '',
+    seo_title TEXT,
+    seo_description TEXT,
+    seo_keywords TEXT,
+
+    -- ========== 变体列表 ==========
+    sku_list JSONB DEFAULT '[]'::jsonb,
+
+    -- ========== 采集来源 ==========
+    platform TEXT NOT NULL,
+    source_url TEXT NOT NULL,
+    source_product_id TEXT,
+    source_locale TEXT DEFAULT 'en',
+
+    -- ========== 采集元数据 ==========
+    collected_at TIMESTAMP WITH TIME ZONE,
+    collected_by TEXT,
+
+    -- ========== 导入状态 ==========
+    import_status TEXT DEFAULT 'pending',
+    imported_at TIMESTAMP WITH TIME ZONE,
+    import_error TEXT,
+
+    -- ========== 时间戳 ==========
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+
+    UNIQUE(site_id, source_url)
+);
+
+-- ============================================================
+-- 索引
+-- ============================================================
+CREATE INDEX IF NOT EXISTS idx_crawler_products_site ON crawler_products(site_id);
+CREATE INDEX IF NOT EXISTS idx_crawler_products_platform ON crawler_products(platform);
+CREATE INDEX IF NOT EXISTS idx_crawler_products_import_status ON crawler_products(import_status);
+CREATE INDEX IF NOT EXISTS idx_crawler_products_collected_at ON crawler_products(collected_at DESC);
+CREATE INDEX IF NOT EXISTS idx_crawler_products_source_url ON crawler_products(source_url);
+
+-- ============================================================
+-- 添加注释（便于维护）
+-- ============================================================
+COMMENT ON TABLE crawler_products IS '产品采集数据临时表，存放从各平台采集的商品数据';
+COMMENT ON COLUMN crawler_products.import_status IS '导入状态: pending-待导入, imported-已导入, skipped-已跳过, failed-导入失败';
+COMMENT ON COLUMN crawler_products.sku_list IS '变体列表（SKU组合）';
+
+
+-- ============================================================
+-- 1. 订单表（完整版）- 新增 shipping_records 字段
+-- ============================================================
+CREATE TABLE IF NOT EXISTS "orders" (
+    "id"                 UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    "site_id"            TEXT NOT NULL,
+    "order_no"           TEXT NOT NULL UNIQUE,              -- 系统订单号（UUID），唯一
+    "contract_no"        TEXT,                             -- 合同号（客户可见），用户可编辑
+    "customer_id"        TEXT,                             -- CRM客户ID，用于关联订单与客户
+    
+    -- 买家信息
+    "buyer_name"         TEXT NOT NULL,
+    "buyer_email"        TEXT NOT NULL,
+    "buyer_company"      TEXT DEFAULT '',
+    "buyer_country"      TEXT DEFAULT '',
+    "buyer_phone"        TEXT DEFAULT '',
+    "buyer_address"      TEXT DEFAULT '',
+    
+    -- 支付方式
+    "payment_method"     TEXT DEFAULT 'bank_transfer',     -- bank_transfer | qr_code | online_payment
+    "selected_account_ids" JSONB DEFAULT '[]'::jsonb,      -- 选中的收款账号ID列表，JSON数组格式
+    
+    -- 订单金额
+    "currency"           TEXT DEFAULT 'USD',
+    "sub_total"          DECIMAL(15,2) DEFAULT 0,
+    "discount"           DECIMAL(15,2) DEFAULT 0,
+    "shipping_fee"       DECIMAL(15,2) DEFAULT 0,
+    "tax"                DECIMAL(15,2) DEFAULT 0,
+    "total_amount"       DECIMAL(15,2) DEFAULT 0,
+    
+    -- ============================================================
+    -- 发货信息
+    -- ============================================================
+    "shipping_method"    TEXT DEFAULT '',                   -- 运输方式：快递/海运/空运等
+    "shipping_date_type" TEXT DEFAULT '',                   -- deposit | balance | fixed
+    "shipping_date"      DATE,                              -- 指定发货日期（fixed时使用）
+    "shipping_days"      INTEGER DEFAULT 0,                 -- 到账后发货天数（deposit/balance时使用）
+    "trade_term"         TEXT DEFAULT 'FOB',                -- EXW | FCA | FAS | FOB | CFR | CIF | CPT | CIP | DAT | DAP | DDP
+    
+    -- ============================================================
+    -- 物流追踪信息（旧字段保留兼容，新逻辑使用 shipping_records）
+    -- ============================================================
+    "tracking_number"    TEXT DEFAULT '',                   -- 【已废弃，请使用 shipping_records】物流单号
+    "carrier"            TEXT DEFAULT '',                   -- 【已废弃，请使用 shipping_records】物流承运商（key）
+    "carrier_name"       TEXT DEFAULT '',                   -- 【已废弃，请使用 shipping_records】承运商英文名称（用于客户显示）
+    "tracking_image"     TEXT DEFAULT '',                   -- 【已废弃，请使用 shipping_records】物流凭证（运单图片地址）
+    
+    -- ✅ 新增：发货记录列表（JSONB数组），支持多次发货
+    "shipping_records"   JSONB DEFAULT '[]'::jsonb,         -- 发货记录列表
+    
+    -- ============================================================
+    -- 账单信息
+    -- ============================================================
+    "expiry_date"        TIMESTAMP,                         -- 订单过期时间
+    "legal_terms"        TEXT DEFAULT '',
+    "postscript"         TEXT DEFAULT '',
+    "remark"             TEXT DEFAULT '',                   -- 备注（仅内部可见）
+    
+    -- ============================================================
+    -- 支付信息（PayPal）
+    -- ============================================================
+    "paypal_order_id"    TEXT,
+    "paypal_payer_id"    TEXT,
+    "paypal_payment_id"  TEXT,
+    "payment_status"     TEXT DEFAULT 'pending',
+    "paid_at"            TIMESTAMP,
+    
+    -- ============================================================
+    -- 预付款信息
+    -- ============================================================
+    "deposit_amount"     DECIMAL(15,2) DEFAULT 0,           -- 预付款金额
+    
+    -- ============================================================
+    -- 订单状态
+    -- ============================================================
+    "status"             TEXT DEFAULT 'draft',              -- draft | formal | paid | completed | cancelled
+    "sent_status"        TEXT DEFAULT 'unsent',             -- 发送状态: sent-已发送 | unsent-未发送
+    "share_token"        TEXT,
+    "share_view_count"   INTEGER DEFAULT 0,
+    
+    -- ============================================================
+    -- 操作记录
+    -- ============================================================
+    "created_by"         TEXT,
+    "sent_at"            TIMESTAMP,
+    "cancelled_at"       TIMESTAMP,
+    "expired_at"         TIMESTAMP,
+    
+    "created_at"         TIMESTAMP DEFAULT NOW(),
+    "updated_at"         TIMESTAMP DEFAULT NOW()
+);
+
+-- ============================================================
+-- 订单索引
+-- ============================================================
+CREATE INDEX IF NOT EXISTS "idx_orders_site" ON "orders" ("site_id");
+CREATE INDEX IF NOT EXISTS "idx_orders_site_status" ON "orders" ("site_id", "status");
+CREATE INDEX IF NOT EXISTS "idx_orders_site_customer" ON "orders" ("site_id", "customer_id");
+CREATE INDEX IF NOT EXISTS "idx_orders_order_no" ON "orders" ("order_no");
+CREATE INDEX IF NOT EXISTS "idx_orders_contract_no" ON "orders" ("contract_no");
+CREATE INDEX IF NOT EXISTS "idx_orders_paypal_order_id" ON "orders" ("paypal_order_id");
+CREATE INDEX IF NOT EXISTS "idx_orders_site_created" ON "orders" ("site_id", "created_at" DESC);
+CREATE INDEX IF NOT EXISTS "idx_orders_site_status_expiry" ON "orders" ("site_id", "status", "expiry_date");
+CREATE INDEX IF NOT EXISTS "idx_orders_share_token" ON "orders" ("share_token");
+CREATE INDEX IF NOT EXISTS "idx_orders_payment_method" ON "orders" ("payment_method");
+CREATE INDEX IF NOT EXISTS "idx_orders_selected_account_ids" ON "orders" USING GIN ("selected_account_ids");
+CREATE INDEX IF NOT EXISTS "idx_orders_customer_id" ON "orders" ("customer_id");
+CREATE INDEX IF NOT EXISTS "idx_orders_sent_status" ON "orders" ("sent_status");
+-- ✅ 新增：shipping_records 索引（JSONB 数组查询）
+CREATE INDEX IF NOT EXISTS "idx_orders_shipping_records" ON "orders" USING GIN ("shipping_records");
+
+-- ============================================================
+-- 字段注释（新增 shipping_records 注释）
+-- ============================================================
+COMMENT ON COLUMN "orders"."order_no" IS '系统订单号（UUID），唯一不可重复';
+COMMENT ON COLUMN "orders"."contract_no" IS '合同号（客户可见），用户可编辑，格式如 PI-20260901-0001';
+COMMENT ON COLUMN "orders"."customer_id" IS 'CRM客户ID，用于关联订单与客户';
+COMMENT ON COLUMN "orders"."buyer_country" IS '买家国家/地区';
+COMMENT ON COLUMN "orders"."payment_method" IS '支付方式: bank_transfer | qr_code | online_payment';
+COMMENT ON COLUMN "orders"."selected_account_ids" IS '选中的收款账号ID列表，JSON数组格式，支持多选支付方式';
+COMMENT ON COLUMN "orders"."shipping_method" IS '运输方式: 快递/海运/空运/陆运/邮政/多式联运';
+COMMENT ON COLUMN "orders"."shipping_date_type" IS '发货日期类型: deposit(预付款到账后) | balance(尾款到账后) | fixed(指定日期)';
+COMMENT ON COLUMN "orders"."shipping_date" IS '指定发货日期（shipping_date_type = fixed 时使用）';
+COMMENT ON COLUMN "orders"."shipping_days" IS '发货天数（shipping_date_type = deposit 或 balance 时使用），表示到账后多少天发货';
+COMMENT ON COLUMN "orders"."trade_term" IS '贸易术语: EXW | FCA | FAS | FOB | CFR | CIF | CPT | CIP | DAT | DAP | DDP';
+COMMENT ON COLUMN "orders"."tracking_number" IS '【已废弃，请使用 shipping_records】物流单号，保留仅用于兼容旧数据';
+COMMENT ON COLUMN "orders"."carrier" IS '【已废弃，请使用 shipping_records】物流承运商（key），保留仅用于兼容旧数据';
+COMMENT ON COLUMN "orders"."carrier_name" IS '【已废弃，请使用 shipping_records】承运商英文名称，保留仅用于兼容旧数据';
+COMMENT ON COLUMN "orders"."tracking_image" IS '【已废弃，请使用 shipping_records】物流凭证（运单图片地址），保留仅用于兼容旧数据';
+COMMENT ON COLUMN "orders"."shipping_records" IS '发货记录列表（JSONB数组），支持多次发货。结构: [{"id":"xxx","carrier_key":"sf-express","carrier_name_cn":"顺丰速运","carrier_name_en":"SF Express","tracking_number":"SF123","tracking_image":"url","shipping_method":"快递","created_at":"2026-09-06T10:00:00Z"}]';
+COMMENT ON COLUMN "orders"."expiry_date" IS '订单过期时间，用于自动过期判断';
+COMMENT ON COLUMN "orders"."remark" IS '备注（仅内部可见）';
+COMMENT ON COLUMN "orders"."deposit_amount" IS '预付款金额';
+COMMENT ON COLUMN "orders"."status" IS '订单状态: draft(草稿) | formal(正式订单) | paid(已付款) | completed(已完成) | cancelled(已取消)';
+COMMENT ON COLUMN "orders"."sent_status" IS '发送状态: sent(已发送) | unsent(未发送)';
+
+-- ============================================================
+-- 增量升级脚本（仅新增字段，不删除旧字段）
+-- ============================================================
+-- 说明：如果 orders 表已存在，执行以下 ALTER 语句
+-- 
+-- ALTER TABLE "orders" 
+-- ADD COLUMN IF NOT EXISTS "shipping_records" JSONB DEFAULT '[]'::jsonb;
+-- 
+-- CREATE INDEX IF NOT EXISTS "idx_orders_shipping_records" 
+-- ON "orders" USING GIN ("shipping_records");
+
+-- ============================================================
+-- 数据迁移脚本（将现有物流数据迁移到 shipping_records）
+-- ============================================================
+-- 说明：如果存在旧物流数据，执行以下迁移
+-- 
+-- UPDATE "orders" 
+-- SET "shipping_records" = JSONB_BUILD_ARRAY(
+--   JSONB_BUILD_OBJECT(
+--     'id', gen_random_uuid()::text,
+--     'carrier_key', COALESCE("carrier", ''),
+--     'carrier_name_cn', '',
+--     'carrier_name_en', COALESCE("carrier_name", ''),
+--     'tracking_number', COALESCE("tracking_number", ''),
+--     'tracking_image', COALESCE("tracking_image", ''),
+--     'shipping_method', COALESCE("shipping_method", ''),
+--     'created_at', COALESCE("updated_at", "created_at", NOW())::text
+--   )
+-- )
+-- WHERE "tracking_number" IS NOT NULL 
+--   AND "tracking_number" != ''
+--   AND ("shipping_records" IS NULL OR "shipping_records" = '[]'::jsonb);
+
+-- ============================================================
+-- 2. 订单商品明细表
+-- ============================================================
+CREATE TABLE IF NOT EXISTS "order_items" (
+    "id"                UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    "order_id"          UUID NOT NULL,
+    "product_id"        TEXT,
+    "locale"            TEXT DEFAULT 'zh',
+    
+    "product_name"      TEXT NOT NULL,
+    "product_image"     TEXT DEFAULT '',
+    "category"          TEXT DEFAULT '',
+    "specification"     TEXT DEFAULT '',
+    "sku"               TEXT DEFAULT '',
+    
+    "price"             DECIMAL(15,2) NOT NULL,
+    "quantity"          INTEGER NOT NULL DEFAULT 1,
+    "unit"              TEXT DEFAULT 'pcs',
+    "total"             DECIMAL(15,2) NOT NULL,
+    
+    "sort_order"        INTEGER DEFAULT 0,
+    
+    "created_at"        TIMESTAMP DEFAULT NOW(),
+    "updated_at"        TIMESTAMP DEFAULT NOW(),
+    
+    FOREIGN KEY ("order_id") REFERENCES "orders" ("id") ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS "idx_order_items_order" ON "order_items" ("order_id");
+CREATE INDEX IF NOT EXISTS "idx_order_items_product" ON "order_items" ("product_id");
+
+-- ============================================================
+-- 3. 订单状态日志表
+-- ============================================================
+CREATE TABLE IF NOT EXISTS "order_status_logs" (
+    "id"                UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    "order_id"          UUID NOT NULL,
+    "from_status"       TEXT,
+    "to_status"         TEXT NOT NULL,
+    "operator"          TEXT,
+    "note"              TEXT DEFAULT '',
+    "created_at"        TIMESTAMP DEFAULT NOW(),
+    
+    FOREIGN KEY ("order_id") REFERENCES "orders" ("id") ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS "idx_order_status_logs_order" ON "order_status_logs" ("order_id");
+CREATE INDEX IF NOT EXISTS "idx_order_status_logs_created" ON "order_status_logs" ("created_at" DESC);
+
+-- ============================================================
+-- 4. 支付账户表（完整版）
+-- ============================================================
+CREATE TABLE IF NOT EXISTS "payment_accounts" (
+    "id"                UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    "site_id"           TEXT NOT NULL,
+    
+    -- ===== 账号分类 =====
+    "account_type"      TEXT,                              -- NULL 表示预设账号（微信/支付宝/PayPal）
+    
+    -- ===== 支付类型 =====
+    -- 'bank_transfer' | 'qr_code' | 'online_payment'
+    "payment_type"      TEXT NOT NULL,
+    
+    -- 'tt' | 'wechat' | 'alipay' | 'paypal' | 'credit_card'
+    "payment_method"    TEXT NOT NULL,
+    
+    -- ===== 显示名称（中英文拆分） =====
+    "display_name_zh"   TEXT NOT NULL,
+    "display_name_en"   TEXT NOT NULL,
+    
+    -- ===== 货币（多选，JSONB数组） =====
+    "currency"          JSONB NOT NULL DEFAULT '[]',
+    
+    -- ===== 状态 =====
+    "is_active"         BOOLEAN DEFAULT TRUE,
+    "is_default"        BOOLEAN DEFAULT FALSE,
+    "sort_order"        INTEGER DEFAULT 0,
+    
+    -- ============================================================
+    -- TT银行字段（payment_method = 'tt'）
+    -- ============================================================
+    "beneficiary_name"          TEXT,
+    "beneficiary_account"       TEXT,
+    "country_region"            TEXT,
+    "swift_code"                TEXT,
+    "beneficiary_address"       TEXT,
+    "beneficiary_bank"          TEXT,
+    "beneficiary_bank_address"  TEXT,
+    "bank_code"                 TEXT,
+    "branch_code"               TEXT,
+    "iban"                      TEXT,
+    "attention"                 TEXT,
+    "intermediary_bank"         TEXT,
+    
+    -- ============================================================
+    -- 微信/支付宝字段（payment_method = 'wechat' | 'alipay'）
+    -- ============================================================
+    "account_holder"            TEXT,                      -- 收款户名
+    "account_identifier"        TEXT,                      -- 账号标识（支付宝：邮箱/手机号）
+    "qr_code_image"             TEXT,                      -- 收款码图片URL
+    "remark"                    TEXT,                      -- 备注
+    
+    -- ============================================================
+    -- PayPal字段（payment_method = 'paypal'）
+    -- ============================================================
+    "paypal_email"              TEXT,
+    "paypal_client_id"          TEXT,
+    "paypal_client_secret"      TEXT,
+    "paypal_webhook_id"         TEXT,
+    "is_verified"               BOOLEAN DEFAULT FALSE,    -- PayPal API 验证状态
+    
+    -- ============================================================
+    -- 信用卡（预留）
+    -- ============================================================
+    "stripe_secret_key"         TEXT,
+    "stripe_publishable_key"    TEXT,
+    "stripe_webhook_secret"     TEXT,
+    
+    -- ============================================================
+    -- 分享与扩展
+    -- ============================================================
+    "share_token"               TEXT,
+    "details"                   JSONB,
+    
+    "created_at"        TIMESTAMP DEFAULT NOW(),
+    "updated_at"        TIMESTAMP DEFAULT NOW()
+);
+
+-- 支付账户索引
+CREATE INDEX IF NOT EXISTS "idx_payment_accounts_site" ON "payment_accounts" ("site_id");
+CREATE INDEX IF NOT EXISTS "idx_payment_accounts_account_type" ON "payment_accounts" ("account_type");
+CREATE INDEX IF NOT EXISTS "idx_payment_accounts_type_method" ON "payment_accounts" ("payment_type", "payment_method");
+CREATE INDEX IF NOT EXISTS "idx_payment_accounts_currency" ON "payment_accounts" USING GIN ("currency");
+CREATE INDEX IF NOT EXISTS "idx_payment_accounts_default" ON "payment_accounts" ("site_id", "is_default");
+CREATE INDEX IF NOT EXISTS "idx_payment_accounts_share_token" ON "payment_accounts" ("share_token");
+CREATE INDEX IF NOT EXISTS "idx_payment_accounts_display_name" ON "payment_accounts" ("display_name_zh", "display_name_en");
+CREATE INDEX IF NOT EXISTS "idx_payment_accounts_payment_method" ON "payment_accounts" ("payment_method");
+CREATE INDEX IF NOT EXISTS "idx_payment_accounts_is_verified" ON "payment_accounts" ("is_verified");
+
+-- ============================================================
+-- 5. PayPal Webhook日志表
+-- ============================================================
+CREATE TABLE IF NOT EXISTS "paypal_webhook_logs" (
+    "id"                UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    "event_id"          TEXT NOT NULL,
+    "event_type"        TEXT NOT NULL,
+    "order_id"          UUID,
+    "paypal_order_id"   TEXT,
+    "payload"           JSONB,
+    "processed"         BOOLEAN DEFAULT FALSE,
+    "processed_at"      TIMESTAMP,
+    "error"             TEXT,
+    "created_at"        TIMESTAMP DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS "idx_paypal_webhook_logs_event_id" ON "paypal_webhook_logs" ("event_id");
+CREATE INDEX IF NOT EXISTS "idx_paypal_webhook_logs_order" ON "paypal_webhook_logs" ("order_id");
+CREATE INDEX IF NOT EXISTS "idx_paypal_webhook_logs_processed" ON "paypal_webhook_logs" ("processed");
+
+-- ============================================================
+-- 6. 初始化示例数据
+-- ============================================================
+
+-- 6.1 T/T银行 - 花旗银行(香港)
+INSERT INTO "payment_accounts" (
+    "site_id", 
+    "account_type",
+    "payment_type", 
+    "payment_method", 
+    "display_name_zh", 
+    "display_name_en",
+    "currency",
+    "beneficiary_name", 
+    "beneficiary_account", 
+    "swift_code", 
+    "country_region", 
+    "beneficiary_address", 
+    "beneficiary_bank",
+    "beneficiary_bank_address", 
+    "bank_code", 
+    "branch_code", 
+    "attention",
+    "is_active", 
+    "is_default", 
+    "sort_order"
+) VALUES (
+    '000001',
+    'global',
+    'bank_transfer', 
+    'tt', 
+    '中国香港(花旗)',
+    'Hong Kong, China (CITI)',
+    '["USD", "EUR", "HKD"]',
+    'Shenzhen Feisman Technology Co., Ltd.',
+    '3974000005387',
+    'CITIHKHX',
+    'Hong Kong',
+    '20/F, TOWER ONE, TIMES SQUARE, 1 MATHESON STREET, CAUSEWAY BAY, HONG KONG',
+    'CITIBANK N.A.HONG KONG BRANCH',
+    'Champion Tower THREE Garden ROAD CENTRAL, HONG KONG',
+    '006',
+    '391',
+    'Please pay attention to fill in the correct Beneficiary Account Number...',
+    true,
+    true,
+    1
+) ON CONFLICT DO NOTHING;
+
+-- 6.2 T/T银行 - 摩根大通(新加坡)
+INSERT INTO "payment_accounts" (
+    "site_id", 
+    "account_type",
+    "payment_type", 
+    "payment_method", 
+    "display_name_zh", 
+    "display_name_en",
+    "currency",
+    "beneficiary_name", 
+    "beneficiary_account", 
+    "swift_code", 
+    "country_region", 
+    "beneficiary_address", 
+    "beneficiary_bank",
+    "beneficiary_bank_address", 
+    "bank_code", 
+    "branch_code", 
+    "is_active", 
+    "is_default", 
+    "sort_order"
+) VALUES (
+    '000001',
+    'global',
+    'bank_transfer', 
+    'tt', 
+    '新加坡(摩根)',
+    'Singapore (JPM)',
+    '["USD", "SGD"]',
+    'ABC Trading Company Limited',
+    '1234567890',
+    'CHASSGSG',
+    'Singapore',
+    '8 Marina View, #12-01, Asia Square Tower 1, Singapore 018960',
+    'JPMORGAN CHASE BANK, N.A., SINGAPORE BRANCH',
+    '8 Marina View, #12-01, Asia Square Tower 1, Singapore 018960',
+    '',
+    '',
+    true,
+    false,
+    2
+) ON CONFLICT DO NOTHING;
+
+-- ============================================================
+-- 7. 添加字段注释
+-- ============================================================
+COMMENT ON COLUMN "orders"."order_no" IS '系统订单号（UUID），唯一不可重复';
+COMMENT ON COLUMN "orders"."contract_no" IS '合同号（客户可见），用户可编辑，格式如 PI-20260901-0001';
+COMMENT ON COLUMN "orders"."buyer_country" IS '买家国家/地区';
+COMMENT ON COLUMN "orders"."payment_method" IS '支付方式: bank_transfer | qr_code | online_payment';
+COMMENT ON COLUMN "orders"."selected_account_ids" IS '选中的收款账号ID列表，JSON数组格式，支持多选支付方式';
+COMMENT ON COLUMN "orders"."shipping_method" IS '运输方式: 快递/海运/空运/陆运/邮政/多式联运';
+COMMENT ON COLUMN "orders"."shipping_date_type" IS '发货日期类型: deposit(预付款到账后) | balance(尾款到账后) | fixed(指定日期)';
+COMMENT ON COLUMN "orders"."shipping_date" IS '指定发货日期';
+COMMENT ON COLUMN "orders"."trade_term" IS '贸易术语: EXW | FCA | FAS | FOB | CFR | CIF | CPT | CIP | DAT | DAP | DDP';
+COMMENT ON COLUMN "orders"."remark" IS '备注（仅内部可见）';
+
+COMMENT ON COLUMN "payment_accounts"."account_type" IS '账号类型: global | local | domestic，NULL 表示预设账号（微信/支付宝/PayPal）';
+COMMENT ON COLUMN "payment_accounts"."payment_type" IS '支付类型: bank_transfer | qr_code | online_payment';
+COMMENT ON COLUMN "payment_accounts"."payment_method" IS '支付方式: tt | wechat | alipay | paypal | credit_card';
+COMMENT ON COLUMN "payment_accounts"."display_name_zh" IS '中文显示名称';
+COMMENT ON COLUMN "payment_accounts"."display_name_en" IS '英文显示名称';
+COMMENT ON COLUMN "payment_accounts"."account_holder" IS '收款户名（微信/支付宝）';
+COMMENT ON COLUMN "payment_accounts"."account_identifier" IS '账号标识（支付宝：邮箱/手机号）';
+COMMENT ON COLUMN "payment_accounts"."qr_code_image" IS '收款码图片URL（微信/支付宝）';
+COMMENT ON COLUMN "payment_accounts"."remark" IS '备注（微信/支付宝）';
+COMMENT ON COLUMN "payment_accounts"."is_verified" IS 'PayPal API 验证状态: true=已验证, false=未验证';
+COMMENT ON COLUMN "payment_accounts"."paypal_client_id" IS 'PayPal REST API Client ID';
+COMMENT ON COLUMN "payment_accounts"."paypal_client_secret" IS 'PayPal REST API Client Secret';
+COMMENT ON COLUMN "payment_accounts"."paypal_webhook_id" IS 'PayPal Webhook ID';
+
+-- ============================================================
+-- 8. 创建法律条款模板表
+-- ============================================================
+CREATE TABLE IF NOT EXISTS legal_templates (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    site_id VARCHAR(20) NOT NULL DEFAULT '000001',
+    name VARCHAR(200) NOT NULL,
+    content TEXT NOT NULL,
+    description TEXT,
+    is_default BOOLEAN DEFAULT FALSE,
+    sort_order INTEGER DEFAULT 0,
+    created_by VARCHAR(100),
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    deleted_at TIMESTAMP WITH TIME ZONE
+);
+
+-- 创建索引
+CREATE INDEX idx_legal_templates_site_id ON legal_templates(site_id);
+CREATE INDEX idx_legal_templates_is_default ON legal_templates(is_default);
+CREATE INDEX idx_legal_templates_deleted_at ON legal_templates(deleted_at);
+CREATE INDEX idx_legal_templates_sort_order ON legal_templates(sort_order);
+
+-- 插入默认模板数据（使用 gen_random_uuid() 自动生成 UUID）
+INSERT INTO legal_templates (name, content, is_default, sort_order) VALUES 
+(
+    '标准条款',
+    '1. 付款方式：买方应在收到形式发票后3个工作日内支付全部款项。\n2. 交货时间：卖方应在收到预付款后15个工作日内安排发货。\n3. 质量标准：产品应符合双方确认的样品及规格书要求。\n4. 售后服务：卖方提供12个月的质量保证期。\n5. 争议解决：双方应友好协商解决争议，协商不成的，提交深圳国际仲裁院仲裁。',
+    TRUE,
+    1
+),
+(
+    '贸易条款',
+    '1. 贸易术语：FOB Shenzhen\n2. 付款方式：30%预付款 + 70%尾款（发货前付清）\n3. 包装要求：标准出口包装，适合海运\n4. 文件要求：商业发票、装箱单、原产地证、提单\n5. 保险：由买方自行投保',
+    FALSE,
+    2
+);
+
+-- 添加注释
+COMMENT ON TABLE legal_templates IS '法律条款模板表';
+COMMENT ON COLUMN legal_templates.id IS '模板ID (UUID)';
+COMMENT ON COLUMN legal_templates.site_id IS '站点ID';
+COMMENT ON COLUMN legal_templates.name IS '模板名称';
+COMMENT ON COLUMN legal_templates.content IS '模板内容';
+COMMENT ON COLUMN legal_templates.description IS '模板描述';
+COMMENT ON COLUMN legal_templates.is_default IS '是否默认模板';
+COMMENT ON COLUMN legal_templates.sort_order IS '排序顺序';
+COMMENT ON COLUMN legal_templates.created_by IS '创建人';
+COMMENT ON COLUMN legal_templates.deleted_at IS '软删除时间';
+
+
+-- ============================================================
+-- 9. 快递公司信息表（公共信息，所有租户共享）
+-- ============================================================
+CREATE TABLE IF NOT EXISTS "carriers" (
+    "id"                 UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    "site_id"            TEXT,                              -- ✅ 可选，NULL 表示公共数据
+    "key"                TEXT NOT NULL UNIQUE,              -- 唯一标识，如 dhl, fedex
+    "name_en"            TEXT NOT NULL,                     -- 英文名称
+    "name_cn"            TEXT NOT NULL,                     -- 中文名称
+    "name_hk"            TEXT,                              -- 香港名称（可选）
+    "url"                TEXT,                              -- 官网地址
+    "shipping_methods"   JSONB DEFAULT '[]'::jsonb,         -- 适用运输方式: ["快递", "空运"]
+    "logo"               TEXT,                              -- Logo图片URL
+    "sort_order"         INTEGER DEFAULT 0,
+    "is_active"          BOOLEAN DEFAULT TRUE,
+    "created_at"         TIMESTAMP DEFAULT NOW(),
+    "updated_at"         TIMESTAMP DEFAULT NOW()
+);
+
+-- 索引
+CREATE INDEX IF NOT EXISTS "idx_carriers_site" ON "carriers" ("site_id");
+CREATE INDEX IF NOT EXISTS "idx_carriers_key" ON "carriers" ("key");
+CREATE INDEX IF NOT EXISTS "idx_carriers_shipping_methods" ON "carriers" USING GIN ("shipping_methods");
+CREATE INDEX IF NOT EXISTS "idx_carriers_is_active" ON "carriers" ("is_active");
+
+-- 字段注释
+COMMENT ON COLUMN "carriers"."site_id" IS '站点ID，NULL表示公共数据，所有租户共享';
+COMMENT ON COLUMN "carriers"."key" IS '唯一标识，如 dhl, fedex, ups';
+COMMENT ON COLUMN "carriers"."name_en" IS '英文名称';
+COMMENT ON COLUMN "carriers"."name_cn" IS '中文名称';
+COMMENT ON COLUMN "carriers"."name_hk" IS '香港名称（繁体）';
+COMMENT ON COLUMN "carriers"."url" IS '官网地址';
+COMMENT ON COLUMN "carriers"."shipping_methods" IS '适用运输方式: ["快递", "空运", "海运", "陆运", "邮政", "多式联运"]';
+COMMENT ON COLUMN "carriers"."logo" IS 'Logo图片URL';
+
+-- ============================================================
+-- 初始化示例数据
+-- ============================================================
+INSERT INTO "carriers" ("site_id", "key", "name_en", "name_cn", "name_hk", "url", "shipping_methods", "logo", "sort_order", "is_active") VALUES
+('000001', 'dhl', 'DHL Express', '中外运敦豪', 'DHL', 'https://www.dhl.com', '["快递", "空运"]', '/share/carriers/dhl.png', 1, true),
+('000001', 'fedex', 'FedEx', '联邦快递', 'FedEx', 'https://www.fedex.com', '["快递", "空运"]', '/share/carriers/fedex.png', 2, true),
+('000001', 'ups', 'UPS', '联合包裹', 'UPS', 'https://www.ups.com', '["快递", "空运"]', '/share/carriers/ups.png', 3, true),
+('000001', 'tnt', 'TNT Express', '天地快运', 'TNT', 'https://www.tnt.com', '["快递", "空运"]', '/share/carriers/tnt.png', 4, true),
+('000001', 'ems', 'EMS', '中国邮政速递物流', 'EMS', 'https://www.ems.com.cn', '["快递", "邮政"]', '/share/carriers/ems.png', 5, true),
+('000001', 'sf', 'SF Express', '顺丰速运', '順豐速運', 'https://www.sf-express.com', '["快递"]', '/share/carriers/sf.png', 6, true),
+('000001', 'yt', 'YTO Express', '圆通速递', '圓通速遞', 'https://www.yto.net.cn', '["快递"]', '/share/carriers/yto.png', 7, true),
+('000001', 'sto', 'STO Express', '申通快递', '申通快遞', 'https://www.sto.cn', '["快递"]', '/share/carriers/sto.png', 8, true),
+('000001', 'zto', 'ZTO Express', '中通快递', '中通快遞', 'https://www.zto.com', '["快递"]', '/share/carriers/zto.png', 9, true),
+('000001', 'yunda', 'Yunda Express', '韵达快递', '韻達快遞', 'https://www.yundaex.com', '["快递"]', '/share/carriers/yunda.png', 10, true),
+('000001', 'maersk', 'Maersk', '马士基航运', '馬士基航運', 'https://www.maersk.com', '["海运"]', '/share/carriers/maersk.png', 11, true),
+('000001', 'msc', 'MSC', '地中海航运', '地中海航運', 'https://www.msc.com', '["海运"]', '/share/carriers/msc.png', 12, true),
+('000001', 'cma', 'CMA CGM', '达飞轮船', '達飛輪船', 'https://www.cma-cgm.com', '["海运"]', '/share/carriers/cma.png', 13, true),
+('000001', 'cosco', 'COSCO Shipping', '中远海运', '中遠海運', 'https://www.coscoshipping.com', '["海运"]', '/share/carriers/cosco.png', 14, true),
+('000001', 'china_post', 'China Post', '中国邮政', '中國郵政', 'https://www.chinapost.com.cn', '["邮政"]', '/share/carriers/china_post.png', 15, true),
+('000001', 'others', 'Others', '其他', '其他', '', '["快递", "空运", "海运", "陆运", "邮政", "多式联运"]', '', 99, true)
+ON CONFLICT (key) DO NOTHING;
+
+
+-- ==========================================================
+-- content_templates 表
+-- 用于存储"内容模板"（系统模板 + 用户模板）
+-- ==========================================================
+
+CREATE TABLE content_templates (
+  id            TEXT PRIMARY KEY,
+  site_id       TEXT NOT NULL DEFAULT '000001',
+  locale        TEXT NOT NULL,
+  name          TEXT NOT NULL,
+  content       TEXT NOT NULL,
+  is_system     BOOLEAN DEFAULT FALSE,
+  created_at    TIMESTAMPTZ DEFAULT NOW(),
+  updated_at    TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- 索引：按站点 + 语言查询
+CREATE INDEX idx_content_templates_site_locale 
+ON content_templates(site_id, locale);
+
+-- 索引：按系统/用户模板筛选
+CREATE INDEX idx_content_templates_is_system 
+ON content_templates(is_system);
+
+
+-- ==========================================================
+-- 注释
+-- ==========================================================
+
+COMMENT ON TABLE content_templates IS '内容模板表 - 存储系统预设和用户自定义的内容模板';
+COMMENT ON COLUMN content_templates.id IS '模板 ID，系统模板以 sys_ 开头，用户模板以 user_ 开头';
+COMMENT ON COLUMN content_templates.locale IS '语言代码';
+COMMENT ON COLUMN content_templates.name IS '模板名称';
+COMMENT ON COLUMN content_templates.content IS '模板内容（HTML）';
+COMMENT ON COLUMN content_templates.is_system IS '是否为系统模板（true 时不可删除、不可修改）';
+
+
+-- ==========================================================
+-- 初始化系统模板（每个语言一份）
+-- ==========================================================
+
+INSERT INTO content_templates (id, site_id, locale, name, content, is_system) VALUES
+-- 中文系统模板
+('sys_intro_zh', '000001', 'zh', '公司简介', 
+'<h2>公司简介</h2><p>我们是一家专注于XXX领域的公司，成立于XXXX年，致力于为客户提供优质的产品和服务。</p><h3>我们的使命</h3><p>为客户创造价值，为员工提供发展平台，为社会贡献力量。</p><h3>我们的优势</h3><ul><li>专业的技术团队</li><li>完善的服务体系</li><li>丰富的行业经验</li></ul>', 
+true),
+('sys_product_intro_zh', '000001', 'zh', '产品介绍', 
+'<h2>产品介绍</h2><p>本产品采用先进的技术和优质的材料，具有以下特点：</p><h3>产品特点</h3><ul><li>高效节能</li><li>稳定可靠</li><li>易于维护</li></ul><h3>应用场景</h3><p>广泛应用于工业自动化、电力系统、通信设备等领域。</p>', 
+true),
+('sys_faq_zh', '000001', 'zh', '常见问题', 
+'<h2>常见问题</h2><h3>Q1: 产品保修期是多久？</h3><p>A: 我们的产品提供2年质保服务，终身技术支持。</p><h3>Q2: 如何联系售后服务？</h3><p>A: 您可以通过以下方式联系我们：<br>电话：400-XXX-XXXX<br>邮箱：support@example.com</p><h3>Q3: 支持定制服务吗？</h3><p>A: 是的，我们提供定制服务，请与销售团队联系。</p>', 
+true),
+('sys_policy_zh', '000001', 'zh', '隐私政策', 
+'<h2>隐私政策</h2><p>我们非常重视您的隐私保护。本政策说明我们如何收集、使用和保护您的个人信息。</p><h3>1. 信息收集</h3><p>我们可能收集您的姓名、邮箱、电话等信息，用于提供服务和沟通。</p><h3>2. 信息使用</h3><p>您的信息仅用于订单处理、客户服务和产品改进。</p><h3>3. 信息保护</h3><p>我们采取严格的安全措施保护您的个人信息，不会向第三方出售或泄露。</p>', 
+true),
+
+-- 英文系统模板
+('sys_intro_en', '000001', 'en', 'Company Introduction', 
+'<h2>Company Introduction</h2><p>We are a company specializing in XXX, founded in XXXX, committed to providing customers with quality products and services.</p><h3>Our Mission</h3><p>Create value for customers, provide development opportunities for employees, and contribute to society.</p><h3>Our Advantages</h3><ul><li>Professional technical team</li><li>Comprehensive service system</li><li>Rich industry experience</li></ul>', 
+true),
+('sys_product_intro_en', '000001', 'en', 'Product Introduction', 
+'<h2>Product Introduction</h2><p>This product uses advanced technology and quality materials with the following features:</p><h3>Features</h3><ul><li>Energy efficient</li><li>Stable and reliable</li><li>Easy to maintain</li></ul><h3>Applications</h3><p>Widely used in industrial automation, power systems, communication equipment and other fields.</p>', 
+true),
+('sys_faq_en', '000001', 'en', 'FAQ', 
+'<h2>FAQ</h2><h3>Q1: How long is the warranty?</h3><p>A: We provide 2-year warranty and lifetime technical support.</p><h3>Q2: How to contact after-sales service?</h3><p>A: You can contact us via:<br>Phone: 400-XXX-XXXX<br>Email: support@example.com</p><h3>Q3: Do you support customization?</h3><p>A: Yes, we provide customization services. Please contact our sales team.</p>', 
+true),
+('sys_policy_en', '000001', 'en', 'Privacy Policy', 
+'<h2>Privacy Policy</h2><p>We take your privacy very seriously. This policy explains how we collect, use and protect your personal information.</p><h3>1. Information Collection</h3><p>We may collect your name, email, phone and other information to provide services and communication.</p><h3>2. Information Use</h3><p>Your information is only used for order processing, customer service and product improvement.</p><h3>3. Information Protection</h3><p>We take strict security measures to protect your personal information and will not sell or disclose it to third parties.</p>', 
+true)
+ON CONFLICT (id) DO NOTHING;

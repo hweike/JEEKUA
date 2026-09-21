@@ -8,6 +8,7 @@ interface FooterClientProps {
   footerConfig?: FooterConfig;
   menusMap: Map<string, any>;
   siteSettings?: SiteSettings;
+  policyLinks?: React.ReactNode; // 新增
 }
 
 const styleMap: Record<string, React.ComponentType<FooterClientProps>> = {
@@ -15,7 +16,7 @@ const styleMap: Record<string, React.ComponentType<FooterClientProps>> = {
   default: SimpleFooter,
 };
 
-export default function FooterClient({ footerConfig, menusMap, siteSettings }: FooterClientProps) {
+export default function FooterClient({ footerConfig, menusMap, siteSettings, policyLinks }: FooterClientProps) {
   const style = footerConfig?.style || 'simple';
   const Component = styleMap[style] || SimpleFooter;
   return (
@@ -23,6 +24,7 @@ export default function FooterClient({ footerConfig, menusMap, siteSettings }: F
       footerConfig={footerConfig}
       menusMap={menusMap}
       siteSettings={siteSettings}
+      policyLinks={policyLinks}
     />
   );
 }

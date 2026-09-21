@@ -1,8 +1,9 @@
 'use client';
 
 import { useState, useCallback, useRef } from 'react';
-import { X, Upload, Link as LinkIcon, GripVertical, Loader2 } from 'lucide-react';
-import { getImageUrl } from '@/lib/files/url'; // 公共函数，用于拼接完整图片URL
+import { X, Upload, Link as LinkIcon, GripVertical, Image, Loader2 } from 'lucide-react';
+import { getImageUrl } from '@/lib/files/url';
+import ImageLibraryPicker from '@/components/files/ImageLibraryPicker';
 
 interface ProductImageManagerProps {
   mainImage: string;
@@ -20,6 +21,7 @@ export default function ProductImageManager({
   const [uploading, setUploading] = useState(false);
   const [downloading, setDownloading] = useState(false);
   const [showUrlModal, setShowUrlModal] = useState(false);
+  const [showLibrary, setShowLibrary] = useState(false);
   const [urlList, setUrlList] = useState('');
   const [dragSrcIndex, setDragSrcIndex] = useState<number | null>(null);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
@@ -137,6 +139,30 @@ export default function ProductImageManager({
     setShowUrlModal(false);
   };
 
+  // ✅ 处理从图片库选择
+  const handleLibrarySelect = (urls: string[]) => {
+    const remainingSlots = maxImages - allImages.length;
+    const toAdd = urls.slice(0, remainingSlots);
+    
+    if (toAdd.length === 0) {
+      setErrorMsg(`最多只能上传 ${maxImages} 张图片`);
+      return;
+    }
+    
+    // 过滤掉已存在的图片
+    const existingUrls = new Set(allImages);
+    const newUrls = toAdd.filter(url => !existingUrls.has(url));
+    
+    if (newUrls.length === 0) {
+      setErrorMsg('所选图片已存在');
+      return;
+    }
+    
+    const newImages = [...allImages, ...newUrls].slice(0, maxImages);
+    updateImages(newImages);
+    setShowLibrary(false);
+  };
+
   const removeImage = (index: number) => {
     const newImages = allImages.filter((_, i) => i !== index);
     updateImages(newImages);
@@ -159,7 +185,7 @@ export default function ProductImageManager({
 
   return (
     <div>
-      <div className="flex gap-2 mb-3">
+      <div className="flex gap-2 mb-3 flex-wrap">
         <button
           type="button"
           onClick={() => fileInputRef.current?.click()}
@@ -176,6 +202,14 @@ export default function ProductImageManager({
           className="bg-gray-200 text-gray-700 px-3 py-1.5 rounded text-sm flex items-center gap-1 disabled:opacity-50"
         >
           <LinkIcon size={14} /> 网络图片
+        </button>
+        {/* ✅ 新增图片库按钮 */}
+        <button
+          type="button"
+          onClick={() => setShowLibrary(true)}
+          className="bg-purple-600 text-white px-3 py-1.5 rounded text-sm flex items-center gap-1"
+        >
+          <Image size={14} /> 图片库
         </button>
         <input
           ref={fileInputRef}
@@ -203,7 +237,6 @@ export default function ProductImageManager({
             onDrop={() => handleDrop(idx)}
             className="relative aspect-square border rounded overflow-hidden bg-gray-50 group cursor-move"
           >
-            {/* 使用公共函数 getImageUrl 转换图片地址，不再依赖代理组件 */}
             <img
               src={getImageUrl(url)}
               alt={`产品图${idx + 1}`}
@@ -237,6 +270,7 @@ export default function ProductImageManager({
         最多 {maxImages} 张图片，第一张为主图。拖动图片可调整顺序，点击图片右下角删除。
       </p>
 
+      {/* 网络图片模态框 */}
       {showUrlModal && (
         <div
           className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50"
@@ -273,6 +307,18 @@ export default function ProductImageManager({
             </div>
           </div>
         </div>
+      )}
+
+      {/* ✅ 图片库选择器 */}
+      {showLibrary && (
+        <ImageLibraryPicker
+          open={showLibrary}
+          onClose={() => setShowLibrary(false)}
+          onSelect={handleLibrarySelect}
+          mode="multiple"
+          maxSelect={maxImages - allImages.length}
+          initialSelected={allImages}
+        />
       )}
     </div>
   );

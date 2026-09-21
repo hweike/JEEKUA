@@ -1,3 +1,5 @@
+// components/admin/analytics/WorldMap.tsx
+
 'use client';
 
 import { useEffect, useState } from 'react';
@@ -18,6 +20,7 @@ interface WorldMapProps {
 export function WorldMap({ data = [], loading, height = 400 }: WorldMapProps) {
   const [maxValue, setMaxValue] = useState(1);
   const [geoData, setGeoData] = useState<any>(null);
+  const [loadError, setLoadError] = useState(false);
 
   // 更新最大值
   useEffect(() => {
@@ -29,14 +32,29 @@ export function WorldMap({ data = [], loading, height = 400 }: WorldMapProps) {
 
   // 加载并转换 TopoJSON 为 GeoJSON
   useEffect(() => {
+    // ✅ 如果 data 为空，直接跳过加载，避免无效请求
+    if (!data || data.length === 0) {
+      setGeoData(null);
+      setLoadError(false);
+      return;
+    }
+
+    setLoadError(false);
     fetch(geoUrl)
-      .then(res => res.json())
+      .then(res => {
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        return res.json();
+      })
       .then(topology => {
         const countries = feature(topology, topology.objects.countries);
         setGeoData(countries);
       })
-      .catch(err => console.error('Failed to load map data:', err));
-  }, []);
+      .catch(err => {
+        console.error('Failed to load map data:', err);
+        setLoadError(true);
+        setGeoData(null);
+      });
+  }, [data]); // ✅ 依赖 data，当 data 变化时重新加载
 
   if (loading) {
     return (
@@ -48,6 +66,14 @@ export function WorldMap({ data = [], loading, height = 400 }: WorldMapProps) {
     return (
       <div className="w-full h-[400px] flex items-center justify-center text-gray-400 border rounded-lg bg-gray-50">
         暂无数据
+      </div>
+    );
+  }
+
+  if (loadError) {
+    return (
+      <div className="w-full h-[400px] flex items-center justify-center text-gray-400 border rounded-lg bg-gray-50">
+        地图数据加载失败，请稍后刷新
       </div>
     );
   }
@@ -66,12 +92,11 @@ export function WorldMap({ data = [], loading, height = 400 }: WorldMapProps) {
     countryMap[item.x] = item.y;
   });
 
-  // 颜色比例尺（同原逻辑）
+  // 颜色比例尺
   const colorScale = scaleQuantize<string>()
     .domain([0, maxValue])
     .range(['#f0f8ff', '#d6e9ff', '#b8d9ff', '#96c4ff', '#72adff', '#4a94ff', '#1e79ff', '#0059e6']);
 
-  // 动态获取每个国家的填充色
   const getCountryStyle = (feature: any) => {
     const countryCode = feature.id;
     const value = countryMap[countryCode] || 0;
@@ -85,7 +110,6 @@ export function WorldMap({ data = [], loading, height = 400 }: WorldMapProps) {
     };
   };
 
-  // 悬停交互（与原 hover 效果一致）
   const onEachCountry = (feature: any, layer: any) => {
     layer.on({
       mouseover: () => {

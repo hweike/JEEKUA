@@ -1,7 +1,5 @@
 // =====================================================
-// SEO 同步服务
-// 职责：将确认发布的 SEO 数据同步到业务表和源文件（JSON / MD）
-// 调用时机：approveSeo 成功后调用
+// SEO 同步服务（按最新需求重构）
 // =====================================================
 
 import { supabase } from '@/lib/supabase/client';
@@ -12,9 +10,6 @@ const DEFAULT_SITE_ID = '000001';
 const storage = getPrivateStorage();
 
 export class SyncService {
-  /**
-   * 同步确认发布的 SEO 数据（顶层入口，捕获所有错误）
-   */
   async syncAfterApprove(
     siteId: string,
     pageId: string,
@@ -38,41 +33,45 @@ export class SyncService {
 
       switch (page.type) {
         case 'product':
-          await this.syncProduct(siteId, rawId, locale, page);
-          break;
-        case 'blogPost':
-          await this.syncBlogPost(siteId, rawId, locale, page);
-          break;
-        case 'doc':
-          await this.syncDoc(siteId, rawId, locale, page);
-          break;
-        case 'page':
-          await this.syncPage(siteId, rawId, locale, page);
-          break;
-        case 'video':
-          await this.syncVideo(siteId, rawId, locale, page);
+          await this.syncProduct(rawId, locale, page);
           break;
 
-        // ---- JSON 文件类型 ----
         case 'productLine':
-          await this.syncProductLine(siteId, rawId, locale, page);
+          await this.syncProductLineJson(rawId, locale, page);
           break;
         case 'productCollection':
-          await this.syncProductCollection(siteId, rawId, locale, page);
-          break;
-        case 'blogCategory':
-          await this.syncBlogCategory(siteId, rawId, locale, page);
-          break;
-        case 'docLibrary':
-          await this.syncDocLibrary(siteId, rawId, locale, page);
-          break;
-        case 'videoCategory':
-          await this.syncVideoCategory(siteId, rawId, locale, page);
+          await this.syncProductCollectionJson(rawId, locale, page);
           break;
 
+        case 'blogPost':
+          await this.syncBlogPostTable(siteId, rawId, locale, page);
+          break;
+
+        case 'blogCategory':
+          await this.syncBlogCategoryJson(rawId, locale, page);
+          break;
+
+        case 'docLibrary':
+          await this.syncDocLibraryJson(rawId, page);
+          break;
+
+        case 'doc':
+          await this.syncDocTable(siteId, rawId, locale, page);
+          break;
+
+        case 'videoCategory':
+          await this.syncVideoCategoryJson(rawId, locale, page);
+          break;
+
+        case 'video':
+          await this.syncVideoTableAndMd(siteId, rawId, locale, page);
+          break;
+
+        case 'home':
+        case 'page':
         case 'inquiry':
         case 'policy':
-          console.log(`暂不同步: ${page.type} (${pageId})`);
+          await this.syncSitePageTableAndMd(siteId, rawId, locale, page);
           break;
 
         default:
@@ -84,285 +83,81 @@ export class SyncService {
   }
 
   // ============================================================
-  // 原有同步方法（product, blogPost, doc, page, video）
-  // 保持不变
+  // 1. product：判断父产品还是变体
   // ============================================================
-
   private async syncProduct(
-    siteId: string,
     productId: string,
     locale: string,
     page: any
   ): Promise<void> {
-    try {
-      const { error: updateError } = await supabase
-        .from('products')
-        .update({
-          seo_title: page.seo_title,
-          seo_description: page.seo_description,
-          seo_keywords: page.seo_keywords,
-          updatedAt: new Date().toISOString(),
-        })
-        .eq('site_id', siteId)
-        .eq('productId', productId)
-        .eq('locale', locale);
+    const isVariant = productId.includes('/');
 
-      if (updateError) {
-        console.error(`更新 products 表失败 (${productId}):`, updateError);
-        return;
-      }
-
-      await this.updateProductMd(siteId, productId, locale, page);
-    } catch (error) {
-      console.error(`同步产品 ${productId} 失败:`, error);
+    if (isVariant) {
+      await this.syncVariantProductMd(productId, locale, page);
+    } else {
+      await this.syncParentProductMd(productId, locale, page);
     }
   }
 
-  private async updateProductMd(
-    siteId: string,
+  /**
+   * 父产品：更新 MD 文件中的根 seo 字段
+   */
+  private async syncParentProductMd(
     productId: string,
     locale: string,
     page: any
   ): Promise<void> {
     const mdKey = `products/${locale}/products/${productId}.md`;
-    try {
-      let rawContent = '';
-      try {
-        rawContent = await storage.read(mdKey, 'utf8');
-      } catch (err: any) {
-        if (err?.code === 'NoSuchKey' || err?.Code === 'NoSuchKey' || err?.message?.includes('File not found')) {
-          console.warn(`MD 文件不存在: ${mdKey}，跳过文件同步`);
-          return;
-        }
-        throw err;
-      }
-
-      const parsed = matter(rawContent);
-      const data = parsed.data || {};
-      const content = parsed.content || '';
-
-      data.seo_title = page.seo_title || null;
-      data.seo_description = page.seo_description || null;
-      data.seo_keywords = page.seo_keywords || null;
-
-      const newContent = matter.stringify(content, data);
-      await storage.write(mdKey, newContent, { contentType: 'text/markdown' });
-      console.log(`✅ 更新产品 MD 文件: ${mdKey}`);
-    } catch (err) {
-      console.error(`更新产品 MD 文件失败 (${productId}):`, err);
-    }
+    await this.updateMdFile(mdKey, page, null);
+    console.log(`✅ 更新父产品根 seo: ${mdKey}`);
   }
-
-  private async syncBlogPost(
-    siteId: string,
-    postId: string,
-    locale: string,
-    page: any
-  ): Promise<void> {
-    try {
-      const { error: updateError } = await supabase
-        .from('blog_posts')
-        .update({
-          seo_title: page.seo_title,
-          seo_description: page.seo_description,
-          seo_keywords: page.seo_keywords,
-          updated_at: new Date().toISOString(),
-        })
-        .eq('site_id', siteId)
-        .eq('id', postId)
-        .eq('locale', locale);
-
-      if (updateError) {
-        console.error(`更新 blog_posts 表失败 (${postId}):`, updateError);
-        return;
-      }
-
-      await this.updateBlogPostMd(siteId, postId, locale, page);
-    } catch (error) {
-      console.error(`同步博客文章 ${postId} 失败:`, error);
-    }
-  }
-
-  private async updateBlogPostMd(
-    siteId: string,
-    postId: string,
-    locale: string,
-    page: any
-  ): Promise<void> {
-    const mdKey = `blog/${locale}/posts/${postId}.md`;
-    try {
-      let rawContent = '';
-      try {
-        rawContent = await storage.read(mdKey, 'utf8');
-      } catch (err: any) {
-        if (err?.code === 'NoSuchKey' || err?.Code === 'NoSuchKey' || err?.message?.includes('File not found')) {
-          console.warn(`MD 文件不存在: ${mdKey}，跳过文件同步`);
-          return;
-        }
-        throw err;
-      }
-
-      const parsed = matter(rawContent);
-      const data = parsed.data || {};
-      const content = parsed.content || '';
-
-      data.seo_title = page.seo_title || null;
-      data.seo_description = page.seo_description || null;
-      data.seo_keywords = page.seo_keywords || null;
-
-      const newContent = matter.stringify(content, data);
-      await storage.write(mdKey, newContent, { contentType: 'text/markdown' });
-      console.log(`✅ 更新博客 MD 文件: ${mdKey}`);
-    } catch (err) {
-      console.error(`更新博客 MD 文件失败 (${postId}):`, err);
-    }
-  }
-
-  private async syncDoc(
-    siteId: string,
-    docId: string,
-    locale: string,
-    page: any
-  ): Promise<void> {
-    try {
-      const { error: updateError } = await supabase
-        .from('documents')
-        .update({
-          seo_title: page.seo_title,
-          seo_description: page.seo_description,
-          seo_keywords: page.seo_keywords,
-          updated_at: new Date().toISOString(),
-        })
-        .eq('site_id', siteId)
-        .eq('id', docId)
-        .eq('locale', locale);
-
-      if (updateError) {
-        console.error(`更新 documents 表失败 (${docId}):`, updateError);
-        return;
-      }
-
-      const { data: doc, error: docError } = await supabase
-        .from('documents')
-        .select('lib_id, file')
-        .eq('site_id', siteId)
-        .eq('id', docId)
-        .eq('locale', locale)
-        .maybeSingle();
-
-      if (docError || !doc) {
-        console.warn(`文档 ${docId} 不存在或获取失败，跳过 MD 同步`);
-        return;
-      }
-
-      const mdKey = `docs/${locale}/${doc.lib_id}/${doc.file}`;
-      await this.updateMdFile(mdKey, page);
-    } catch (error) {
-      console.error(`同步文档 ${docId} 失败:`, error);
-    }
-  }
-
-  private async syncPage(
-    siteId: string,
-    pageId: string,
-    locale: string,
-    page: any
-  ): Promise<void> {
-    try {
-      const { error: updateError } = await supabase
-        .from('site_pages')
-        .update({
-          seo_title: page.seo_title,
-          seo_description: page.seo_description,
-          seo_keywords: page.seo_keywords,
-          updated_at: new Date().toISOString(),
-        })
-        .eq('site_id', siteId)
-        .eq('id', pageId)
-        .eq('locale', locale);
-
-      if (updateError) {
-        console.error(`更新 site_pages 表失败 (${pageId}):`, updateError);
-        return;
-      }
-
-      const mdKey = `pages/${locale}/${pageId}.md`;
-      await this.updateMdFile(mdKey, page);
-    } catch (error) {
-      console.error(`同步页面 ${pageId} 失败:`, error);
-    }
-  }
-
-  private async syncVideo(
-    siteId: string,
-    videoId: string,
-    locale: string,
-    page: any
-  ): Promise<void> {
-    try {
-      const { error: updateError } = await supabase
-        .from('videos')
-        .update({
-          seo_title: page.seo_title,
-          seo_description: page.seo_description,
-          seo_keywords: page.seo_keywords,
-          updated_at: new Date().toISOString(),
-        })
-        .eq('site_id', siteId)
-        .eq('id', videoId)
-        .eq('locale', locale);
-
-      if (updateError) {
-        console.error(`更新 videos 表失败 (${videoId}):`, updateError);
-        return;
-      }
-
-      const mdKey = `videosys/${locale}/${videoId}.md`;
-      await this.updateMdFile(mdKey, page);
-    } catch (error) {
-      console.error(`同步视频 ${videoId} 失败:`, error);
-    }
-  }
-
-  private async updateMdFile(mdKey: string, page: any): Promise<void> {
-    try {
-      let rawContent = '';
-      try {
-        rawContent = await storage.read(mdKey, 'utf8');
-      } catch (err: any) {
-        if (err?.code === 'NoSuchKey' || err?.Code === 'NoSuchKey' || err?.message?.includes('File not found')) {
-          console.warn(`MD 文件不存在: ${mdKey}，跳过文件同步`);
-          return;
-        }
-        throw err;
-      }
-
-      const parsed = matter(rawContent);
-      const data = parsed.data || {};
-      const content = parsed.content || '';
-
-      data.seo_title = page.seo_title || null;
-      data.seo_description = page.seo_description || null;
-      data.seo_keywords = page.seo_keywords || null;
-
-      const newContent = matter.stringify(content, data);
-      await storage.write(mdKey, newContent, { contentType: 'text/markdown' });
-      console.log(`✅ 更新 MD 文件: ${mdKey}`);
-    } catch (err) {
-      console.error(`更新 MD 文件失败 (${mdKey}):`, err);
-    }
-  }
-
-  // ============================================================
-  // 新增：JSON 文件类型的同步方法（适配实际格式）
-  // ============================================================
 
   /**
-   * 产品线：products/{locale}/categories.json 中的 productLines[]
-   * 字段：seoTitle, seoDescription, seoKeywords
+   * 变体产品：更新 MD 文件中 variants 数组对应变体的 seo_* 字段
    */
-  private async syncProductLine(
-    siteId: string,
+  private async syncVariantProductMd(
+    productId: string,
+    locale: string,
+    page: any
+  ): Promise<void> {
+    const parts = productId.split('/');
+    const parentId = parts[0];
+    const variantId = parts[parts.length - 1];
+    const mdKey = `products/${locale}/products/${parentId}.md`;
+
+    const variantExists = await this.variantExistsInMd(mdKey, variantId);
+    if (!variantExists) {
+      console.warn(`变体 ${variantId} 在 MD 文件中不存在，跳过同步`);
+      return;
+    }
+
+    await this.updateMdFile(mdKey, page, variantId);
+    console.log(`✅ 更新变体 ${variantId} SEO → variants 数组`);
+  }
+
+  /**
+   * 检查变体是否存在于 MD 文件中
+   */
+  private async variantExistsInMd(mdKey: string, variantId: string): Promise<boolean> {
+    try {
+      const rawContent = await storage.read(mdKey, 'utf8');
+      const parsed = matter(rawContent);
+      const data = parsed.data || {};
+      
+      if (data.variants && Array.isArray(data.variants)) {
+        return data.variants.some((v: any) => v.id === variantId);
+      }
+      return false;
+    } catch (err) {
+      console.warn(`检查变体存在失败: ${mdKey}`, err);
+      return false;
+    }
+  }
+
+  // ============================================================
+  // 2a. productLine：更新 categories.json
+  // ============================================================
+  private async syncProductLineJson(
     rawId: string,
     locale: string,
     page: any
@@ -390,14 +185,10 @@ export class SyncService {
     }
   }
 
-  /**
-   * 产品分类：products/{locale}/categories.json 中的 categories[] 和 series[]
-   * 一级分类字段：seoTitle, seoDescription, seoKeywords
-   * 二级分类字段：同上
-   * page.id 格式：productCollection:{catId} 或 productCollection:{catId}/{subId}
-   */
-  private async syncProductCollection(
-    siteId: string,
+  // ============================================================
+  // 2b. productCollection：更新 categories.json
+  // ============================================================
+  private async syncProductCollectionJson(
     rawId: string,
     locale: string,
     page: any
@@ -412,7 +203,6 @@ export class SyncService {
 
       const parts = rawId.split('/');
       if (parts.length === 1) {
-        // 一级分类
         const cat = data.categories.find((c: any) => c.id === parts[0]);
         if (!cat) {
           console.warn(`未找到一级分类 id=${parts[0]} in ${jsonPath}`);
@@ -422,7 +212,6 @@ export class SyncService {
         cat.seoDescription = page.seo_description || '';
         cat.seoKeywords = page.seo_keywords || '';
       } else if (parts.length === 2) {
-        // 二级分类（series）
         const cat = data.categories.find((c: any) => c.id === parts[0]);
         if (!cat) {
           console.warn(`未找到父级分类 id=${parts[0]} in ${jsonPath}`);
@@ -452,12 +241,42 @@ export class SyncService {
     }
   }
 
-  /**
-   * 博客分类：blog/{locale}/categories.json 数组，字段为 seo_title, seo_description, seo_keywords
-   * page.id 格式：blogCategory:{categoryId}
-   */
-  private async syncBlogCategory(
+  // ============================================================
+  // 3. blogPost：只更新 blog_posts 表
+  // ============================================================
+  private async syncBlogPostTable(
     siteId: string,
+    postId: string,
+    locale: string,
+    page: any
+  ): Promise<void> {
+    try {
+      const { error: updateError } = await supabase
+        .from('blog_posts')
+        .update({
+          seo_title: page.seo_title,
+          seo_description: page.seo_description,
+          seo_keywords: page.seo_keywords,
+          updated_at: new Date().toISOString(),
+        })
+        .eq('site_id', siteId)
+        .eq('id', postId)
+        .eq('locale', locale);
+
+      if (updateError) {
+        console.error(`更新 blog_posts 表失败 (${postId}):`, updateError);
+      } else {
+        console.log(`✅ 更新 blog_posts 表: ${postId}`);
+      }
+    } catch (error) {
+      console.error(`同步博客文章 ${postId} 失败:`, error);
+    }
+  }
+
+  // ============================================================
+  // 4. blogCategory：只更新 categories.json
+  // ============================================================
+  private async syncBlogCategoryJson(
     rawId: string,
     locale: string,
     page: any
@@ -485,17 +304,14 @@ export class SyncService {
     }
   }
 
-  /**
-   * 文档库：docs/{locale}/libs.json 数组，字段为 seo_title, seo_description, seo_keywords
-   * page.id 格式：docLibrary:{libId}
-   */
-  private async syncDocLibrary(
-    siteId: string,
+  // ============================================================
+  // 5. docLibrary：更新 docs/libs.json
+  // ============================================================
+  private async syncDocLibraryJson(
     rawId: string,
-    locale: string,
     page: any
   ): Promise<void> {
-    const jsonPath = `docs/${locale}/libs.json`;
+    const jsonPath = `docs/libs.json`;
     try {
       const data = await this.readJson(jsonPath);
       if (!Array.isArray(data)) {
@@ -518,13 +334,42 @@ export class SyncService {
     }
   }
 
-  /**
-   * 视频分类：videosys/{locale}/categories.json 对象，键为 id，值为分类信息
-   * 字段：seo_title, seo_description, seo_keywords
-   * page.id 格式：videoCategory:{categoryId}
-   */
-  private async syncVideoCategory(
+  // ============================================================
+  // 6. doc：只更新 documents 表
+  // ============================================================
+  private async syncDocTable(
     siteId: string,
+    docId: string,
+    locale: string,
+    page: any
+  ): Promise<void> {
+    try {
+      const { error: updateError } = await supabase
+        .from('documents')
+        .update({
+          seo_title: page.seo_title,
+          seo_description: page.seo_description,
+          seo_keywords: page.seo_keywords,
+          updated_at: new Date().toISOString(),
+        })
+        .eq('site_id', siteId)
+        .eq('id', docId)
+        .eq('locale', locale);
+
+      if (updateError) {
+        console.error(`更新 documents 表失败 (${docId}):`, updateError);
+      } else {
+        console.log(`✅ 更新 documents 表: ${docId}`);
+      }
+    } catch (error) {
+      console.error(`同步文档 ${docId} 失败:`, error);
+    }
+  }
+
+  // ============================================================
+  // 7. videoCategory：只更新 categories.json
+  // ============================================================
+  private async syncVideoCategoryJson(
     rawId: string,
     locale: string,
     page: any
@@ -553,6 +398,76 @@ export class SyncService {
   }
 
   // ============================================================
+  // 8. video：更新 videos 表 + MD 文件
+  // ============================================================
+  private async syncVideoTableAndMd(
+    siteId: string,
+    videoId: string,
+    locale: string,
+    page: any
+  ): Promise<void> {
+    try {
+      const { error: updateError } = await supabase
+        .from('videos')
+        .update({
+          seo_title: page.seo_title,
+          seo_description: page.seo_description,
+          seo_keywords: page.seo_keywords,
+          updated_at: new Date().toISOString(),
+        })
+        .eq('site_id', siteId)
+        .eq('id', videoId)
+        .eq('locale', locale);
+
+      if (updateError) {
+        console.error(`更新 videos 表失败 (${videoId}):`, updateError);
+      } else {
+        console.log(`✅ 更新 videos 表: ${videoId}`);
+      }
+
+      const mdKey = `videosys/${locale}/${videoId}.md`;
+      await this.updateMdFile(mdKey, page, null);
+    } catch (error) {
+      console.error(`同步视频 ${videoId} 失败:`, error);
+    }
+  }
+
+  // ============================================================
+  // 9. home, page, inquiry, policy：更新 site_pages 表 + MD 文件
+  // ============================================================
+  private async syncSitePageTableAndMd(
+    siteId: string,
+    pageId: string,
+    locale: string,
+    page: any
+  ): Promise<void> {
+    try {
+      const { error: updateError } = await supabase
+        .from('site_pages')
+        .update({
+          seo_title: page.seo_title,
+          seo_description: page.seo_description,
+          seo_keywords: page.seo_keywords,
+          updated_at: new Date().toISOString(),
+        })
+        .eq('site_id', siteId)
+        .eq('id', pageId)
+        .eq('locale', locale);
+
+      if (updateError) {
+        console.error(`更新 site_pages 表失败 (${pageId}):`, updateError);
+      } else {
+        console.log(`✅ 更新 site_pages 表: ${pageId}`);
+      }
+
+      const mdKey = `pages/${locale}/${pageId}.md`;
+      await this.updateMdFile(mdKey, page, null);
+    } catch (error) {
+      console.error(`同步页面 ${pageId} 失败:`, error);
+    }
+  }
+
+  // ============================================================
   // 辅助工具
   // ============================================================
 
@@ -574,9 +489,73 @@ export class SyncService {
     await storage.write(filePath, content, { contentType: 'application/json' });
   }
 
-  // ============================================================
-  // 批量同步
-  // ============================================================
+  /**
+   * 更新 MD 文件
+   * - 父产品（variantId = null）：更新根 seo_title, seo_description, seo_keywords
+   * - 变体（variantId 有值）：更新 variants 数组中对应变体的 seo_title, seo_description, seo_keywords
+   */
+  private async updateMdFile(mdKey: string, page: any, variantId: string | null): Promise<void> {
+    try {
+      let rawContent = '';
+      try {
+        rawContent = await storage.read(mdKey, 'utf8');
+      } catch (err: any) {
+        if (err?.code === 'NoSuchKey' || err?.Code === 'NoSuchKey' || err?.message?.includes('File not found')) {
+          console.warn(`MD 文件不存在: ${mdKey}，跳过文件同步`);
+          return;
+        }
+        throw err;
+      }
+
+      const parsed = matter(rawContent);
+      const data = parsed.data || {};
+      const content = parsed.content || '';
+
+      if (variantId) {
+        // ============================================================
+        // ✅ 变体：直接修改 variants 数组中对应变体的 seo_* 字段
+        // ============================================================
+        if (data.variants && Array.isArray(data.variants)) {
+          const variant = data.variants.find((v: any) => v.id === variantId);
+          if (variant) {
+            variant.seo_title = page.seo_title || '';
+            variant.seo_description = page.seo_description || '';
+            variant.seo_keywords = page.seo_keywords || '';
+            console.log(`✅ 更新变体 ${variantId} 的 seo_* 字段`);
+          } else {
+            console.warn(`未找到变体 ${variantId}，跳过更新`);
+          }
+        } else {
+          console.warn(`MD 文件中没有 variants 数组`);
+        }
+      } else {
+        // ============================================================
+        // ✅ 父产品：更新根 seo 字段
+        // ============================================================
+        const seoTitle = page.seo_title || null;
+        const seoDescription = page.seo_description || null;
+        const seoKeywords = page.seo_keywords || null;
+
+        if (!seoTitle && !seoDescription && !seoKeywords) {
+          delete data.seo_title;
+          delete data.seo_description;
+          delete data.seo_keywords;
+          console.log(`✅ 清空父产品根 seo 字段`);
+        } else {
+          data.seo_title = seoTitle;
+          data.seo_description = seoDescription;
+          data.seo_keywords = seoKeywords;
+          console.log(`✅ 更新父产品根 seo 字段`);
+        }
+      }
+
+      const newContent = matter.stringify(content, data);
+      await storage.write(mdKey, newContent, { contentType: 'text/markdown' });
+      console.log(`✅ MD 文件已更新: ${mdKey}`);
+    } catch (err) {
+      console.error(`更新 MD 文件失败 (${mdKey}):`, err);
+    }
+  }
 
   async syncBatch(
     siteId: string,

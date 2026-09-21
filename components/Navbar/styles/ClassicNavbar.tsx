@@ -7,9 +7,10 @@ import { HeaderConfig } from '@/lib/config-loader';
 import { SiteSettings } from '@/lib/getSiteSettings';
 import Logo from '../shared/Logo';
 import MenuItems from '../shared/MenuItems';
-import LanguageSwitcher from '../shared/LanguageSwitcher';
+import RightTools from '../shared/RightTools';
 import AnnouncementBar from '../shared/AnnouncementBar';
 import { cn } from '@/lib/utils';
+import MobileNav from '../shared/MobileNav';
 
 interface ClassicNavbarProps {
   headerConfig: HeaderConfig;
@@ -47,18 +48,21 @@ const DEFAULT_CONFIG = {
 };
 
 const getDefaultNavbarHeight = (position: string): number => {
+  if (position === 'top-center') return 100;
   return 70;
 };
 
 export default function ClassicNavbar({ headerConfig, menuTree, siteSettings }: ClassicNavbarProps) {
   const pathname = usePathname();
-  const t = useTranslations('Common');
+  const t = useTranslations('Shared');
   const [scrolled, setScrolled] = useState(false);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [navbarHeight, setNavbarHeight] = useState<number>(70);
+  const navbarHeightRef = useRef<number>(70);
   const [lastScrollY, setLastScrollY] = useState(0);
   const [navbarVisible, setNavbarVisible] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
+  const navbarRef = useRef<HTMLElement>(null);
 
   const safeConfig = {
     menu: { ...DEFAULT_CONFIG.menu, ...(headerConfig?.menu || {}) },
@@ -69,17 +73,19 @@ export default function ClassicNavbar({ headerConfig, menuTree, siteSettings }: 
   };
 
   const { menu: menuConfig, utilities, announcements, logo: logoConfig, search: searchConfig } = safeConfig;
-  const defaultHeight = getDefaultNavbarHeight(logoConfig.position);
+  const logoPosition = logoConfig.position;
+  const mobileLogoPosition = logoConfig.mobilePosition;
+  const defaultHeight = getDefaultNavbarHeight(logoPosition);
   const minHeight = 70;
-  const maxHeight = 100;
-
-  // 由于 MenuItems 组件的 menuType 类型定义不包含 'inline'，使用类型断言绕过检查
+  const maxHeight = 120;
   const menuType = menuConfig.menuType as any;
+  const locale = pathname.split('/')[1] || 'zh';
 
-  // 计算行高
   useEffect(() => {
     if (!logoConfig.imageUrl) {
-      setNavbarHeight(Math.min(maxHeight, Math.max(minHeight, defaultHeight)));
+      const h = Math.min(maxHeight, Math.max(minHeight, defaultHeight));
+      setNavbarHeight(h);
+      navbarHeightRef.current = h;
       return;
     }
     const img = new Image();
@@ -89,20 +95,37 @@ export default function ClassicNavbar({ headerConfig, menuTree, siteSettings }: 
       const totalHeight = scaledHeight + 16;
       const finalHeight = Math.min(maxHeight, Math.max(minHeight, Math.max(defaultHeight, totalHeight)));
       setNavbarHeight(finalHeight);
+      navbarHeightRef.current = finalHeight;
     };
     img.onerror = () => {
-      setNavbarHeight(Math.min(maxHeight, Math.max(minHeight, defaultHeight)));
+      const h = Math.min(maxHeight, Math.max(minHeight, defaultHeight));
+      setNavbarHeight(h);
+      navbarHeightRef.current = h;
     };
     img.src = logoConfig.imageUrl;
   }, [logoConfig.imageUrl, logoConfig.width, defaultHeight]);
 
-  // 滚动粘性
+  useEffect(() => {
+    if (mobileMenuOpen) {
+      document.body.style.overflow = 'hidden';
+    } else {
+      document.body.style.overflow = '';
+    }
+    return () => {
+      document.body.style.overflow = '';
+    };
+  }, [mobileMenuOpen]);
+
+  // ✅ 改进滚动粘性：使用导航栏实际高度 + 缓冲
   useEffect(() => {
     if (menuConfig.stickyBehavior !== 'scroll-up') return;
 
     const handleScroll = () => {
       const currentScrollY = window.scrollY;
-      if (currentScrollY > lastScrollY && currentScrollY > 10) {
+      const actualHeight = navbarRef.current?.offsetHeight || navbarHeightRef.current;
+      const threshold = actualHeight + 20;
+
+      if (currentScrollY > threshold && currentScrollY > lastScrollY) {
         setNavbarVisible(false);
         setScrolled(true);
       } else {
@@ -127,10 +150,8 @@ export default function ClassicNavbar({ headerConfig, menuTree, siteSettings }: 
     }
   }, [menuConfig.stickyBehavior]);
 
-  const navbarStyle = {
-    paddingTop: `${utilities.topSpacing}px`,
+  const navbarStyle: React.CSSProperties = {
     paddingBottom: `${utilities.bottomSpacing}px`,
-    minHeight: `${navbarHeight}px`,
   };
 
   const isSticky = menuConfig.stickyBehavior !== 'none';
@@ -143,164 +164,240 @@ export default function ClassicNavbar({ headerConfig, menuTree, siteSettings }: 
     }
   };
 
-  const searchPlaceholder = searchConfig.placeholder || t('search_placeholder');
+  const searchPlaceholder = searchConfig.placeholder || t('searchPlaceholder');
 
-  // 搜索框统一样式
-  const searchInputStyle = {
-    borderColor: 'var(--navbar-text)',
-    backgroundColor: 'color-mix(in srgb, var(--navbar-bg) 70%, transparent)',
-    color: 'var(--navbar-text)',
+  // ✅ 搜索框样式（用变量 + fallback）
+  const searchInputStyle: React.CSSProperties = {
+    borderColor: 'var(--navbar-text, var(--foreground, #0f172a))',
+    backgroundColor: 'color-mix(in srgb, var(--navbar-bg, var(--background, #ffffff)) 70%, transparent)',
+    color: 'var(--navbar-text, var(--foreground, #0f172a))',
+    paddingLeft: 'var(--spacing-4, 1rem)',
+    paddingRight: 'var(--spacing-4, 1rem)',
+    paddingTop: 'var(--spacing-2, 0.5rem)',
+    paddingBottom: 'var(--spacing-2, 0.5rem)',
+    borderRadius: 'var(--radius-full, 9999px)',
+    fontSize: 'var(--font-size-base, 1rem)',
+    transition: `border-color var(--transition-duration-150, 150ms) var(--transition-timing-ease, ease), box-shadow var(--transition-duration-150, 150ms) var(--transition-timing-ease, ease)`,
   };
 
-  // 桌面布局
-  const renderDesktop = () => (
+  // ========== 桌面布局 ==========
+  // ---- 顶部居中：Logo 居中，搜索框居中，RightTools 右对齐 ----
+  const renderTopCenter = () => (
+    <div
+      className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8"
+      style={{ paddingTop: `${utilities.topSpacing}px` }}
+    >
+      <div style={{ paddingTop: 'var(--spacing-2, 0.5rem)', paddingBottom: 'var(--spacing-2, 0.5rem)' }}>
+        <div className="flex justify-center">
+          <Logo logoConfig={logoConfig} siteName={siteSettings?.siteName || 'My Web'} />
+        </div>
+      </div>
+      <div
+        className="grid grid-cols-3 items-center"
+        style={{ paddingTop: 'var(--spacing-2, 0.5rem)', paddingBottom: 'var(--spacing-2, 0.5rem)' }}
+      >
+        <div className="flex justify-start" /> {/* 左占位 */}
+        <div className="flex justify-center" style={{ paddingLeft: 'var(--spacing-4, 1rem)', paddingRight: 'var(--spacing-4, 1rem)' }}>
+          {searchConfig.enabled && (
+            <form onSubmit={handleSearch} className="w-full" style={{ maxWidth: '500px' }}>
+              <input
+                type="text"
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                placeholder={searchPlaceholder}
+                className="w-full border focus:outline-none focus:ring-2"
+                style={searchInputStyle}
+              />
+            </form>
+          )}
+        </div>
+        <div className="flex justify-end">
+          <RightTools
+            showSearch={false}
+            showLanguageSelector={utilities.showLanguageSelector}
+            locale={locale}
+          />
+        </div>
+      </div>
+      <div
+        className="flex justify-center"
+        style={{ paddingTop: 'var(--spacing-2, 0.5rem)', paddingBottom: 'var(--spacing-2, 0.5rem)' }}
+      >
+        <MenuItems items={menuTree} pathname={pathname} menuType={menuType} />
+      </div>
+    </div>
+  );
+
+  // ---- 中部居左：Logo 左，搜索框居中，RightTools 右 ----
+  const renderMiddleLeft = () => (
     <>
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-        <div className="flex items-center justify-between py-2">
+      <div
+        className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8"
+        style={{ paddingTop: `${utilities.topSpacing}px` }}
+      >
+        <div
+          className="flex items-center justify-between"
+          style={{ paddingTop: 'var(--spacing-2, 0.5rem)', paddingBottom: 'var(--spacing-2, 0.5rem)' }}
+        >
           <div className="flex-shrink-0">
             <Logo logoConfig={logoConfig} siteName={siteSettings?.siteName || 'My Web'} />
           </div>
-          <div className="flex-1 flex justify-center px-4">
+          <div
+            className="flex-1 flex justify-center"
+            style={{ paddingLeft: 'var(--spacing-4, 1rem)', paddingRight: 'var(--spacing-4, 1rem)' }}
+          >
             {searchConfig.enabled && (
-              <form onSubmit={handleSearch} className="w-full max-w-md">
+              <form onSubmit={handleSearch} className="w-full" style={{ maxWidth: '28rem' }}>
                 <input
                   type="text"
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
                   placeholder={searchPlaceholder}
-                  className="w-full px-4 py-2 rounded-full border focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent transition-all"
+                  className="w-full border focus:outline-none focus:ring-2"
                   style={searchInputStyle}
                 />
               </form>
             )}
           </div>
           <div className="flex-shrink-0">
-            {utilities.showLanguageSelector && <LanguageSwitcher />}
+            <RightTools
+              showSearch={false}
+              showLanguageSelector={utilities.showLanguageSelector}
+              locale={locale}
+            />
           </div>
         </div>
       </div>
-      {/* 取消分割线 */}
-      {/* <div className="border-t border-[rgba(255,255,255,0.15)] w-full" /> */}
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-        <div className="flex justify-center mt-2">
+        <div
+          className="flex justify-center"
+          style={{ paddingTop: 'var(--spacing-2, 0.5rem)', paddingBottom: 'var(--spacing-2, 0.5rem)' }}
+        >
           <MenuItems items={menuTree} pathname={pathname} menuType={menuType} />
         </div>
       </div>
     </>
   );
 
-  // 移动端布局（支持居中/左对齐）
-  const renderMobile = () => {
-    const isCenter = logoConfig.mobilePosition === 'center';
-
-    return (
-      <div className="flex flex-col gap-2">
-        {/* 第一行：根据位置显示不同布局 */}
-        {isCenter ? (
-          <div className="flex items-center justify-between w-full">
-            <button
-              className="p-2 rounded-md hover:bg-accent"
-              onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
-              aria-label="Menu"
-            >
-              <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                {mobileMenuOpen ? (
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                ) : (
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
-                )}
-              </svg>
-            </button>
-            <div className="flex justify-center flex-1">
-              <Logo logoConfig={logoConfig} siteName={siteSettings?.siteName || 'FEISMAN POWER'} />
-            </div>
-            <div className="flex items-center gap-2">
-              {utilities.showLanguageSelector && <LanguageSwitcher />}
-            </div>
-          </div>
-        ) : (
-          <div className="flex items-center justify-between w-full">
-            <div className="flex justify-start">
-              <Logo logoConfig={logoConfig} siteName={siteSettings?.siteName || 'FEISMAN POWER'} />
-            </div>
-            <div className="flex items-center gap-2">
-              {utilities.showLanguageSelector && <LanguageSwitcher />}
-              <button
-                className="p-2 rounded-md hover:bg-accent"
-                onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
-              >
-                <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  {mobileMenuOpen ? (
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                  ) : (
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
-                  )}
-                </svg>
-              </button>
-            </div>
-          </div>
-        )}
-
-        {/* 搜索框（独立一行） */}
-        {searchConfig.enabled && (
-          <form onSubmit={handleSearch} className="mt-2">
-            <input
-              type="text"
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              placeholder={searchPlaceholder}
-              className="w-full px-4 py-2 rounded-full border focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent transition-all"
-              style={searchInputStyle}
-            />
-          </form>
-        )}
-
-        {/* 移动端菜单 */}
-        {mobileMenuOpen && (
-          <div className="py-2 border-t border-[rgba(255,255,255,0.15)]">
-            <MenuItems items={menuTree} pathname={pathname} mobile onClickItem={() => setMobileMenuOpen(false)} menuType={menuType} />
-          </div>
-        )}
+  // ---- 中部居中：Logo 中，RightTools 右，菜单在下 ----
+  const renderMiddleCenter = () => (
+    <div
+      className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8"
+      style={{ paddingTop: `${utilities.topSpacing}px` }}
+    >
+      <div
+        className="flex items-center justify-between"
+        style={{ paddingTop: 'var(--spacing-2, 0.5rem)', paddingBottom: 'var(--spacing-2, 0.5rem)' }}
+      >
+        <div className="flex-1 flex justify-start" />
+        <div className="flex justify-center">
+          <Logo logoConfig={logoConfig} siteName={siteSettings?.siteName || 'My Web'} />
+        </div>
+        <div
+          className="flex-1 flex justify-end items-center"
+          style={{ gap: 'var(--spacing-4, 1rem)' }}
+        >
+          <RightTools
+            showSearch={searchConfig.enabled}
+            searchPlaceholder={searchConfig.placeholder}
+            showLanguageSelector={utilities.showLanguageSelector}
+            locale={locale}
+          />
+        </div>
       </div>
-    );
+      <div
+        className="flex justify-center"
+        style={{ paddingTop: 'var(--spacing-2, 0.5rem)', paddingBottom: 'var(--spacing-2, 0.5rem)' }}
+      >
+        <MenuItems items={menuTree} pathname={pathname} menuType={menuType} />
+      </div>
+    </div>
+  );
+
+  const renderDesktop = () => {
+    switch (logoPosition) {
+      case 'top-center':
+        return renderTopCenter();
+      case 'middle-center':
+        return renderMiddleCenter();
+      default:
+        return renderMiddleLeft();
+    }
   };
 
   const stickyClass = () => {
     if (!isSticky) return '';
     if (menuConfig.stickyBehavior === 'always') return 'sticky top-0';
     if (menuConfig.stickyBehavior === 'scroll-up') {
-      return navbarVisible ? 'sticky top-0' : 'sticky top-0 -translate-y-full';
+      return 'sticky top-0';
     }
     return '';
   };
 
+  const showAnnouncement = announcements.enabled && announcements.items.length > 0;
+
   return (
-    <>
-      {announcements.enabled && announcements.items.length > 0 && (
-        <AnnouncementBar items={announcements.items} />
+    <nav
+      id="main-navbar"
+      ref={navbarRef}
+      className={cn(
+        "relative w-full box-border",
+        stickyClass()
       )}
-      <nav
-        id="main-navbar"
+      style={{
+        left: 0,
+        right: 0,
+        minWidth: 0,
+        backgroundColor: 'transparent',
+      } as React.CSSProperties}
+    >
+      {/* 滑动容器 */}
+      <div
         className={cn(
-          "relative transition-transform duration-300 ease-in-out",
-          stickyClass(),
-          menuConfig.stickyBehavior === 'scroll-up' && scrolled && "shadow-md",
-          showSeparator && "border-b border-[rgba(255,255,255,0.1)]"
+          "bg-[var(--navbar-bg,var(--background,#ffffff))]",
+          "text-[var(--navbar-text,var(--foreground,#0f172a))]",
+          showSeparator && "border-b",
+          menuConfig.stickyBehavior === 'scroll-up' && !navbarVisible && "-translate-y-full"
         )}
         style={{
           ...navbarStyle,
-          backgroundColor: 'var(--navbar-bg, var(--background))',
-          color: 'var(--navbar-text, var(--foreground))',
-          '--navbar-height': `${navbarHeight}px`,
-        } as React.CSSProperties}
+          borderColor: showSeparator
+            ? 'var(--navbar-divider-color, rgba(255,255,255,0.1))'
+            : undefined,
+          transition: `transform var(--transition-duration-300, 300ms) var(--transition-timing-ease, ease), box-shadow var(--transition-duration-300, 300ms) var(--transition-timing-ease, ease)`,
+          boxShadow: menuConfig.stickyBehavior === 'scroll-up' && scrolled
+            ? 'var(--shadow-md, 0 4px 6px -1px rgb(0 0 0 / 0.1))'
+            : undefined,
+        }}
       >
-        <div className="hidden md:block">{renderDesktop()}</div>
-        <div className="md:hidden">
-          <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-            {renderMobile()}
+        {/* 公告栏 */}
+        {showAnnouncement && <AnnouncementBar items={announcements.items} />}
+
+        <div
+          className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8"
+          style={{ paddingTop: `${utilities.topSpacing}px` }}
+        >
+          {/* 桌面内容 */}
+          <div className="hidden md:block">{renderDesktop()}</div>
+
+          {/* 移动端内容 */}
+          <div className="md:hidden">
+            <MobileNav
+              logoConfig={logoConfig}
+              siteSettings={siteSettings}
+              menuTree={menuTree}
+              pathname={pathname}
+              mobileMenuOpen={mobileMenuOpen}
+              setMobileMenuOpen={setMobileMenuOpen}
+              searchConfig={searchConfig}
+              utilities={utilities}
+              locale={locale}
+              menuType={menuType}
+              onCloseMenu={() => {}}
+            />
           </div>
         </div>
-      </nav>
-    </>
+      </div>
+    </nav>
   );
 }

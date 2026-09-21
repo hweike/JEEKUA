@@ -6,7 +6,7 @@ export async function getCategoryBySlug(locale: string, slug: string) {
   console.log('[getCategoryBySlug] locale:', locale, 'slug:', slug);
   try {
     const storage = getPrivateStorage();
-    const key = `data/products/${locale}/categories.json`;
+    const key = `products/${locale}/categories.json`;
     const content = await storage.read(key, 'utf8');
     const data = JSON.parse(content as string);
     const categories = data.categories || [];
@@ -34,7 +34,7 @@ export async function getCategoryBySlug(locale: string, slug: string) {
 export async function getAllCategories(locale: string) {
   try {
     const storage = getPrivateStorage();
-    const key = `data/products/${locale}/categories.json`;
+    const key = `products/${locale}/categories.json`;
     const content = await storage.read(key, 'utf8');
     const data = JSON.parse(content as string);
     return {

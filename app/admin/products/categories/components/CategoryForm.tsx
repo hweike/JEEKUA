@@ -9,6 +9,12 @@ import { getFieldHint, getFieldPlaceholder, HINT_PATHS, InfoTooltip } from '@/co
 export default function CategoryForm({ category, onSave, onCancel, attributeTemplates }: any) {
   const [form, setForm] = useState(() => ({ ...category, templateId: category.templateId || '' }));
 
+  // ★ 新增：标准化换行符，将 \\n 转为真正的换行符
+  const normalizeLineBreaks = (text: string) => {
+    if (!text) return '';
+    return text.replace(/\\n/g, '\n');
+  };
+
   return (
     <div>
       <div className="grid grid-cols-2 gap-6">
@@ -37,12 +43,20 @@ export default function CategoryForm({ category, onSave, onCancel, attributeTemp
                   <InfoTooltip hintKey={HINT_PATHS.productCategory.basic.description as any} />
                 </label>
                 <textarea
-                  value={form.description}
+                  value={form.description || ''}
                   onChange={e => setForm({ ...form, description: e.target.value })}
-                  rows={3}
+                  rows={6}
                   className="border rounded p-2 w-full"
                   placeholder={getFieldPlaceholder('productCategory.basic.description')}
                 />
+                {/* 实时预览 */}
+                <div className="mt-2">
+                  <div className="text-xs text-gray-500 mb-1">预览效果：</div>
+                  {/* ★ 使用 normalizeLineBreaks 处理描述文本 */}
+                  <div className="border rounded p-2 bg-gray-50 text-sm min-h-[60px]" style={{ whiteSpace: 'pre-wrap' }}>
+                    {normalizeLineBreaks(form.description) || '（空）'}
+                  </div>
+                </div>
               </div>
               <div>
                 <label className="block font-medium mb-1">

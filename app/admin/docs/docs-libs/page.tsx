@@ -49,6 +49,10 @@ export default function DocsLibsAdmin() {
       if (!res.ok) throw new Error();
       const data = await res.json();
       setLibs(data);
+      // 默认选中第一个文档库
+      if (data.length > 0 && !selectedLibId) {
+        setSelectedLibId(data[0].id);
+      }
     } catch (err) {
       showToast('加载文档库失败', 'error');
     } finally {
@@ -77,60 +81,62 @@ export default function DocsLibsAdmin() {
 
   // 拖拽排序（跨语言同步）
   const handleTreeChange = async (newTree: any[]) => {
-  const flatten = (nodes: any[], parentId: string | null = null): any[] => {
-    let result: any[] = [];
-    nodes.forEach((node, idx) => {
-      result.push({ id: node.id, parentId, order: idx });
-      if (node.children?.length) {
-        result = result.concat(flatten(node.children, node.id));
-      }
-    });
-    return result;
-  };
-  const updates = flatten(newTree);
+    const flatten = (nodes: any[], parentId: string | null = null): any[] => {
+      let result: any[] = [];
+      nodes.forEach((node, idx) => {
+        result.push({ id: node.id, parentId, order: idx });
+        if (node.children?.length) {
+          result = result.concat(flatten(node.children, node.id));
+        }
+      });
+      return result;
+    };
+    const updates = flatten(newTree);
 
-  try {
-    const res = await fetch('/api/admin/docs/reorder-all', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        docsLibId: selectedLibId,
-        items: updates,
-      }),
-    });
-    if (!res.ok) {
-      const err = await res.json();
-      showToast('保存排序失败: ' + (err.error || '未知错误'), 'error');
-      // 回滚：重新加载树
-      const reloadRes = await fetch(`/api/admin/docs/tree?locale=${locale}&docsLibId=${selectedLibId}`);
-      if (reloadRes.ok) {
-        const data = await reloadRes.json();
-        setTree(data);
-      }
-    } else {
-      // 成功，更新本地树
-      setTree(newTree);
-    }
-  } catch (error) {
-    console.error('保存排序错误:', error);
-    showToast('保存排序失败', 'error');
-    // 回滚：重新加载树
     try {
-      const reloadRes = await fetch(`/api/admin/docs/tree?locale=${locale}&docsLibId=${selectedLibId}`);
-      if (reloadRes.ok) {
-        const data = await reloadRes.json();
-        setTree(data);
+      const res = await fetch('/api/admin/docs/reorder-all', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          docsLibId: selectedLibId,
+          items: updates,
+        }),
+      });
+      if (!res.ok) {
+        const err = await res.json();
+        showToast('保存排序失败: ' + (err.error || '未知错误'), 'error');
+        const reloadRes = await fetch(`/api/admin/docs/tree?locale=${locale}&docsLibId=${selectedLibId}`);
+        if (reloadRes.ok) {
+          const data = await reloadRes.json();
+          setTree(data);
+        }
+      } else {
+        setTree(newTree);
       }
-    } catch {
-      showToast('刷新树失败', 'error');
+    } catch (error) {
+      console.error('保存排序错误:', error);
+      showToast('保存排序失败', 'error');
+      try {
+        const reloadRes = await fetch(`/api/admin/docs/tree?locale=${locale}&docsLibId=${selectedLibId}`);
+        if (reloadRes.ok) {
+          const data = await reloadRes.json();
+          setTree(data);
+        }
+      } catch {
+        showToast('刷新树失败', 'error');
+      }
     }
-  }
-};
+  };
 
+  // 新增子文档：携带来源页面参数、语言、返回地址
   const handleNewChild = (parentId?: string) => {
-  const baseUrl = `/admin/docs/edit?locale=${locale}&docsLibId=${selectedLibId}`;
-  const url = parentId ? `${baseUrl}&parentId=${parentId}` : baseUrl;
-  router.push(url);
+    const baseUrl = `/admin/docs/edit?locale=${locale}&docsLibId=${selectedLibId}`;
+    const parentParam = parentId ? `&parentId=${parentId}` : '';
+    // from=docs-libs 标识来源页面，returnUrl 用于保存后跳回
+    const fromParam = '&from=docs-libs';
+    const returnUrl = encodeURIComponent(`/admin/docs/docs-libs?locale=${locale}`);
+    const url = `${baseUrl}${parentParam}${fromParam}&returnUrl=${returnUrl}`;
+    router.push(url);
   };
 
   const handleDeleteDoc = async (id: string) => {
@@ -158,8 +164,13 @@ export default function DocsLibsAdmin() {
     // 已弃用
   };
 
+  // 编辑文档：同样携带来源页面参数、语言、返回地址
   const handleEditDoc = (docId: string) => {
-    router.push(`/admin/docs/edit?locale=${locale}&docsLibId=${selectedLibId}&id=${docId}`);
+    const fromParam = '&from=docs-libs';
+    const returnUrl = encodeURIComponent(`/admin/docs/docs-libs?locale=${locale}`);
+    router.push(
+      `/admin/docs/edit?locale=${locale}&docsLibId=${selectedLibId}&id=${docId}${fromParam}&returnUrl=${returnUrl}`
+    );
   };
 
   const openCreateModal = () => {

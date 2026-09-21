@@ -30,3 +30,18 @@ export async function PUT(
     return NextResponse.json({ error: 'Failed to update menu' }, { status: 500 });
   }
 }
+
+export async function DELETE(
+  request: NextRequest,
+  { params }: { params: Promise<{ locale: string; menuType: string }> }
+) {
+  try {
+    const { locale, menuType } = await params;
+    // 传入 null 删除菜单记录，恢复到未设置状态
+    await writeMenuFile(locale, menuType, null);
+    return NextResponse.json({ success: true });
+  } catch (error) {
+    console.error('DELETE menu error:', error);
+    return NextResponse.json({ error: 'Failed to delete menu' }, { status: 500 });
+  }
+}

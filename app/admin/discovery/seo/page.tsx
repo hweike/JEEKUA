@@ -11,13 +11,13 @@ import { SEOTable } from './components/SEOTable';
 import { SEOPagination } from './components/SEOPagination';
 import { useSEOData } from './hooks/useSEOData';
 import type { PageListItem, PageSeoData, SeoStrategy } from './types';
+import LanguageSelector from '@/components/common/LanguageSelector';
 
 // =====================================================
 // 主组件
 // =====================================================
 
 export default function SEOManagementPage() {
-  // 使用自定义 Hook 管理数据
   const {
     pages,
     total,
@@ -39,6 +39,8 @@ export default function SEOManagementPage() {
     handleTypeChange,
     handleSearchChange,
     typeOptions,
+    category,
+    setCategory,
   } = useSEOData();
 
   // 本地状态
@@ -55,9 +57,23 @@ export default function SEOManagementPage() {
   // 批量任务
   const [batchJobId, setBatchJobId] = useState<string | null>(null);
   const [batchModalOpen, setBatchModalOpen] = useState(false);
+  
+  // ✅ 两个按钮独立状态
   const [isBatchRunning, setIsBatchRunning] = useState(false);
+  const [isBatchAllRunning, setIsBatchAllRunning] = useState(false);
+  
   const [showBatchGenerate, setShowBatchGenerate] = useState(false);
   const [batchMode, setBatchMode] = useState<'selected' | 'all'>('selected');
+
+  // 标签定义
+  const tabs = [
+    { key: 'product', label: '产品' },
+    { key: 'blog', label: '博客' },
+    { key: 'doc', label: '文档' },
+    { key: 'video', label: '视频' },
+    { key: 'page', label: '页面' },
+  ];
+  const currentTab = tabs.some(t => t.key === category) ? category : tabs[0]?.key || 'product';
 
   // ========== 加载策略 ==========
   useEffect(() => {
@@ -202,9 +218,10 @@ export default function SEOManagementPage() {
     setSelectedSeoData((prev) => (prev ? { ...prev, generation_status: 'approved' as any } : null));
   };
 
-  // ========== 批量生成 ==========
+  // ========== 批量生成（选中项） ==========
   const handleBatchGenerate = async (fields: { title: boolean; description: boolean; keywords: boolean }) => {
-    const targetIds = batchMode === 'all' ? pages.map((p) => p.id) : Array.from(selectedIds);
+    // ✅ 使用选中的页面 ID（当前页的选中项）
+    const targetIds = Array.from(selectedIds);
     if (targetIds.length === 0) {
       setError('没有可选的页面');
       return;
@@ -225,6 +242,100 @@ export default function SEOManagementPage() {
     setError(null);
     setShowBatchGenerate(false);
 
+    try {
+      await runBatchProcess(targetIds);
+      await loadPages();
+      setSelectedIds(new Set());
+    } catch (err) {
+      setError(err instanceof Error ? err.message : '批量生成失败');
+    } finally {
+      setIsBatchRunning(false);
+    }
+  };
+
+  // ========== 一键全部生成（当前语言下所有页面） ==========
+  const handleBatchGenerateAll = async (fields: { title: boolean; description: boolean; keywords: boolean }) => {
+    // ✅ 获取当前语言下的所有页面 ID（调用 API 获取全部，不只是当前页）
+    setIsBatchAllRunning(true);
+    setError(null);
+    setShowBatchGenerate(false);
+
+    try {
+      // 获取所有页面 ID（不分页）
+      const allPageIds = await fetchAllPageIds(selectedLocale);
+      
+      if (allPageIds.length === 0) {
+        setError('当前语言下没有页面');
+        setIsBatchAllRunning(false);
+        return;
+      }
+
+      const fieldNames: string[] = [];
+      if (fields.title) fieldNames.push('SEO 标题');
+      if (fields.description) fieldNames.push('SEO 描述');
+      if (fields.keywords) fieldNames.push('SEO 关键词');
+
+      if (!confirm(
+        `⚠️ 一键全部生成将覆盖当前语言（${selectedLocale}）下所有页面的 SEO 信息（${fieldNames.join('、')}），可能对页面的搜索引擎排名产生影响，请谨慎操作！\n\n` +
+        `将对 ${allPageIds.length} 个页面执行：分析 → AI 生成 → 确认发布（一气呵成）\n\n` +
+        `确定要继续吗？`
+      )) {
+        setIsBatchAllRunning(false);
+        return;
+      }
+
+      await runBatchProcess(allPageIds);
+      await loadPages();
+      setSelectedIds(new Set());
+    } catch (err) {
+      setError(err instanceof Error ? err.message : '一键全部生成失败');
+    } finally {
+      setIsBatchAllRunning(false);
+    }
+  };
+
+  /**
+   * 获取当前语言下的所有页面 ID
+   */
+  const fetchAllPageIds = async (locale: string): Promise<string[]> => {
+    let allIds: string[] = [];
+    let page = 1;
+    const pageSize = 100;
+    let hasMore = true;
+
+    while (hasMore) {
+      try {
+        const params = new URLSearchParams({
+          page: String(page),
+          pageSize: String(pageSize),
+          locale: locale,
+          status: 'all',
+          type: '',
+          keyword: '',
+        });
+        const res = await fetch(`/api/discovery/seo/pages?${params.toString()}`);
+        if (!res.ok) break;
+        const json = await res.json();
+        const ids = (json.data || []).map((item: any) => item.id);
+        allIds = allIds.concat(ids);
+        if (ids.length < pageSize) {
+          hasMore = false;
+        } else {
+          page++;
+        }
+      } catch (err) {
+        console.error('获取页面列表失败:', err);
+        hasMore = false;
+      }
+    }
+
+    return allIds;
+  };
+
+  /**
+   * 执行批量处理流程
+   */
+  const runBatchProcess = async (targetIds: string[]) => {
     try {
       // 批量分析
       const analyzeRes = await fetch('/api/discovery/seo/batch/analyze', {
@@ -251,8 +362,7 @@ export default function SEOManagementPage() {
       await waitForJob(generateJson.jobId);
 
       // 逐个确认发布
-      let approved = 0,
-        failed = 0;
+      let approved = 0, failed = 0;
       for (const pageId of targetIds) {
         try {
           const approveRes = await fetch('/api/discovery/seo/approve', {
@@ -270,12 +380,8 @@ export default function SEOManagementPage() {
 
       setSuccess(`批量生成完成！成功 ${approved} 个，失败 ${failed} 个`);
       setTimeout(() => setSuccess(null), 5000);
-      await loadPages();
-      setSelectedIds(new Set());
     } catch (err) {
-      setError(err instanceof Error ? err.message : '批量生成失败');
-    } finally {
-      setIsBatchRunning(false);
+      throw err;
     }
   };
 
@@ -291,6 +397,22 @@ export default function SEOManagementPage() {
       }, 3000);
     });
 
+  // ========== 标签切换 ==========
+  const handleTabClick = (tabKey: string) => {
+    setCategory(tabKey);
+    handleTypeChange('all');
+  };
+
+  // ========== 打开批量生成弹窗 ==========
+  const openBatchGenerate = (mode: 'selected' | 'all') => {
+    if (mode === 'selected' && selectedIds.size === 0) {
+      setError('请先选择要生成的页面');
+      return;
+    }
+    setBatchMode(mode);
+    setShowBatchGenerate(true);
+  };
+
   // ========== 渲染 ==========
   return (
     <div className="min-h-screen bg-gray-50">
@@ -304,13 +426,20 @@ export default function SEOManagementPage() {
             </h1>
             <p className="text-gray-600 text-sm">管理所有页面的 SEO 元数据，支持 AI 分析生成</p>
           </div>
-          <button
-            onClick={() => loadPages()}
-            disabled={loading}
-            className="p-2 text-gray-600 hover:text-gray-900 rounded-lg hover:bg-gray-100 disabled:opacity-50"
-          >
-            <RefreshCw className={`w-5 h-5 ${loading ? 'animate-spin' : ''}`} />
-          </button>
+          <div className="flex items-center gap-2">
+            <LanguageSelector
+              currentLocale={selectedLocale}
+              onLocaleChange={handleLocaleChange}
+              displayMode="zh"
+            />
+            <button
+              onClick={() => loadPages()}
+              disabled={loading}
+              className="p-2 text-gray-600 hover:text-gray-900 rounded-lg hover:bg-gray-100 disabled:opacity-50"
+            >
+              <RefreshCw className={`w-5 h-5 ${loading ? 'animate-spin' : ''}`} />
+            </button>
+          </div>
         </div>
 
         {/* 消息 */}
@@ -333,11 +462,30 @@ export default function SEOManagementPage() {
           </div>
         )}
 
+        {/* 标签栏 */}
+        <div className="border-b border-gray-200 mb-4">
+          <nav className="-mb-px flex space-x-8" aria-label="页面类型标签">
+            {tabs.map((tab) => (
+              <button
+                key={tab.key}
+                onClick={() => handleTabClick(tab.key)}
+                className={`
+                  py-2 px-1 border-b-2 font-medium text-sm transition-colors
+                  ${
+                    currentTab === tab.key
+                      ? 'border-blue-500 text-blue-600'
+                      : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+                  }
+                `}
+              >
+                {tab.label}
+              </button>
+            ))}
+          </nav>
+        </div>
+
         {/* 筛选栏 */}
         <SEOFilterBar
-          selectedLocale={selectedLocale}
-          languages={languages}
-          onLocaleChange={handleLocaleChange}
           filterStatus={filterStatus}
           onStatusChange={handleStatusChange}
           filterType={filterType}
@@ -345,25 +493,6 @@ export default function SEOManagementPage() {
           onTypeChange={handleTypeChange}
           searchQuery={searchQuery}
           onSearchChange={handleSearchChange}
-          selectedCount={selectedIds.size}
-          totalCount={total}
-          isBatchRunning={isBatchRunning}
-          onBatchGenerate={() => {
-            if (selectedIds.size === 0) {
-              setError('请先选择要生成的页面');
-              return;
-            }
-            setBatchMode('selected');
-            setShowBatchGenerate(true);
-          }}
-          onBatchAll={() => {
-            if (total === 0) {
-              setError('当前没有页面');
-              return;
-            }
-            setBatchMode('all');
-            setShowBatchGenerate(true);
-          }}
         />
 
         {/* 表格 */}
@@ -420,10 +549,44 @@ export default function SEOManagementPage() {
           mode={batchMode}
           count={batchMode === 'all' ? total : selectedIds.size}
           onClose={() => setShowBatchGenerate(false)}
-          onConfirm={handleBatchGenerate}
-          loading={isBatchRunning}
+          onConfirm={batchMode === 'all' ? handleBatchGenerateAll : handleBatchGenerate}
+          loading={batchMode === 'all' ? isBatchAllRunning : isBatchRunning}
         />
       )}
+
+      {/* 底部悬浮条 */}
+      <div className="fixed bottom-0 left-0 right-0 bg-white border-t shadow-lg p-4 z-50">
+        <div className="max-w-7xl mx-auto flex flex-wrap items-center justify-between gap-3">
+          <span className="text-sm text-gray-700">
+            已选择 <span className="font-semibold">{selectedIds.size}</span> 个页面
+            <span className="ml-2 text-gray-400">（共 {total} 个）</span>
+          </span>
+          <div className="flex gap-3 flex-wrap">
+            <button
+              onClick={() => setSelectedIds(new Set())}
+              className="px-4 py-2 border rounded hover:bg-gray-50 transition text-gray-700"
+            >
+              取消选择
+            </button>
+            <button
+              onClick={() => openBatchGenerate('selected')}
+              disabled={isBatchRunning || isBatchAllRunning || selectedIds.size === 0}
+              className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 transition disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-1"
+            >
+              {isBatchRunning ? <Loader2 className="w-4 h-4 animate-spin" /> : <FileText className="w-4 h-4" />}
+              批量生成（{selectedIds.size}）
+            </button>
+            <button
+              onClick={() => openBatchGenerate('all')}
+              disabled={isBatchRunning || isBatchAllRunning || total === 0}
+              className="px-4 py-2 bg-purple-600 text-white rounded hover:bg-purple-700 transition disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-1"
+            >
+              {isBatchAllRunning ? <Loader2 className="w-4 h-4 animate-spin" /> : <FileText className="w-4 h-4" />}
+              一键全部生成
+            </button>
+          </div>
+        </div>
+      </div>
     </div>
   );
 }

@@ -1,6 +1,7 @@
 import type { ComponentConfig } from '@measured/puck';
 import { Paragraph } from '@/components/webbuilder/blocks/basic/Paragraph';
 import { ColorPickerField } from '@/components/webbuilder/fields/ColorPickerField';
+import RichTextEditor from '@/components/RichTextEditor';
 import { DEFAULT_PARAGRAPH } from '@/lib/webbuilder/defaults/Paragraph';
 import type { ParagraphProps } from '@/lib/webbuilder/types';
 
@@ -8,21 +9,23 @@ export const config: ComponentConfig<ParagraphProps> = {
   label: '段落',
   category: 'Basic',
   defaultProps: {
-    text: DEFAULT_PARAGRAPH.text,
+    content: DEFAULT_PARAGRAPH.content,
     fontSize: DEFAULT_PARAGRAPH.fontSize,
-    textAlign: DEFAULT_PARAGRAPH.textAlign,
-    bold: DEFAULT_PARAGRAPH.bold,
-    italic: DEFAULT_PARAGRAPH.italic,
-    underline: DEFAULT_PARAGRAPH.underline,
     color: DEFAULT_PARAGRAPH.color,
-    link: DEFAULT_PARAGRAPH.link,
+    textAlign: DEFAULT_PARAGRAPH.textAlign,
     spacingGroup: { ...DEFAULT_PARAGRAPH.spacingGroup },
   },
   fields: {
-    text: {
-      label: '段落文本',
-      type: 'textarea',
-      rows: 4,
+    content: {
+      label: '内容',
+      type: 'custom',
+      render: ({ value, onChange }: { value?: string; onChange: (val: string) => void }) => (
+        <RichTextEditor
+          value={value || ''}
+          onChange={onChange}
+          placeholder="开始编写段落..."
+        />
+      ),
     },
     fontSize: {
       label: '文字大小 (px)',
@@ -40,40 +43,12 @@ export const config: ComponentConfig<ParagraphProps> = {
         { label: '右对齐', value: 'right' },
       ],
     },
-    bold: {
-      label: '加粗',
-      type: 'radio',
-      options: [
-        { label: '是', value: true },
-        { label: '否', value: false },
-      ],
-    },
-    italic: {
-      label: '斜体',
-      type: 'radio',
-      options: [
-        { label: '是', value: true },
-        { label: '否', value: false },
-      ],
-    },
-    underline: {
-      label: '下划线',
-      type: 'radio',
-      options: [
-        { label: '是', value: true },
-        { label: '否', value: false },
-      ],
-    },
     color: {
       label: '文字颜色',
       type: 'custom',
-      render: ({ value, onChange }) => (
+      render: ({ value, onChange }: { value?: string; onChange: (val: string) => void }) => (
         <ColorPickerField field={{}} value={value || '#333333'} onChange={onChange} />
       ),
-    },
-    link: {
-      label: '链接地址',
-      type: 'text',
     },
   },
   render: ({ puck, ...props }) => <Paragraph puck={puck} {...props} />,

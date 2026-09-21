@@ -1,14 +1,14 @@
 'use client';
 
-import Link from 'next/link';
-import { useState, useEffect } from 'react';
-import { ChevronRight, ChevronDown } from 'lucide-react';
+import React, { useState } from 'react';
+import { ChevronRight } from 'lucide-react';
 
 interface DocNode {
   id: string;
   title: string;
   slug: string;
   children?: DocNode[];
+  badge?: string;
 }
 
 interface DocsTreeProps {
@@ -16,162 +16,227 @@ interface DocsTreeProps {
   librarySlug: string;
   currentDocSlug: string;
   locale: string;
-  basePath?: string;
+  basePath: string;
+  onSelect: (slug: string) => void;
+  theme: {
+    text: string;
+    groupLabel: string;
+    activeBg: string;
+    activeText: string;
+    activeBorder: string;
+    hoverBg: string;
+    hoverText: string;
+    badgeBg: string;
+    badgeText: string;
+    border: string;
+  };
 }
 
 export default function DocsTree({
   tree,
-  librarySlug,
   currentDocSlug,
-  locale,
-  basePath = 'docs',
+  onSelect,
+  theme,
 }: DocsTreeProps) {
-  // 记录当前展开的一级节点ID
-  const [expandedRoot, setExpandedRoot] = useState<string | null>(null);
-  // 记录展开的二级及更深节点的ID集合
-  const [expandedInner, setExpandedInner] = useState<Set<string>>(new Set());
+  const {
+    text,
+    groupLabel,
+    activeBg,
+    activeText,
+    hoverBg,
+    hoverText,
+    badgeBg,
+    badgeText,
+  } = theme;
 
-  // 构建完整的URL
-  const getHref = (slug: string) => `/${locale}/${basePath}/${librarySlug}/${slug}`;
+  // ============================================================
+  // ✅ 全局标准变量（对应 VARIABLE_COMPONENT_MAP）
+  // ============================================================
+  const FONT_SIZE_SM   = 'var(--font-size-sm, 14px)';           // 二级节点
+  const FONT_SIZE_BASE = 'var(--font-size-base, 16px)';         // 一级节点
+  const FW_NORMAL      = 'var(--font-weight-normal, 400)';      // 叶子
+  const FW_MEDIUM      = 'var(--font-weight-medium, 500)';      // 二级
+  const FW_SEMIBOLD    = 'var(--font-weight-semibold, 600)';    // 一级 / 选中
+  const LINE_HEIGHT    = 'var(--line-height-normal, 1.5)';
+  const LETTER_SPACING = 'var(--letter-spacing-normal, normal)';
+  const SPACING_2      = 'var(--spacing-2, 0.5rem)';            // 分组间距
+  const SPACING_4      = 'var(--spacing-4, 1rem)';              // 一级缩进
 
-  // 根据当前文档自动展开上层节点
-  useEffect(() => {
-    if (!currentDocSlug || !tree.length) return;
+  // ============================================================
+  // ✅ 硬编码尺寸（全局标准里没有）
+  // ============================================================
+  const NODE_HEIGHT = '36px';
+  const INDENT_L1   = SPACING_4;   // 16px
+  const INDENT_L2   = '2rem';      // 32px
 
-    const findParent = (nodes: DocNode[], targetSlug: string): { root: string | null; ancestors: string[] } => {
-      for (const node of nodes) {
-        if (node.slug === targetSlug) {
-          return { root: node.id, ancestors: [] };
-        }
-        if (node.children) {
-          for (const child of node.children) {
-            if (child.slug === targetSlug) {
-              return { root: node.id, ancestors: [] };
-            }
-            // 如果存在更深层级，遍历子节点的子节点...
-          }
-        }
-      }
-      return { root: null, ancestors: [] };
+  // ============================================================
+  // ✅ 展开状态（替代 <details>，避免"详情"）
+  // 默认展开一级
+  // ============================================================
+  const [expandedKeys, setExpandedKeys] = useState<Record<string, boolean>>(() => {
+    const init: Record<string, boolean> = {};
+    const collect = (nodes: DocNode[], level: number, prefix: string) => {
+      nodes.forEach((node, i) => {
+        const key = `${prefix}-${i}`;
+        if (level === 0) init[key] = true;   // 一级默认展开
+        if (node.children) collect(node.children, level + 1, key);
+      });
     };
+    collect(tree, 0, 'group');
+    return init;
+  });
 
-    const { root } = findParent(tree, currentDocSlug);
-    if (root) {
-      setExpandedRoot(root);
-    }
-  }, [tree, currentDocSlug]);
-
-  // 切换一级节点的展开/折叠
-  const toggleRoot = (nodeId: string) => {
-    setExpandedRoot(prev => (prev === nodeId ? null : nodeId));
+  const toggleExpand = (key: string) => {
+    setExpandedKeys((prev) => ({ ...prev, [key]: !prev[key] }));
   };
 
-  // 切换二级或更深节点的展开/折叠
-  const toggleInner = (nodeId: string) => {
-    setExpandedInner(prev => {
-      const newSet = new Set(prev);
-      if (newSet.has(nodeId)) {
-        newSet.delete(nodeId);
-      } else {
-        newSet.add(nodeId);
-      }
-      return newSet;
-    });
-  };
-
-  // 主题变量
-  const textColor = 'var(--navbar-text, var(--foreground))';
-  const hoverTextColor = 'var(--navbar-hover-text, var(--primary))';
-  const hoverBgColor = 'var(--navbar-hover-bg, transparent)';
-  const activeTextColor = 'var(--navbar-active-text, var(--primary))';
-  const activeBgColor = 'var(--navbar-active-bg, color-mix(in oklch, var(--primary) 10%, transparent))';
-
-  const renderNode = (node: DocNode, depth: number = 0): React.ReactNode => {
-    const isRoot = depth === 0;
+  const renderNode = (node: DocNode, level: number, key: string) => {
+    const isActive = currentDocSlug === node.slug;
     const hasChildren = node.children && node.children.length > 0;
-    const isActive = node.slug === currentDocSlug;
-    const isExpanded = isRoot ? expandedRoot === node.id : expandedInner.has(node.id);
-    const href = getHref(node.slug);
+    const isExpanded = !!expandedKeys[key];
+    const indentCss = level === 1 ? INDENT_L1 : level === 2 ? INDENT_L2 : '0px';
 
-    // 整行容器：负责高亮激活背景
-    return (
-      <div key={node.id} className="relative">
-        <div
-          className="flex items-center justify-between w-full rounded-md transition-all"
-          style={{
-            backgroundColor: isActive ? activeBgColor : 'transparent',
-          }}
-        >
-          {/* 整行点击跳转：Link 组件撑满整个容器 */}
-          <Link
-            href={href}
-            className="flex-1 py-1.5 px-2 text-sm font-medium"
+    const levelFontSize = level === 0 ? FONT_SIZE_BASE : FONT_SIZE_SM;
+    const levelWeight =
+      level === 0 ? FW_SEMIBOLD :
+      level === 1 ? FW_MEDIUM :
+      FW_NORMAL;
+
+    // ============================================================
+    // 有子节点：一级节点也可点击（选中 + 展开子节点）
+    // ============================================================
+    if (hasChildren) {
+      return (
+        <li key={key} style={{ marginBottom: SPACING_2 }}>
+          <div
+            className="flex items-center gap-1 rounded-md transition-colors"
             style={{
-              color: isActive ? activeTextColor : textColor,
-              transition: 'color 150ms ease',
+              height: NODE_HEIGHT,
+              paddingLeft: `calc(${indentCss} + 8px)`,
+              paddingRight: '8px',
+              backgroundColor: isActive ? activeBg : 'transparent',
             }}
             onMouseEnter={(e) => {
-              if (!isActive) e.currentTarget.style.color = hoverTextColor;
+              if (!isActive) {
+                e.currentTarget.style.backgroundColor = hoverBg;
+              }
             }}
             onMouseLeave={(e) => {
-              if (!isActive) e.currentTarget.style.color = textColor;
+              if (!isActive) {
+                e.currentTarget.style.backgroundColor = 'transparent';
+              }
             }}
           >
-            {node.title}
-          </Link>
-
-          {/* 折叠/展开按钮（仅存在于有子节点的节点） */}
-          {hasChildren && (
+            {/* ✅ 标题：点击 → 选中 + 展开子节点 */}
             <button
-              onClick={(e) => {
-                e.preventDefault();
-                e.stopPropagation();
-                if (isRoot) {
-                  toggleRoot(node.id);
-                } else {
-                  toggleInner(node.id);
-                }
+              type="button"
+              onClick={() => {
+                onSelect(node.slug);
+                if (!isExpanded) toggleExpand(key);
               }}
-              className="p-1 rounded-md"
+              className="truncate flex-1 text-left cursor-pointer"
               style={{
-                color: textColor,
-                transition: 'color 150ms ease',
-                backgroundColor: 'transparent',
+                fontSize: levelFontSize,
+                fontWeight: isActive ? FW_SEMIBOLD : levelWeight,
+                lineHeight: LINE_HEIGHT,
+                letterSpacing: LETTER_SPACING,
+                color: isActive ? activeText : (level === 0 ? groupLabel : text),
+                background: 'none',
                 border: 'none',
-                cursor: 'pointer',
+                padding: 0,
               }}
-              onMouseEnter={(e) => {
-                if (!isActive) e.currentTarget.style.color = hoverTextColor;
-                if (hoverBgColor !== 'transparent') e.currentTarget.style.backgroundColor = hoverBgColor;
-              }}
-              onMouseLeave={(e) => {
-                if (!isActive) e.currentTarget.style.color = textColor;
-                if (hoverBgColor !== 'transparent') e.currentTarget.style.backgroundColor = 'transparent';
-              }}
-              aria-label={isExpanded ? '折叠' : '展开'}
             >
-              {isExpanded ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
+              {node.title}
             </button>
-          )}
-        </div>
 
-        {/* 子节点列表 */}
-        {hasChildren && isExpanded && (
-          <ul className="ml-4 mt-1 space-y-1 border-l border-gray-100 pl-2">
-            {node.children!.map(child => renderNode(child, depth + 1))}
-          </ul>
-        )}
-      </div>
+            {/* ✅ 箭头：点击 → 只展开/收起 */}
+            <button
+              type="button"
+              aria-label={isExpanded ? 'Collapse' : 'Expand'}
+              onClick={() => toggleExpand(key)}
+              className="flex-shrink-0 cursor-pointer"
+              style={{
+                background: 'none',
+                border: 'none',
+                padding: '2px',
+                color: isActive ? activeText : (level === 0 ? groupLabel : text),
+                display: 'flex',
+                alignItems: 'center',
+                transition: 'transform var(--transition-duration-150, 150ms) var(--transition-timing-ease, ease)',
+                transform: isExpanded ? 'rotate(90deg)' : 'rotate(0deg)',
+              }}
+            >
+              <ChevronRight size={16} />
+            </button>
+          </div>
+
+          {isExpanded && (
+            <ul style={{ marginTop: SPACING_2 }}>
+              {node.children!.map((child, i) =>
+                renderNode(child, level + 1, `${key}-${i}`)
+              )}
+            </ul>
+          )}
+        </li>
+      );
+    }
+
+    // ============================================================
+    // 叶子节点
+    // ============================================================
+    return (
+      <li key={key} style={{ marginBottom: '2px' }}>
+        <button
+          type="button"
+          onClick={() => onSelect(node.slug)}
+          className="w-full text-left flex items-center gap-2 rounded-md transition-colors relative"
+          style={{
+            height: NODE_HEIGHT,
+            paddingLeft: `calc(${indentCss} + 8px)`,
+            paddingRight: '8px',
+            fontSize: levelFontSize,
+            fontWeight: isActive ? FW_SEMIBOLD : levelWeight,
+            lineHeight: LINE_HEIGHT,
+            letterSpacing: LETTER_SPACING,
+            color: isActive ? activeText : text,
+            backgroundColor: isActive ? activeBg : 'transparent',
+          }}
+          onMouseEnter={(e) => {
+            if (!isActive) {
+              e.currentTarget.style.backgroundColor = hoverBg;
+              e.currentTarget.style.color = hoverText;
+            }
+          }}
+          onMouseLeave={(e) => {
+            if (!isActive) {
+              e.currentTarget.style.backgroundColor = 'transparent';
+              e.currentTarget.style.color = text;
+            }
+          }}
+        >
+          <span className="truncate flex-1">{node.title}</span>
+
+          {node.badge && (
+            <span
+              className="text-[10px] px-1.5 py-0.5 rounded flex-shrink-0"
+              style={{
+                backgroundColor: badgeBg,
+                color: badgeText,
+              }}
+            >
+              {node.badge}
+            </span>
+          )}
+        </button>
+      </li>
     );
   };
 
   return (
-    <aside className="w-full md:w-64 flex-shrink-0 bg-gray-50">
-      <div className="sticky top-16 pb-8">
-        <div className="space-y-1 p-4">
-          {tree.map(node => renderNode(node, 0))}
-        </div>
-      </div>
-    </aside>
+    <nav aria-label="Documentation navigation">
+      <ul>
+        {tree.map((group, i) => renderNode(group, 0, `group-${i}`))}
+      </ul>
+    </nav>
   );
 }

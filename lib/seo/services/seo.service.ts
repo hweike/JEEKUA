@@ -1,3 +1,4 @@
+// lib/seo/services/seo.service.ts
 // =====================================================
 // SEO 数据管理服务
 // 职责：管理 page_seo_data 表的 CRUD，以及分析/AI生成的编排
@@ -5,20 +6,13 @@
 // =====================================================
 
 import { supabase } from '@/lib/supabase/client';
-import type { PageSeoData, GenerationStatus, GenerateSeoInput } from '../types';
-import { GENERATION_STATUS } from '../constants';
+import type { PageSeoData, GenerateSeoInput, AnalyzedContent } from '../types';
+import { GENERATION_STATUS, PAGE_TYPES } from '../constants';
 import { strategiesService } from './strategies.service';
 import { AnalyzerService } from './analyzer.service';
-import type { AnalyzedContent } from '../types';
 import { syncService } from './sync.service';
 
 const DEFAULT_SITE_ID = '000001';
-
-type PageRow = {
-  type: string;
-  title: string;
-  content_summary?: string;
-};
 
 export class SeoService {
   private analyzer: AnalyzerService;
@@ -445,8 +439,8 @@ async approveSeo(
 
     const productName = product?.product_name || pageTitle || '';
     if (productName) {
-      const nameParts = productName.split(/[\s\-]+/).filter(p => p.length > 2);
-      nameParts.forEach(p => {
+      const nameParts = productName.split(/[\s\-]+/).filter((p: string) => p.length > 2);
+      nameParts.forEach((p: string) => {
         if (!productKeywords.includes(p)) {
           productKeywords.push(p);
         }
@@ -654,12 +648,8 @@ async approveSeo(
     let pageType = seoData.page_type;
     if (pageType === 'unknown' && pageId.includes(':')) {
       const extractedType = pageId.split(':')[0];
-      const supportedTypes = [
-        'home', 'product', 'productLine', 'productCollection', 'page',
-        'blog', 'blogCategory', 'blogPost', 'docLibrary', 'doc',
-        'videoCategory', 'video', 'inquiry', 'policy'
-      ];
-      if (supportedTypes.includes(extractedType)) {
+      // ✅ 使用导入的 PAGE_TYPES 常量
+      if (PAGE_TYPES.includes(extractedType as any)) {
         pageType = extractedType;
         console.log(`从 pageId 提取类型: ${extractedType}`);
       }

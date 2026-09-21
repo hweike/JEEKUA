@@ -3,51 +3,33 @@
 import { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { useLocale } from 'next-intl';
+import { getImageUrl } from '@/lib/files/url';
 
 interface Product {
   id: string;
   name: string;
   image: string | null;
   slug: string;
-  priceDisplay: string;
+  sku?: string;
+  priceDisplay?: string;
 }
 
 interface RelatedProductsProps {
   resourceType: 'blog' | 'document' | 'video';
   resourceId: string;
-  title?: string;
   maxItems?: number;
 }
 
-/**
- * 智能处理图片 URL：
- * - 本地图片（以 / 开头或 localhost 域名）直接返回，不代理
- * - 外部 http/https 链接走代理（解决防盗链）
- */
-function getProcessedImageUrl(url: string | null): string {
-  if (!url) return '';
-  // 本地图片：相对路径 /uploads/... 或绝对路径但包含 localhost
-  if (url.startsWith('/')) return url;
-  if (url.includes('localhost') || url.includes('127.0.0.1')) {
-    // 如果包含 localhost，尝试转换成相对路径
-    try {
-      const urlObj = new URL(url);
-      return urlObj.pathname;
-    } catch {
-      return url;
-    }
-  }
-  // 外部链接，走代理
-  if (url.startsWith('http://') || url.startsWith('https://')) {
-    return `/api/proxy-image?url=${encodeURIComponent(url)}`;
-  }
-  return url;
-}
+// ============================================================
+// 公共样式常量
+// ============================================================
+const COLOR_TRANSITION = `color var(--transition-duration-150, 150ms) var(--transition-timing-ease, ease)`;
+const BG_COLOR_TRANSITION = `background-color var(--transition-duration-150, 150ms) var(--transition-timing-ease, ease)`;
+const COLOR_BG_TRANSITION = `${COLOR_TRANSITION}, ${BG_COLOR_TRANSITION}`;
 
 export default function RelatedProducts({
   resourceType,
   resourceId,
-  title = '相关产品',
   maxItems,
 }: RelatedProductsProps) {
   const locale = useLocale();
@@ -60,7 +42,7 @@ export default function RelatedProducts({
     const fetchProducts = async () => {
       try {
         setLoading(true);
-        const res = await fetch(`/api/resources/${resourceType}/${resourceId}/products`);
+        const res = await fetch(`/api/resources/${resourceType}/${resourceId}/products?locale=${locale}`);
         if (!res.ok) throw new Error('Failed to fetch');
         const data = await res.json();
         let items = data.items || [];
@@ -79,7 +61,17 @@ export default function RelatedProducts({
   }, [resourceType, resourceId, maxItems]);
 
   if (loading) {
-    return <div className="mt-8 text-center text-muted-foreground">加载相关产品中...</div>;
+    return (
+      <div
+        className="text-center"
+        style={{
+          marginTop: 'var(--spacing-4, 1rem)',
+          color: 'var(--muted-foreground, #64748b)',
+        }}
+      >
+        加载中...
+      </div>
+    );
   }
 
   if (error || products.length === 0) {
@@ -87,53 +79,103 @@ export default function RelatedProducts({
   }
 
   const handleImageError = (e: React.SyntheticEvent<HTMLImageElement, Event>) => {
-    const target = e.currentTarget;
-    const originalUrl = target.getAttribute('data-original-src');
-    if (originalUrl && !target.src.includes('/api/proxy-image')) {
-      // 如果图片加载失败且尚未尝试代理，尝试走代理（针对外部图片）
-      target.src = `/api/proxy-image?url=${encodeURIComponent(originalUrl)}`;
-    } else {
-      // 加载失败显示占位图
-      target.src = 'data:image/svg+xml,%3Csvg xmlns="http://www.w3.org/2000/svg" width="100" height="100" viewBox="0 0 24 24" fill="none" stroke="%23999"%3E%3Crect x="2" y="2" width="20" height="20" rx="2"%3E%3C/rect%3E%3C/svg%3E';
-    }
+    const img = e.currentTarget;
+    img.src = 'data:image/svg+xml,%3Csvg xmlns="http://www.w3.org/2000/svg" width="100" height="100" viewBox="0 0 24 24" fill="none" stroke="%23999"%3E%3Crect x="2" y="2" width="20" height="20" rx="2"%3E%3C/rect%3E%3C/svg%3E';
   };
 
   return (
-    <div className="mt-12 pt-8 border-t border-border">
-      <h2 className="text-2xl font-bold text-foreground mb-6">{title}</h2>
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
-        {products.map((product) => {
-          const rawImageUrl = product.image || '';
-          const processedUrl = getProcessedImageUrl(rawImageUrl);
-          return (
-            <Link
-              key={product.id}
-              href={`/${locale}/products/${product.slug}`}
-              className="group block border border-border rounded-lg overflow-hidden hover:shadow-lg transition-shadow"
+    <div
+      style={{
+        display: 'flex',
+        flexDirection: 'column',
+        gap: 'var(--spacing-3, 0.75rem)',
+      }}
+    >
+      {products.map((product) => {
+        const imageUrl = getImageUrl(product.image);
+        return (
+          <Link
+            key={product.id}
+            href={`/${locale}/product/${product.slug}`}
+            className="flex items-start no-underline"
+            style={{
+              gap: 'var(--spacing-3, 0.75rem)',
+              padding: 'var(--spacing-4, 1rem)',
+              borderRadius: 'var(--radius-lg, 0.75rem)',
+              backgroundColor: 'var(--muted, #f1f5f9)',
+              transition: BG_COLOR_TRANSITION,
+            }}
+            onMouseEnter={(e) => {
+              e.currentTarget.style.backgroundColor =
+                'color-mix(in srgb, var(--muted, #f1f5f9) 80%, transparent)';
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.backgroundColor = 'var(--muted, #f1f5f9)';
+            }}
+          >
+            {/* 图片区域 */}
+            <div
+              className="flex-shrink-0 overflow-hidden"
+              style={{
+                width: '100px',
+                height: '100px',
+                backgroundColor: 'color-mix(in srgb, var(--muted, #f1f5f9) 50%, transparent)',
+                borderRadius: 'var(--radius-md, 0.625rem)',
+              }}
             >
-              <div className="aspect-square bg-muted relative overflow-hidden">
-                {rawImageUrl ? (
-                  <img
-                    src={processedUrl}
-                    alt={product.name}
-                    className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
-                    data-original-src={rawImageUrl}
-                    onError={handleImageError}
-                  />
-                ) : (
-                  <div className="w-full h-full flex items-center justify-center text-muted-foreground">
-                    暂无图片
-                  </div>
-                )}
+              {imageUrl ? (
+                <img
+                  src={imageUrl}
+                  alt={product.name}
+                  className="w-full h-full object-cover"
+                  onError={handleImageError}
+                />
+              ) : (
+                <div
+                  className="w-full h-full flex items-center justify-center"
+                  style={{
+                    color: 'var(--muted-foreground, #64748b)',
+                    fontSize: 'var(--font-size-xs, 0.75rem)',
+                  }}
+                >
+                  无图
+                </div>
+              )}
+            </div>
+            {/* 文字信息 */}
+            <div className="flex-1 min-w-0 flex flex-col">
+              <div
+                className="line-clamp-2 break-words"
+                style={{
+                  fontWeight: 'var(--font-weight-medium, 500)',
+                  fontSize: 'var(--font-size-sm, 0.875rem)',
+                  color: 'var(--foreground, #0f172a)',
+                  transition: COLOR_TRANSITION,
+                }}
+                onMouseEnter={(e) => {
+                  e.currentTarget.style.color = 'var(--primary, #1e293b)';
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.color = 'var(--foreground, #0f172a)';
+                }}
+              >
+                {product.name}
               </div>
-              <div className="p-4">
-                <h3 className="font-semibold text-foreground line-clamp-1">{product.name}</h3>
-                <p className="text-primary font-medium mt-2">{product.priceDisplay || '价格面议'}</p>
-              </div>
-            </Link>
-          );
-        })}
-      </div>
+              {product.sku && (
+                <div
+                  style={{
+                    fontSize: 'var(--font-size-xs, 0.75rem)',
+                    color: 'var(--muted-foreground, #64748b)',
+                    marginTop: 'var(--spacing-1, 0.25rem)',
+                  }}
+                >
+                  SKU: {product.sku}
+                </div>
+              )}
+            </div>
+          </Link>
+        );
+      })}
     </div>
   );
 }

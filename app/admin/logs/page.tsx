@@ -54,34 +54,42 @@ export default function LogsPage() {
     if (log.type === 'login') {
       return (
         <tr key={log.timestamp + log.email} className="border-b">
-          <td className="px-4 py-2">{time}</td>
-          <td className="px-4 py-2">登录</td>
-          <td className="px-4 py-2">{log.email}</td>
-          <td className="px-4 py-2">{log.ip}</td>
-          <td className="px-4 py-2">{log.success ? '成功' : '失败'}</td>
-          <td className="px-4 py-2">{log.message || ''}</td>
+          <td className="px-4 py-2 text-sm whitespace-nowrap">{time}</td>
+          <td className="px-4 py-2 text-sm whitespace-nowrap">登录</td>
+          <td className="px-4 py-2 text-sm">{log.email}</td>
+          <td className="px-4 py-2 text-sm">{log.ip}</td>
+          <td className="px-4 py-2 text-sm whitespace-nowrap">{log.success ? '成功' : '失败'}</td>
+          <td className="px-4 py-2 text-sm">{log.message || ''}</td>
         </tr>
       );
     } else if (log.type === 'admin') {
       return (
         <tr key={log.timestamp + log.targetEmail} className="border-b">
-          <td className="px-4 py-2">{time}</td>
-          <td className="px-4 py-2">管理员操作</td>
-          <td className="px-4 py-2">{log.operatorEmail}</td>
-          <td className="px-4 py-2">{log.action === 'add' ? '添加' : '删除'}</td>
-          <td className="px-4 py-2">{log.targetEmail} ({log.targetName})</td>
-          <td className="px-4 py-2">{log.ip}</td>
+          <td className="px-4 py-2 text-sm whitespace-nowrap">{time}</td>
+          <td className="px-4 py-2 text-sm whitespace-nowrap">管理员操作</td>
+          <td className="px-4 py-2 text-sm">{log.operatorEmail}</td>
+          <td className="px-4 py-2 text-sm whitespace-nowrap">
+            <span className={`px-2 py-0.5 rounded text-xs ${log.action === 'add' ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>
+              {log.action === 'add' ? '添加' : '删除'}
+            </span>
+          </td>
+          <td className="px-4 py-2 text-sm">{log.targetEmail} ({log.targetName})</td>
+          <td className="px-4 py-2 text-sm">{log.ip}</td>
         </tr>
       );
     } else {
       return (
         <tr key={log.timestamp + log.path} className="border-b">
-          <td className="px-4 py-2">{time}</td>
-          <td className="px-4 py-2">菜单访问</td>
-          <td className="px-4 py-2">{log.email}</td>
-          <td className="px-4 py-2">{log.menuName}</td>
-          <td className="px-4 py-2">{log.path}</td>
-          <td className="px-4 py-2">{log.ip}</td>
+          <td className="px-4 py-2 text-sm whitespace-nowrap">{time}</td>
+          <td className="px-4 py-2 text-sm whitespace-nowrap">菜单访问</td>
+          <td className="px-4 py-2 text-sm">{log.email}</td>
+          <td className="px-4 py-2 text-sm max-w-[150px] truncate" title={log.menuName}>
+            {log.menuName}
+          </td>
+          <td className="px-4 py-2 text-sm max-w-[180px] truncate" title={log.path}>
+            {log.path}
+          </td>
+          <td className="px-4 py-2 text-sm">{log.ip}</td>
         </tr>
       );
     }
@@ -110,12 +118,12 @@ export default function LogsPage() {
         <table className="min-w-full divide-y divide-gray-200">
           <thead className="bg-gray-50">
             <tr>
-              <th className="px-4 py-2 text-left">时间</th>
-              <th className="px-4 py-2 text-left">类型</th>
-              <th className="px-4 py-2 text-left">用户/操作者</th>
-              <th className="px-4 py-2 text-left">详情</th>
-              <th className="px-4 py-2 text-left">IP</th>
-              <th className="px-4 py-2 text-left">备注</th>
+              <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase w-[150px]">时间</th>
+              <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase w-[100px]">类型</th>
+              <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase w-[180px]">用户/操作者</th>
+              <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase w-[200px]">详情</th>
+              <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase w-[130px]">IP</th>
+              <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">备注</th>
             </tr>
           </thead>
           <tbody>

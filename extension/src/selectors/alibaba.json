@@ -1,0 +1,147 @@
+{
+  "_version": "1.0.5",
+  "_platform": "alibaba",
+  "_updatedAt": "2026-08-25T00:00:00Z",
+  "_description": "阿里巴巴国际站商品详情页选择器配置（支持新属性结构）",
+  "name": "阿里巴巴国际站",
+  "domain_patterns": ["*.alibaba.com"],
+  "login_required": true,
+  "field_mapping": {
+    "supplier": "brand"
+  },
+  "fields": {
+    "title": {
+      "selectors": [
+        "h1",
+        "[data-testid=\"product-title\"]",
+        ".product-title",
+        ".product-title-container h1"
+      ],
+      "type": "text",
+      "fallback": "document.title"
+    },
+    "price": {
+      "selectors": [
+        "[data-testid=\"product-price\"] .price-item span:first-child",
+        "[data-testid=\"product-price\"] .price-item .id-text-\\[26px\\] span",
+        ".price-item .id-flex .id-items-center span",
+        ".price-item"
+      ],
+      "type": "text",
+      "fallback": ""
+    },
+    "currency": {
+      "selectors": [
+        "[data-testid=\"product-price\"]",
+        ".price-item .id-text-\\[26px\\]"
+      ],
+      "type": "currency",
+      "fallback": "USD"
+    },
+    "moq": {
+      "selectors": [
+        ".min-order-quantity",
+        ".moq",
+        "[data-testid=\"moq\"]",
+        ".price-item + .id-text-\\[#767676\\]",
+        ".price-item .id-text-\\[#767676\\]"
+      ],
+      "type": "text",
+      "fallback": "1"
+    },
+    "main_image": {
+      "selectors": [
+        ".main-image-tc-image-magnifier.current-main-image img",
+        ".main-image-tc-image-magnifier img",
+        ".image-gallery-main img",
+        ".product-view img",
+        ".main-image img"
+      ],
+      "type": "attr",
+      "attribute": "src",
+      "fallback": ""
+    },
+    "gallery_images": {
+      "selectors": [
+        ".main-image-tc-thumbnail",
+        ".image-gallery-thumbs img",
+        ".thumbnails img",
+        ".gallery img",
+        ".main-image-tc-image-magnifier img"
+      ],
+      "type": "styleAll",
+      "fallback": []
+    },
+    "description": {
+      "selectors": [
+        ".module_product_specification .richtext-detail",
+        ".module_product_specification #J-rich-text-description",
+        ".module_product_specification",
+        ".rich-text-description",
+        ".product-description",
+        ".description",
+        ".detail-content",
+        ".module-structure-description",
+        "[data-testid=\"module-structure-description\"]",
+        ".product-description-content",
+        ".offer-detail",
+        ".module_structure_description"
+      ],
+      "type": "html",
+      "fallback": ""
+    },
+    "attributes": {
+      "selectors": [
+        "[data-testid=\"module-attribute-row\"]",
+        "[data-testid=\"module-attribute-group-grid\"]",
+        ".id-grid-cols-\\[2fr_3fr\\]",
+        ".attributes-table tr",
+        ".specification tr"
+      ],
+      "type": "attributes",
+      "fallback": {}
+    },
+    "supplier": {
+      "selectors": [
+        ".three-col-mini-company-card .id-truncate",
+        "[data-testid=\"three-column-mini-company-card\"] .id-truncate",
+        ".three-column-mini-company-card a",
+        ".company-name",
+        ".seller-name",
+        ".company-card a",
+        ".supplier-name"
+      ],
+      "type": "text",
+      "fallback": ""
+    },
+    "location": {
+      "selectors": [
+        ".three-col-mini-company-card .id-text-xs",
+        "[data-testid=\"three-column-mini-company-card\"] .id-text-xs",
+        ".three-column-mini-company-card .id-flex .id-text-xs",
+        ".business-location",
+        ".location",
+        ".company-card .id-text-xs"
+      ],
+      "type": "text",
+      "fallback": ""
+    },
+    "sku_colors": {
+      "selectors": [
+        ".sku-item img",
+        "[data-testid='sku-list-item'] img"
+      ],
+      "type": "attrAll",
+      "attribute": "alt",
+      "fallback": []
+    },
+    "sku_sizes": {
+      "selectors": [
+        ".sku-text-item",
+        "[data-testid='sku-list-item'] .double-bordered-box span"
+      ],
+      "type": "text",
+      "fallback": []
+    }
+  }
+}

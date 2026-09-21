@@ -70,6 +70,30 @@ export function toRelativeImageUrl(imageUrl: string): string {
   return imageUrl;
 }
 
+// ==================== 排序工具函数 ====================
+
+/** 按 order 字段升序排列产品线 */
+function sortProductLines(lines: ProductLine[]): ProductLine[] {
+  return [...lines].sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
+}
+
+/** 按 order 字段升序排列系列 */
+function sortSeries(series: Series[]): Series[] {
+  return [...series].sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
+}
+
+/** 按 order 字段升序排列分类，并对其内部的 series 进行排序 */
+function sortCategories(categories: Category[]): Category[] {
+  return categories
+    .map(cat => ({
+      ...cat,
+      series: sortSeries(cat.series || []),
+    }))
+    .sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
+}
+
+// ==================== 读写函数 ====================
+
 /** 读取完整的 JSON 数据，若文件不存在则返回空结构 */
 export async function readFullData(locale: string): Promise<ProductData> {
   const storage = getPrivateStorage();
@@ -90,12 +114,21 @@ export async function readFullData(locale: string): Promise<ProductData> {
   }
 }
 
-/** 写入完整的 JSON 数据 */
+/** 写入完整的 JSON 数据（写入前自动排序） */
 export async function writeFullData(locale: string, data: ProductData): Promise<void> {
   const storage = getPrivateStorage();
   const key = getStorageKey(locale);
-  await storage.write(key, JSON.stringify(data, null, 2), { contentType: 'application/json' });
+
+  // 对数据排序
+  const sortedData = {
+    productLines: sortProductLines(data.productLines || []),
+    categories: sortCategories(data.categories || []),
+  };
+
+  await storage.write(key, JSON.stringify(sortedData, null, 2), { contentType: 'application/json' });
 }
+
+// ==================== 其他辅助函数 ====================
 
 /** 批量更新分类图片引用（与路由逻辑完全一致） */
 export async function syncCategoryImageReferences(categories: Category[]): Promise<void> {

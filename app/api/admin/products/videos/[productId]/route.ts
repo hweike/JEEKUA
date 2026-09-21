@@ -1,3 +1,4 @@
+// app/api/admin/products/videos/[productId]/route.ts
 import { NextRequest, NextResponse } from 'next/server';
 import { supabase } from '@/lib/supabase/client';
 
@@ -30,10 +31,10 @@ export async function GET(
 
     const videoIds = relations.map(r => r.resource_id);
 
-    // 批量获取视频详情
+    // 批量获取视频详情（增加 source_type, video_id）
     const { data: videos, error: vidError } = await supabase
       .from('videos')
-      .select('id, title, thumbnail, duration')
+      .select('id, title, thumbnail, duration, source_type, video_id')
       .in('id', videoIds);
 
     if (vidError) {
@@ -51,6 +52,8 @@ export async function GET(
           title: video.title,
           thumbnail: video.thumbnail || '',
           duration: video.duration || 0,
+          source_type: video.source_type,
+          video_id: video.video_id,
           sortOrder: rel.sort_order,
         };
       } else {
@@ -59,6 +62,8 @@ export async function GET(
           title: '已删除的视频',
           thumbnail: '',
           duration: 0,
+          source_type: '',
+          video_id: '',
           sortOrder: rel.sort_order,
         };
       }

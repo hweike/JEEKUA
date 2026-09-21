@@ -1,15 +1,15 @@
 // app/admin/products/categories/page.tsx
-
 'use client';
 
-import { useEffect, useState, useCallback, useMemo, useRef } from 'react';
+import { useEffect, useState, useCallback, useMemo } from 'react';
 import { useSearchParams, useRouter } from 'next/navigation';
 import dynamic from 'next/dynamic';
 import LanguageSelector from '@/components/common/LanguageSelector';
 import Toast from '@/components/Toast';
 import { Settings } from 'lucide-react';
 import { LANGUAGES } from '@/lib/languages/config';
-import AiHelperCategoryModal from './components/AiHelper-CategoryModal'; // 新增导入
+import AiHelperCategoryModal from './components/AiHelper-CategoryModal';
+import { useCategories, ProductLine } from './hooks/useCategories';
 
 const CategoryList = dynamic(() => import('./components/CategoryList'), {
   ssr: false,
@@ -17,35 +17,6 @@ const CategoryList = dynamic(() => import('./components/CategoryList'), {
 });
 const ProductLineManager = dynamic(() => import('./components/ProductLineManager'), { ssr: false });
 const ImportModal = dynamic(() => import('./components/ImportModal'), { ssr: false });
-
-// 产品线类型定义 - 必须与 ProductLineManager 组件中的定义完全一致
-interface ProductLine {
-  id: string;
-  name: string;
-  order?: number;
-  templateId?: string;
-  slug?: string;
-  seoTitle?: string;
-  seoDescription?: string;
-  seoKeywords?: string;
-}
-
-interface AttributeTemplate {
-  id: string;
-  name: string;
-  attributes: { key: string; value: string }[];
-}
-
-const cache: Record<string, { data: any; timestamp: number }> = {};
-const CACHE_TTL = 5 * 60 * 1000;
-
-function debounce<T extends (...args: any[]) => any>(fn: T, delay: number): T {
-  let timer: NodeJS.Timeout;
-  return ((...args: any[]) => {
-    clearTimeout(timer);
-    timer = setTimeout(() => fn(...args), delay);
-  }) as T;
-}
 
 const validLocaleCodes = LANGUAGES.map(lang => lang.code);
 const getInitialLocale = (): string => {
@@ -59,189 +30,77 @@ export default function CategoriesPage() {
   const searchParams = useSearchParams();
   const router = useRouter();
 
+  // ---------- UI 状态 ----------
   const [locale, setLocale] = useState(getInitialLocale);
-  const [productLines, setProductLines] = useState<ProductLine[]>([]);
-  const [categories, setCategories] = useState<any[]>([]);
-  const [initialized, setInitialized] = useState(false);
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
   const [showProductLineModal, setShowProductLineModal] = useState(false);
   const [showImportModal, setShowImportModal] = useState(false);
-  const [attributeTemplates, setAttributeTemplates] = useState<AttributeTemplate[]>([]);
   const [addingCat, setAddingCat] = useState(false);
-  const [isSaving, setIsSaving] = useState(false);
-
-  const [otherLocaleHasLines, setOtherLocaleHasLines] = useState(false);
-  const [copying, setCopying] = useState(false);
-  const [loadingOtherStatus, setLoadingOtherStatus] = useState(false);
-
-  // 新增：AI助手弹窗状态
   const [showAiHelper, setShowAiHelper] = useState(false);
+  const [copying, setCopying] = useState(false);
 
-  const loadAbortController = useRef<AbortController | null>(null);
-  const saveAbortController = useRef<AbortController | null>(null);
+  // ---------- 使用 Hook ----------
+  const {
+    productLines,
+    categories,
+    setCategories,
+    setProductLines,
+    attributeTemplates,
+    loading,
+    saving,
+    error,
+    otherLocaleHasLines,
+    loadingOtherStatus,
+    saveData,
+    refresh,
+    loadData,
+    setError,
+  } = useCategories(locale);
 
+  // ---------- 错误显示 ----------
   useEffect(() => {
-    const initLocale = async () => {
-      const stored = localStorage.getItem('admin_selected_language');
-      if (!stored) {
-        try {
-          const res = await fetch('/api/admin/languages/settings');
-          const data = await res.json();
-          const defaultLang = data.defaultLanguage || validLocaleCodes[0];
-          localStorage.setItem('admin_selected_language', defaultLang);
-          setLocale(defaultLang);
-        } catch {
-          const fallback = validLocaleCodes[0];
-          localStorage.setItem('admin_selected_language', fallback);
-          setLocale(fallback);
-        }
-      } else if (!validLocaleCodes.includes(stored)) {
-        const fallback = validLocaleCodes[0];
-        localStorage.setItem('admin_selected_language', fallback);
-        setLocale(fallback);
-      }
-    };
-    initLocale();
-  }, []);
-
-  const saveToServer = useCallback(async (lines: ProductLine[], cats: any[]) => {
-    if (saveAbortController.current) {
-      saveAbortController.current.abort();
+    if (error) {
+      setToast({ message: error, type: 'error' });
+      setError(null);
     }
-    const controller = new AbortController();
-    saveAbortController.current = controller;
-    setIsSaving(true);
-    try {
-      const res = await fetch(`/api/admin/products/categories?locale=${locale}`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ productLines: lines, categories: cats }),
-        signal: controller.signal,
-      });
-      if (!res.ok) throw new Error('保存失败');
-      setToast({ message: '保存成功', type: 'success' });
-      delete cache[locale];
-    } catch (err: any) {
-      if (err.name === 'AbortError') return;
-      console.error(err);
-      setToast({ message: '保存失败，请重试', type: 'error' });
-    } finally {
-      setIsSaving(false);
-      if (saveAbortController.current === controller) saveAbortController.current = null;
-    }
-  }, [locale]);
+  }, [error, setError]);
 
-  const debouncedSave = useMemo(() => debounce(saveToServer, 500), [saveToServer]);
-
-  const loadData = useCallback(async (ignoreCache = false) => {
-    if (loadAbortController.current) {
-      loadAbortController.current.abort();
-    }
-    const controller = new AbortController();
-    loadAbortController.current = controller;
-    const signal = controller.signal;
-
-    setInitialized(false);
-    try {
-      let categoriesData;
-      const cacheKey = locale;
-      if (!ignoreCache && cache[cacheKey] && Date.now() - cache[cacheKey].timestamp < CACHE_TTL) {
-        categoriesData = cache[cacheKey].data;
-      } else {
-        const categoriesRes = await fetch(`/api/admin/products/categories?locale=${locale}`, { signal });
-        if (!categoriesRes.ok) throw new Error('加载失败');
-        categoriesData = await categoriesRes.json();
-        cache[cacheKey] = { data: categoriesData, timestamp: Date.now() };
-      }
-      setProductLines(categoriesData.productLines || []);
-      setCategories(categoriesData.categories || []);
-      setInitialized(true);
-    } catch (err: any) {
-      if (err.name === 'AbortError') return;
-      console.error(err);
-      setToast({ message: '加载数据失败', type: 'error' });
-      setInitialized(true);
-    } finally {
-      if (loadAbortController.current === controller) loadAbortController.current = null;
-    }
-  }, [locale]);
-
-  useEffect(() => {
-    if (!initialized) return;
-    const checkOtherLocale = async () => {
-      if (productLines.length > 0) {
-        setOtherLocaleHasLines(false);
-        return;
-      }
-      setLoadingOtherStatus(true);
-      const targetLocale = locale === 'en' ? 'zh' : 'en';
-      try {
-        const res = await fetch(`/api/admin/products/categories?locale=${targetLocale}`);
-        if (res.ok) {
-          const data = await res.json();
-          const lines = data.productLines || [];
-          setOtherLocaleHasLines(lines.length > 0);
-        } else {
-          setOtherLocaleHasLines(false);
-        }
-      } catch {
-        setOtherLocaleHasLines(false);
-      } finally {
-        setLoadingOtherStatus(false);
-      }
-    };
-    checkOtherLocale();
-  }, [initialized, productLines.length, locale]);
-
-  useEffect(() => {
-    const controller = new AbortController();
-    fetch(`/api/admin/products/settings?locale=${locale}`, { signal: controller.signal })
-      .then(res => res.json())
-      .then(data => setAttributeTemplates(data.attributeTemplates || []))
-      .catch(err => { if (err.name !== 'AbortError') console.error(err); });
-    return () => controller.abort();
-  }, [locale]);
-
-  useEffect(() => {
-    loadData();
-    return () => {
-      loadAbortController.current?.abort();
-      saveAbortController.current?.abort();
-    };
-  }, [loadData]);
-
-  const handleLocaleChange = (newLocale: string) => {
-    if (newLocale === locale) return;
-    localStorage.setItem('admin_selected_language', newLocale);
-    setLocale(newLocale);
-  };
-
+  // ---------- 当前产品线 ID ----------
   const currentProductLineId = searchParams.get('productLineId') || productLines[0]?.id || '';
 
+  // ---------- 分类更新（与原始逻辑一致，增加 Toast） ----------
   const updateCategories = useCallback((newCurrentLineCategories: any[]) => {
     setCategories(prevCategories => {
+      let mergedCategories;
       if (currentProductLineId === '__other__') {
         const validLineIds = new Set(productLines.map(line => line.id));
         const newMap = new Map(newCurrentLineCategories.map(cat => [cat.id, cat]));
-        const mergedCategories = prevCategories.map(cat => {
+        mergedCategories = prevCategories.map(cat => {
           if (!validLineIds.has(cat.productLineId)) {
             return newMap.get(cat.id) || cat;
           }
           return cat;
         });
-        debouncedSave(productLines, mergedCategories);
-        return mergedCategories;
       } else {
         const otherLineCategories = prevCategories.filter(
           cat => cat.productLineId !== currentProductLineId
         );
-        const mergedCategories = [...otherLineCategories, ...newCurrentLineCategories];
-        debouncedSave(productLines, mergedCategories);
-        return mergedCategories;
+        mergedCategories = [...otherLineCategories, ...newCurrentLineCategories];
       }
-    });
-  }, [currentProductLineId, productLines, debouncedSave]);
 
+      // 触发保存并显示 Toast
+      saveData(productLines, mergedCategories)
+        .then(() => setToast({ message: '保存成功', type: 'success' }))
+        .catch((err) => {
+          // 错误已在 Hook 中设置 error，但此处确保显示
+          setToast({ message: err.message || '保存失败', type: 'error' });
+        });
+
+      return mergedCategories;
+    });
+  }, [currentProductLineId, productLines, saveData, setCategories, setToast]);
+
+  // ---------- 产品线更新 ----------
   const updateProductLines = useCallback((newLines: ProductLine[]) => {
     const deletedLineIds = productLines.filter(old => !newLines.some(n => n.id === old.id)).map(l => l.id);
     let updatedCategories = categories;
@@ -255,10 +114,16 @@ export default function CategoriesPage() {
       setCategories(updatedCategories);
     }
     setProductLines(newLines);
-    debouncedSave(newLines, updatedCategories);
-    delete cache[locale];
-  }, [categories, debouncedSave, locale, productLines]);
 
+    // 保存并显示 Toast
+    saveData(newLines, updatedCategories)
+      .then(() => setToast({ message: '保存成功', type: 'success' }))
+      .catch((err) => {
+        setToast({ message: err.message || '保存失败', type: 'error' });
+      });
+  }, [productLines, categories, setProductLines, setCategories, saveData, setToast]);
+
+  // ---------- 产品线切换 ----------
   const handleProductLineChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
     const value = e.target.value;
     const params = new URLSearchParams(searchParams);
@@ -271,18 +136,7 @@ export default function CategoriesPage() {
     router.push(`?${params.toString()}`);
   };
 
-  const openProductLineManager = () => {
-    setShowProductLineModal(true);
-  };
-
-  const filteredCategories = useMemo(() => {
-    if (currentProductLineId === '__other__') {
-      const validLineIds = new Set(productLines.map(line => line.id));
-      return categories.filter(cat => !validLineIds.has(cat.productLineId));
-    }
-    return categories.filter(cat => cat.productLineId === currentProductLineId);
-  }, [categories, currentProductLineId, productLines]);
-
+  // ---------- 复制产品线 ----------
   const copyProductLinesFrom = async (sourceLocale: string) => {
     if (!confirm(`确定从 ${sourceLocale === 'en' ? '英文站' : '中文站'} 复制产品线到当前站点吗？当前所有产品线数据将被覆盖。`)) {
       return;
@@ -302,7 +156,7 @@ export default function CategoriesPage() {
       });
       if (!saveRes.ok) throw new Error('保存失败');
       setToast({ message: '复制成功', type: 'success' });
-      await loadData(true);
+      await refresh(); // 强制刷新
     } catch (err: any) {
       console.error(err);
       setToast({ message: err.message || '复制失败', type: 'error' });
@@ -311,7 +165,24 @@ export default function CategoriesPage() {
     }
   };
 
-  if (!initialized) {
+  // ---------- 筛选分类 ----------
+  const filteredCategories = useMemo(() => {
+    if (currentProductLineId === '__other__') {
+      const validLineIds = new Set(productLines.map(line => line.id));
+      return categories.filter(cat => !validLineIds.has(cat.productLineId));
+    }
+    return categories.filter(cat => cat.productLineId === currentProductLineId);
+  }, [categories, currentProductLineId, productLines]);
+
+  // ---------- 语言切换 ----------
+  const handleLocaleChange = (newLocale: string) => {
+    if (newLocale === locale) return;
+    localStorage.setItem('admin_selected_language', newLocale);
+    setLocale(newLocale);
+  };
+
+  // ---------- 加载状态 ----------
+  if (loading && productLines.length === 0) {
     return (
       <div className="flex items-center justify-center h-screen">
         <div className="text-gray-500">加载中...</div>
@@ -319,77 +190,77 @@ export default function CategoriesPage() {
     );
   }
 
+  // ---------- 无产品线 ----------
   if (productLines.length === 0) {
-  let showCopyBtn = false;
-  let copySourceLocale = '';
-  if (locale === 'en') {
-    copySourceLocale = 'zh';
-    showCopyBtn = otherLocaleHasLines && !loadingOtherStatus;
-  } else {
-    copySourceLocale = 'en';
-    showCopyBtn = otherLocaleHasLines && !loadingOtherStatus;
-  }
+    let showCopyBtn = false;
+    let copySourceLocale = '';
+    if (locale === 'en') {
+      copySourceLocale = 'zh';
+      showCopyBtn = otherLocaleHasLines && !loadingOtherStatus;
+    } else {
+      copySourceLocale = 'en';
+      showCopyBtn = otherLocaleHasLines && !loadingOtherStatus;
+    }
+    const sourceLangName = copySourceLocale === 'en' ? '英文站' : '中文站';
 
-  // 根据复制源获取站点显示名称
-  const sourceLangName = copySourceLocale === 'en' ? '英文站' : '中文站';
-
-  return (
-    <div className="min-h-screen bg-gray-100 py-8">
-      <div className="w-4/5 mx-auto bg-white rounded-lg shadow p-6">
-        <div className="flex justify-between items-center mb-6">
-          <h1 className="text-2xl font-bold">产品分类管理 - {locale.toUpperCase()}</h1>
-          <LanguageSelector currentLocale={locale} onLocaleChange={handleLocaleChange} displayMode="zh" />
-        </div>
-        <div className="text-center py-12">
-          <p className="text-gray-500 mb-4">请先创建产品线</p>
-
-          {/* 创建说明 - 动态根据复制源显示 */}
-          <div className="text-sm text-gray-600 mb-4 max-w-md mx-auto">
-            {showCopyBtn ? (
-              <>
-                创建说明：如果当前站点销售的产品与 {sourceLangName} 一致，建议使用
-                “复制 {sourceLangName} 产品线及分类”快速创建；若销售产品不同，
-                可点击下方“创建新产品线”手动创建。
-              </>
-            ) : (
-              <>
-                创建说明：若当前站点销售产品与另一语言站点不同，请点击下方
-                “创建新产品线”手动创建产品线。
-              </>
-            )}
+    return (
+      <div className="min-h-screen bg-gray-100 py-8">
+        <div className="w-4/5 mx-auto bg-white rounded-lg shadow p-6">
+          <div className="flex justify-between items-center mb-6">
+            <h1 className="text-2xl font-bold">产品分类管理 - {locale.toUpperCase()}</h1>
+            <LanguageSelector currentLocale={locale} onLocaleChange={handleLocaleChange} displayMode="zh" />
           </div>
-
-          <div className="flex gap-4 justify-center">
-            {showCopyBtn && (
+          <div className="text-center py-12">
+            <p className="text-gray-500 mb-4">请先创建产品线</p>
+            <div className="text-sm text-gray-600 mb-4 max-w-md mx-auto">
+              {showCopyBtn ? (
+                <>
+                  创建说明：如果当前站点销售的产品与 {sourceLangName} 一致，建议使用
+                  “复制 {sourceLangName} 产品线及分类”快速创建；若销售产品不同，
+                  可点击下方“创建新产品线”手动创建。
+                </>
+              ) : (
+                <>
+                  创建说明：若当前站点销售产品与另一语言站点不同，请点击下方
+                  “创建新产品线”手动创建产品线。
+                </>
+              )}
+            </div>
+            <div className="flex gap-4 justify-center">
+              {showCopyBtn && (
+                <button
+                  onClick={() => copyProductLinesFrom(copySourceLocale)}
+                  disabled={copying}
+                  className="bg-green-600 text-white px-4 py-2 rounded inline-flex items-center gap-2"
+                >
+                  {copying ? '复制中...' : `复制 ${sourceLangName} 产品线及分类`}
+                </button>
+              )}
               <button
-                onClick={() => copyProductLinesFrom(copySourceLocale)}
-                disabled={copying}
-                className="bg-green-600 text-white px-4 py-2 rounded inline-flex items-center gap-2"
+                onClick={() => setShowProductLineModal(true)}
+                className="bg-blue-600 text-white px-4 py-2 rounded inline-flex items-center gap-2"
               >
-                {copying ? '复制中...' : `复制 ${sourceLangName} 产品线及分类`}
+                创建新产品线
               </button>
-            )}
-            <button
-              onClick={() => setShowProductLineModal(true)}
-              className="bg-blue-600 text-white px-4 py-2 rounded inline-flex items-center gap-2"
-            >
-              创建新产品线
-            </button>
+            </div>
           </div>
         </div>
+        {showProductLineModal && (
+          <ProductLineManager
+            productLines={productLines}
+            onSave={(newLines: ProductLine[]) => {
+              updateProductLines(newLines);
+              setShowProductLineModal(false);
+            }}
+            onClose={() => setShowProductLineModal(false)}
+          />
+        )}
+        {toast && <Toast message={toast.message} type={toast.type} onClose={() => setToast(null)} />}
       </div>
-      {showProductLineModal && (
-        <ProductLineManager
-          productLines={productLines}
-          onSave={(newLines: ProductLine[]) => updateProductLines(newLines)}
-          onClose={() => setShowProductLineModal(false)}
-        />
-      )}
-      {toast && <Toast message={toast.message} type={toast.type} onClose={() => setToast(null)} />}
-    </div>
-  );
+    );
   }
 
+  // ---------- 主界面 ----------
   return (
     <div className="p-6">
       <div className="flex justify-between items-center mb-4">
@@ -411,17 +282,17 @@ export default function CategoriesPage() {
               ))}
               <option value="__other__">其他产品线</option>
             </select>
-            <button
-              onClick={openProductLineManager}
+            {/* <button
+              onClick={() => setShowProductLineModal(true)}
               className="border border-dashed rounded px-3 py-1 text-sm text-gray-600 hover:bg-gray-50 flex items-center gap-1"
             >
               <Settings size={14} /> 管理产品线
-            </button>
+            </button> */}
           </div>
         </div>
 
         <div className="flex items-center gap-3">
-          {/* 仅在英文或中文时显示 AI 翻译按钮 */}
+          {saving && <span className="text-sm text-gray-500">保存中...</span>}
           {(locale === 'en' || locale === 'zh') && (
             <button
               onClick={() => setShowAiHelper(true)}
@@ -430,7 +301,6 @@ export default function CategoriesPage() {
               🤖 AI翻译
             </button>
           )}
-
           <button
             onClick={() => setShowImportModal(true)}
             className="bg-blue-600 text-white px-4 py-2 rounded"
@@ -440,6 +310,7 @@ export default function CategoriesPage() {
           <button
             onClick={() => setAddingCat(true)}
             className="bg-green-600 text-white px-4 py-2 rounded"
+            disabled={saving}
           >
             添加一级分类
           </button>
@@ -459,7 +330,10 @@ export default function CategoriesPage() {
       {showProductLineModal && (
         <ProductLineManager
           productLines={productLines}
-          onSave={(newLines: ProductLine[]) => updateProductLines(newLines)}
+          onSave={(newLines: ProductLine[]) => {
+            updateProductLines(newLines);
+            setShowProductLineModal(false);
+          }}
           onClose={() => setShowProductLineModal(false)}
         />
       )}
@@ -469,21 +343,18 @@ export default function CategoriesPage() {
           locale={locale}
           onClose={() => setShowImportModal(false)}
           onSuccess={() => {
-            delete cache[locale];
-            loadData(true);
+            refresh();
           }}
           onImportResult={(message, type) => setToast({ message, type })}
         />
       )}
 
-      {/* AI 翻译弹窗 */}
       {showAiHelper && (
         <AiHelperCategoryModal
           sourceLocale={locale}
           onClose={() => setShowAiHelper(false)}
           onImportSuccess={() => {
-            delete cache[locale];
-            loadData(true);
+            refresh();
           }}
         />
       )}

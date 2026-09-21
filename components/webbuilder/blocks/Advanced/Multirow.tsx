@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { ChevronRight } from 'lucide-react';
 import { getImageUrl } from '@/lib/files/url';
 import { DEFAULT_MULTIROW } from '@/lib/webbuilder/defaults/Multirow';
@@ -28,6 +28,10 @@ const WIDTH_MAP: Record<string, string> = {
   large: 'w-full md:w-2/3',
 };
 
+// ✅ 动画参数（硬编码）
+const ANIMATION_DURATION_MS = 600;
+const ANIMATION_DELAY_STEP_MS = 120;
+
 export function Multirow(props: any) {
   const isEditMode = !!props.puck?.isEditing;
 
@@ -41,7 +45,6 @@ export function Multirow(props: any) {
 
   const mobileScaleFactor = spacingGroup.mobileScaleFactor ?? 0.7;
 
-  // Alt 自动生成
   const __runtime = props.__runtime || {};
   const seoTitle = __runtime.seoTitle || '';
   const locale = __runtime.locale || 'zh';
@@ -55,6 +58,39 @@ export function Multirow(props: any) {
     window.addEventListener('resize', checkMobile);
     return () => window.removeEventListener('resize', checkMobile);
   }, []);
+
+  // ✅ 滚动进入动画状态
+  const containerRef = useRef<HTMLDivElement>(null);
+  const [visible, setVisible] = useState(false);
+
+  useEffect(() => {
+    // 编辑模式：直接显示（不做动画，避免干扰编辑）
+    if (isEditMode) {
+      setVisible(true);
+      return;
+    }
+
+    const el = containerRef.current;
+    if (!el) {
+      setVisible(true);
+      return;
+    }
+
+    const observer = new IntersectionObserver(
+      (entries) => {
+        entries.forEach((entry) => {
+          if (entry.isIntersecting) {
+            setVisible(true);
+            observer.unobserve(entry.target);
+          }
+        });
+      },
+      { threshold: 0.15 }
+    );
+
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [isEditMode]);
 
   const currentTextAlign = isMobile ? contentGroup.mobileTextAlign : contentGroup.textAlign;
 
@@ -157,7 +193,8 @@ export function Multirow(props: any) {
     <div ref={props.puck?.dragRef} className={outerClasses} style={outerStyle}>
       <div className="relative w-full">
         <div style={contentStyle}>
-          <div className="w-full">
+          {/* ✅ 用 containerRef 监听进入视口 */}
+          <div className="w-full" ref={containerRef}>
             <div className="space-y-8">
               {mergedItems.map((item: any, idx: number) => {
                 const alt = seoTitle ? `${seoTitle} - ${suffix} ${idx + 1}` : `${suffix} ${idx + 1}`;
@@ -165,10 +202,24 @@ export function Multirow(props: any) {
                 const imgPosition = getImagePosition(idx);
                 const flexDirection = imgPosition === 'left' ? 'md:flex-row' : 'md:flex-row-reverse';
 
+                // ✅ 每行的显示状态（编辑模式强制显示）
+                const showThisRow = isEditMode || visible;
+
                 return (
                   <div
                     key={idx}
                     className={`flex flex-col ${flexDirection} gap-6 ${verticalAlignClass}`}
+                    style={{
+                      // ✅ 动画：从下方 32px + 透明 → 原位 + 不透明
+                      opacity: showThisRow ? 1 : 0,
+                      transform: showThisRow ? 'translateY(0)' : 'translateY(32px)',
+                      transition: `opacity ${ANIMATION_DURATION_MS}ms ease-out ${
+                        idx * ANIMATION_DELAY_STEP_MS
+                      }ms, transform ${ANIMATION_DURATION_MS}ms ease-out ${
+                        idx * ANIMATION_DELAY_STEP_MS
+                      }ms`,
+                      willChange: 'opacity, transform',
+                    }}
                   >
                     <div className={`${imageWidthClass} flex-shrink-0`}>
                       <div className={`${imageHeightClass} overflow-hidden rounded-lg`}>
@@ -178,6 +229,7 @@ export function Multirow(props: any) {
                             alt={alt}
                             className="w-full h-full object-cover"
                             loading="lazy"
+                            decoding="async"
                           />
                         ) : (
                           <div className="w-full h-full bg-gray-200 flex items-center justify-center text-gray-400">

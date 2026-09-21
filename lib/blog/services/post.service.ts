@@ -295,9 +295,9 @@ export async function getPostsBatch(locales: string[]) {
   return result;
 }
 
-/**
- * 创建或更新文章（Upsert）
- */
+// ============================================================
+// 🔥 关键修改：创建或更新文章（Upsert），自动生成摘要
+// ============================================================
 export async function upsertPost(
   locale: string,
   postData: {
@@ -317,7 +317,16 @@ export async function upsertPost(
   },
   content?: string
 ): Promise<{ id: string; created: boolean }> {
-  const result = await upsertPostToDb(locale, postData.id, postData, content);
+  // ---------- 新增：自动生成摘要 ----------
+  let excerpt = postData.excerpt || '';
+  if (!excerpt && content) {
+    const plainText = content.replace(/<[^>]*>/g, ''); // 去除 HTML 标签
+    excerpt = plainText.length > 200 ? plainText.slice(0, 200) + '...' : plainText;
+  }
+  const finalData = { ...postData, excerpt };
+  // -------------------------------------
+
+  const result = await upsertPostToDb(locale, postData.id, finalData, content);
   // 注册到 pages
   const finalPost = await getPost(locale, result.id);
   if (finalPost) {

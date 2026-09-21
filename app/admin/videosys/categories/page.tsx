@@ -144,17 +144,17 @@ export default function CategoriesList() {
     );
   }, [currentLocaleCategories, searchTerm]);
 
-  const handleDelete = async (key: string, locale: string, name: string, isSystem: boolean) => {
-    if (isSystem) {
-      showToast('系统分类不可删除', 'error');
-      return;
-    }
+  const handleDelete = async (key: string, locale: string, name: string) => {
     if (!confirm(`确定删除分类“${name}” (${locale}) 吗？`)) return;
     try {
       const res = await fetch(`/api/admin/videosys-categories?locale=${locale}&key=${key}`, {
         method: 'DELETE',
       });
-      if (!res.ok) throw new Error('删除失败');
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        showToast(data.error || '删除失败', 'error');
+        return;
+      }
       showToast('删除成功', 'success');
       await loadAllCategories();
     } catch (error) {
@@ -175,6 +175,11 @@ export default function CategoriesList() {
   };
 
   const isCollapsibleMode = locale === 'zh' || locale === 'en';
+
+  // 将语言代码转为 "XX站" 格式
+  const getLocaleStationLabel = (loc: string) => {
+    return `${getLanguageDisplayName(loc, 'zh')}站`;
+  };
 
   if (loading) return <div className="p-6 text-center">加载中...</div>;
 
@@ -205,16 +210,17 @@ export default function CategoriesList() {
         </div>
       </div>
 
-      <div className="mb-6">
-        <div className="flex gap-3">
+      {/* 搜索区域（全宽） */}
+      <div className="mb-6 w-full">
+        <div className="flex gap-3 w-full">
           <input
             type="text"
             placeholder="搜索当前语言分类名称或 URL..."
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
-            className="border rounded-lg px-3 py-2 w-64 focus:outline-none focus:ring-2 focus:ring-blue-500"
+            className="border rounded-lg px-3 py-2 flex-1 focus:outline-none focus:ring-2 focus:ring-blue-500"
           />
-          <button className="bg-gray-100 hover:bg-gray-200 px-4 py-2 rounded-lg flex items-center gap-1">
+          <button className="bg-gray-100 hover:bg-gray-200 px-4 py-2 rounded-lg flex items-center gap-1 flex-shrink-0">
             <Search size={16} /> 搜索
           </button>
         </div>
@@ -256,11 +262,19 @@ export default function CategoriesList() {
                               {isExpanded ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
                             </button>
                           )}
-                          <span
-                            className="font-medium text-gray-900 truncate"
-                            title={current?.name || ''}
-                          >
-                            {current?.name || `${getLanguageDisplayName(locale, 'zh')}（未设置）`}
+                          <span className="text-sm truncate min-w-0" title={current?.name || ''}>
+                            <span className="font-bold text-gray-900 flex-shrink-0">
+                              {getLocaleStationLabel(locale)}
+                            </span>
+                            {' '}
+                            <span className="text-gray-900">
+                              {current?.name || '（未设置）'}
+                            </span>
+                            {current?.isSystem && (
+                              <span className="ml-2 inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-gray-100 text-gray-600">
+                                系统
+                              </span>
+                            )}
                           </span>
                         </div>
                       </td>
@@ -277,13 +291,17 @@ export default function CategoriesList() {
                             >
                               <Pencil size={16} className="inline" /> 编辑
                             </Link>
-                            <button
-                              onClick={(e) => { e.stopPropagation(); handleDelete(group.key, locale, current.name, !!current.isSystem); }}
-                              className="text-red-600 hover:text-red-800"
-                              disabled={current.isSystem}
-                            >
-                              <Trash2 size={16} className="inline" /> 删除
-                            </button>
+                            {!current.isSystem && (
+                              <button
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  handleDelete(group.key, locale, current.name);
+                                }}
+                                className="text-red-600 hover:text-red-800"
+                              >
+                                <Trash2 size={16} className="inline" /> 删除
+                              </button>
+                            )}
                           </>
                         ) : (
                           <Link
@@ -306,8 +324,8 @@ export default function CategoriesList() {
                           <tr key={`${group.key}-${loc}`} className="bg-gray-50 hover:bg-gray-100">
                             <td className="px-6 py-3 pl-12 w-[60%] min-w-0 overflow-hidden">
                               <div className="flex items-center gap-2 min-w-0">
-                                <span className="text-sm font-medium text-gray-500 w-16 flex-shrink-0">
-                                  {getLanguageDisplayName(loc, 'zh')}
+                                <span className="text-sm font-bold text-gray-700 w-20 flex-shrink-0">
+                                  {getLocaleStationLabel(loc)}
                                 </span>
                                 <span
                                   className={`text-sm ${exists ? 'text-gray-900' : 'text-gray-400'} truncate`}
@@ -315,6 +333,11 @@ export default function CategoriesList() {
                                 >
                                   {exists ? cat.name : '（未设置）'}
                                 </span>
+                                {cat?.isSystem && (
+                                  <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-gray-100 text-gray-600">
+                                    系统
+                                  </span>
+                                )}
                               </div>
                             </td>
                             <td className="px-6 py-3 whitespace-nowrap text-sm text-gray-700 truncate">
@@ -329,13 +352,14 @@ export default function CategoriesList() {
                                   >
                                     <Pencil size={14} className="inline" /> 编辑
                                   </Link>
-                                  <button
-                                    onClick={() => handleDelete(group.key, loc, cat.name, !!cat.isSystem)}
-                                    className="text-red-600 hover:text-red-800"
-                                    disabled={cat.isSystem}
-                                  >
-                                    <Trash2 size={14} className="inline" /> 删除
-                                  </button>
+                                  {!cat.isSystem && (
+                                    <button
+                                      onClick={() => handleDelete(group.key, loc, cat.name)}
+                                      className="text-red-600 hover:text-red-800"
+                                    >
+                                      <Trash2 size={14} className="inline" /> 删除
+                                    </button>
+                                  )}
                                 </>
                               ) : (
                                 isZhOrEn && (
@@ -358,8 +382,19 @@ export default function CategoriesList() {
               filteredSimple.map((cat) => (
                 <tr key={cat.key} className="hover:bg-gray-50">
                   <td className="px-6 py-4 w-[60%] min-w-0 overflow-hidden">
-                    <span className="font-medium text-gray-900 truncate block" title={cat.name}>
-                      {cat.name}
+                    <span className="text-sm truncate block" title={cat.name}>
+                      <span className="font-bold text-gray-900">
+                        {getLocaleStationLabel(locale)}
+                      </span>
+                      {' '}
+                      <span className="text-gray-900">
+                        {cat.name}
+                      </span>
+                      {cat.isSystem && (
+                        <span className="ml-2 inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-gray-100 text-gray-600">
+                          系统
+                        </span>
+                      )}
                     </span>
                   </td>
                   <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-700 truncate">
@@ -372,13 +407,14 @@ export default function CategoriesList() {
                     >
                       <Pencil size={16} className="inline" /> 编辑
                     </Link>
-                    <button
-                      onClick={() => handleDelete(cat.key, locale, cat.name, !!cat.isSystem)}
-                      className="text-red-600 hover:text-red-800"
-                      disabled={cat.isSystem}
-                    >
-                      <Trash2 size={16} className="inline" /> 删除
-                    </button>
+                    {!cat.isSystem && (
+                      <button
+                        onClick={() => handleDelete(cat.key, locale, cat.name)}
+                        className="text-red-600 hover:text-red-800"
+                      >
+                        <Trash2 size={16} className="inline" /> 删除
+                      </button>
+                    )}
                   </td>
                 </tr>
               ))

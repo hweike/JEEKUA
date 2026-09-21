@@ -1,0 +1,394 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>采集插件</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      width: 360px;
+      padding: 16px;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: #f8f9fa;
+    }
+    .header {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin-bottom: 14px;
+    }
+    .header h3 {
+      font-size: 16px;
+      color: #1a1a2e;
+    }
+    .header .status-dot {
+      display: inline-block;
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      margin-left: auto;
+    }
+    .header .status-dot.online {
+      background: #2b8a3e;
+    }
+    .header .status-dot.offline {
+      background: #c92a2a;
+    }
+
+    /* ===== 状态 ===== */
+    .status {
+      padding: 10px 12px;
+      border-radius: 6px;
+      font-size: 13px;
+      margin-bottom: 10px;
+      background: #f1f3f5;
+      color: #495057;
+      min-height: 40px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .status .icon { font-size: 16px; }
+    .status.ready { background: #d3f9d8; color: #2b8a3e; }
+    .status.error { background: #ffe3e3; color: #c92a2a; }
+    .status.loading { background: #d0ebff; color: #1971c2; }
+    .status.info { background: #f1f3f5; color: #495057; }
+    .status.success { background: #d3f9d8; color: #2b8a3e; }
+    .status.warning { background: #fff3cd; color: #856404; }
+
+    .status .action-link {
+      color: #1a73e8;
+      text-decoration: underline;
+      cursor: pointer;
+      margin-left: 4px;
+    }
+    .status .action-link:hover {
+      color: #1557b0;
+    }
+
+    /* ===== 按钮 ===== */
+    .btn-group {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      margin-bottom: 8px;
+    }
+    .btn {
+      padding: 10px 16px;
+      border: none;
+      border-radius: 6px;
+      font-size: 14px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.2s;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+    }
+    .btn:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+      transform: none !important;
+    }
+    .btn-primary {
+      background: #1a1a2e;
+      color: white;
+    }
+    .btn-primary:hover:not(:disabled) {
+      background: #2d2d44;
+      transform: translateY(-1px);
+    }
+    .btn-success {
+      background: #2b8a3e;
+      color: white;
+    }
+    .btn-success:hover:not(:disabled) {
+      background: #237032;
+      transform: translateY(-1px);
+    }
+    .btn-float {
+      background: #6c5ce7;
+      color: white;
+    }
+    .btn-float:hover:not(:disabled) {
+      background: #5a4bd1;
+      transform: translateY(-1px);
+    }
+    .btn-outline {
+      background: transparent;
+      color: #1a1a2e;
+      border: 1.5px solid #dee2e6;
+    }
+    .btn-outline:hover:not(:disabled) {
+      background: #f1f3f5;
+    }
+    .btn-sm {
+      padding: 4px 12px;
+      font-size: 12px;
+      border-radius: 4px;
+    }
+    .btn-warning {
+      background: #f9a825;
+      color: #1a1a2e;
+    }
+    .btn-warning:hover:not(:disabled) {
+      background: #f57f17;
+      color: white;
+    }
+    .btn-danger {
+      background: #c92a2a;
+      color: white;
+    }
+    .btn-danger:hover:not(:disabled) {
+      background: #a61e1e;
+    }
+    .btn-info {
+      background: #1971c2;
+      color: white;
+    }
+    .btn-info:hover:not(:disabled) {
+      background: #1557b0;
+    }
+
+    .btn .loading-spinner {
+      display: none;
+      width: 16px;
+      height: 16px;
+      border: 2px solid rgba(255,255,255,0.3);
+      border-top-color: white;
+      border-radius: 50%;
+      animation: spin 0.8s linear infinite;
+    }
+    .btn.loading .loading-spinner {
+      display: inline-block;
+    }
+    .btn.loading .btn-text {
+      display: none;
+    }
+    @keyframes spin {
+      to { transform: rotate(360deg); }
+    }
+
+    .divider {
+      border: none;
+      border-top: 1px solid #e9ecef;
+      margin: 6px 0 10px 0;
+    }
+
+    /* ===== 底部信息栏 ===== */
+    .info-bar {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 8px;
+      font-size: 12px;
+      padding: 4px 0;
+    }
+    .info-bar .status-item {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      color: #495057;
+    }
+    .info-bar .status-item .dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      flex-shrink: 0;
+    }
+    .info-bar .status-item .dot.green {
+      background: #2b8a3e;
+    }
+    .info-bar .status-item .dot.red {
+      background: #c92a2a;
+    }
+    .info-bar .status-item .dot.yellow {
+      background: #f9a825;
+    }
+    .info-bar .status-item .dot.gray {
+      background: #adb5bd;
+    }
+    .info-bar .status-item .label {
+      color: #868e96;
+    }
+    .info-bar .status-item .value {
+      font-weight: 500;
+      max-width: 120px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .info-bar .status-item .config-link {
+      color: #1a73e8;
+      cursor: pointer;
+      text-decoration: underline;
+      flex-shrink: 0;
+      margin-left: 2px;
+    }
+    .info-bar .status-item .config-link:hover {
+      color: #1557b0;
+    }
+
+    /* ===== 采集计数 ===== */
+    .collect-count {
+      text-align: center;
+      font-size: 12px;
+      color: #868e96;
+      padding: 4px 0 8px 0;
+      border-bottom: 1px solid #f1f3f5;
+      margin-bottom: 8px;
+    }
+
+    /* ===== 底部版本号 ===== */
+    .footer-version {
+      margin-top: 10px;
+      font-size: 11px;
+      color: #adb5bd;
+      text-align: left;
+    }
+
+    /* ===== 配置页面 ===== */
+    #configPage {
+      display: none;
+    }
+    #configPage .config-desc {
+      font-size: 13px;
+      color: #6c757d;
+      margin-bottom: 12px;
+      line-height: 1.5;
+    }
+    #configPage .form-group {
+      margin-bottom: 10px;
+    }
+    #configPage .form-group label {
+      display: block;
+      font-size: 12px;
+      font-weight: 600;
+      color: #495057;
+      margin-bottom: 4px;
+    }
+    #configPage .form-group input {
+      width: 100%;
+      padding: 8px 12px;
+      border: 1.5px solid #dee2e6;
+      border-radius: 6px;
+      font-size: 13px;
+      transition: border-color 0.2s;
+    }
+    #configPage .form-group input:focus {
+      outline: none;
+      border-color: #1a73e8;
+    }
+    #configPage .form-group input::placeholder {
+      color: #adb5bd;
+    }
+    #configPage .config-status {
+      font-size: 13px;
+      padding: 8px 12px;
+      border-radius: 6px;
+      margin-bottom: 10px;
+    }
+    #configPage .config-status.info {
+      background: #d0ebff;
+      color: #1971c2;
+    }
+    #configPage .config-status.success {
+      background: #d3f9d8;
+      color: #2b8a3e;
+    }
+    #configPage .config-status.error {
+      background: #ffe3e3;
+      color: #c92a2a;
+    }
+
+    .hidden {
+      display: none !important;
+    }
+  </style>
+</head>
+<body>
+
+<!-- ============================================================ -->
+<!-- 配置页面（首次使用或切换配置） -->
+<!-- ============================================================ -->
+<div id="configPage">
+  <div class="header">
+    <h3>⚙️ 配置独立站</h3>
+  </div>
+  <div class="config-desc" id="configDesc">
+    首次使用，请配置您的独立站地址并获取 Token
+  </div>
+  <div class="form-group">
+    <label for="apiBaseInput">独立站地址</label>
+    <input
+      type="url"
+      id="apiBaseInput"
+      placeholder="https://your-store.com"
+      autocomplete="url"
+    />
+  </div>
+  <div id="configStatus" class="config-status info">
+    ℹ️ 请输入独立站地址并点击「保存并连接」
+  </div>
+  <button class="btn btn-primary" id="saveConfigBtn" style="width:100%;">
+    ✅ 保存并连接
+  </button>
+</div>
+
+<!-- ============================================================ -->
+<!-- 主页面 -->
+<!-- ============================================================ -->
+<div id="mainPage">
+  <!-- Header -->
+  <div class="header">
+    <h3>🛒 商品采集器</h3>
+    <span class="status-dot offline" id="connectionStatus" title="连接状态"></span>
+  </div>
+
+  <!-- 状态 -->
+  <div class="status" id="status">
+    <span class="icon">🔍</span>
+    <span id="statusText">检测中...</span>
+  </div>
+
+  <!-- ⭐ 信息栏：独立站配置 + Token 状态 -->
+  <div class="info-bar">
+    <span class="status-item">
+      <span class="dot gray" id="apiDot"></span>
+      <span class="label">独立站</span>
+      <span class="value" id="apiBaseDisplay">未连接</span>
+      <span class="config-link" id="editConfigBtn">配置</span>
+    </span>
+    <span class="status-item">
+      <span class="dot gray" id="tokenDot"></span>
+      <span class="label">Token</span>
+      <span class="value" id="tokenStatusDisplay">未获取</span>
+    </span>
+  </div>
+
+  <!-- 已采集计数 -->
+  <div class="collect-count" id="collectCount">已采集: 0</div>
+
+  <!-- 按钮组：只保留采集商品按钮 -->
+  <div class="btn-group">
+    <button class="btn btn-success" id="collectBtn" disabled>
+      <span class="loading-spinner"></span>
+      <span class="btn-text">📦 采集商品</span>
+    </button>
+  </div>
+
+  <!-- 隐藏的按钮（保留但不显示） -->
+  <div style="display:none;">
+    <button class="btn btn-primary" id="loadBtn">📥 加载适配器</button>
+    <button class="btn btn-float" id="openFloatBtn">🪟 打开悬浮窗</button>
+  </div>
+
+  <!-- ⭐ 移除日志区域 -->
+  <!-- 底部版本号 -->
+  <div class="footer-version" id="versionDisplay">v1.0.0</div>
+</div>
+
+<script src="popup.js"></script>
+</body>
+</html>

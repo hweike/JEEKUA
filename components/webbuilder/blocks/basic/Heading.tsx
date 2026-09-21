@@ -25,7 +25,7 @@ function getDisplayText(field: any): string {
 }
 
 export function Heading({
-  level,
+  level = 2,
   title,
   textAlign,
   bold,
@@ -33,6 +33,7 @@ export function Heading({
   underline,
   fontSize,
   link,
+  color,                // ✅ 新增
   puck,
   spacingGroup,
 }: any) {
@@ -48,7 +49,7 @@ export function Heading({
   // 获取桌面端字体大小
   const desktopFontSize = FONT_SIZE_MAP[fontSize] || 24;
 
-  // ✅ 使用 clamp() 实现响应式字体
+  // ✅ 响应式字体
   const fontSizeClamp = `clamp(${desktopFontSize * mobileScaleFactor}px, 2.5vw, ${desktopFontSize}px)`;
 
   // 构建样式
@@ -58,11 +59,12 @@ export function Heading({
     fontWeight: bold ? 'bold' : 'normal',
     fontStyle: italic ? 'italic' : 'normal',
     textDecoration: underline ? 'underline' : 'none',
+    color: color || '#000000',          // ✅ 应用颜色
   };
 
   const displayText = getDisplayText(title);
 
-  // ✅ 使用 React.createElement 构建元素，避免 JSX 类型问题
+  // ✅ 使用 React.createElement 构建元素
   const tagName = `h${level}` as keyof JSX.IntrinsicElements;
 
   // 如果是链接模式

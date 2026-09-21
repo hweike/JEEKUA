@@ -26,12 +26,7 @@
       "visible": true,
       "title": "Support",
       "menuId": "footer-menu-3"
-    },
-     "textInfo": {
-    "enabled": false,
-    "title": "CONTACT US",
-    "content": "abc@abc.com\n9am - 11pm HKT\nMonday - Sunday (except for public holidays)"
-  }
+    }
   },
   "social": {
     "visible": true,
@@ -41,6 +36,10 @@
     "showPolicyLinks": true,
     "topSpacing": 32,
     "bottomSpacing": 32
+  },
+  "textInfo": {
+    "enabled": false,
+    "title": "CONTACT US",
+    "content": "abc@abc.com\n9am - 11pm HKT\nMonday - Sunday (except for public holidays)"
   }
- 
 }

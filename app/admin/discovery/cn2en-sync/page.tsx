@@ -7,63 +7,51 @@ import { RefreshCw, ExternalLink, ChevronRight, ChevronDown } from 'lucide-react
 import Cn2enSyncDialog from '../components/Cn2enSyncDialog';
 import Toast from '@/components/Toast';
 
-type TabKey = 'productCollection' | 'product';
-const TABS: { key: TabKey; label: string }[] = [
-  { key: 'productCollection', label: '产品分类' },
-  { key: 'product', label: '产品' },
-];
-
-interface SyncPage {
-  id: string;
-  locale: string;
-  type: string;
-  title: string;
-  slug: string;
-  url: string;
+// ========== 从 products 表读取的数据结构 ==========
+interface ProductSyncItem {
+  productId: string;
+  product_name: string;
+  sku: string;
+  slug: string | null;
+  main_image_url: string | null;
   updatedAt: string;
-  content_hash: string;
-  syncedCount: number;
-  totalTargetCount: number;
+  source_locale: string | null;
+  source_product_id: string | null;
+  parent_product_id: string | null;
+  syncedCount: number;          // 1 表示已同步到英文，0 表示未同步
+  totalTargetCount: number;     // 固定为 1（英文）
   needSync: boolean;
-  source_locale?: string | null;
-  source_content_hash?: string | null;
 }
 
-// 扩展类型，增加 level 和 children
-interface ProcessedPage extends SyncPage {
+interface ProcessedProduct extends ProductSyncItem {
   level: number;
-  children?: ProcessedPage[];
+  children?: ProcessedProduct[];
 }
 
 export default function Cn2EnSyncPage() {
   const searchParams = useSearchParams();
   const router = useRouter();
 
-  const [pages, setPages] = useState<SyncPage[]>([]);
+  const [products, setProducts] = useState<ProductSyncItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
-  const [totalTargetCount, setTotalTargetCount] = useState(0);
   const [showSyncDialog, setShowSyncDialog] = useState(false);
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
-  // 展开的父级 ID 集合
   const [expandedParents, setExpandedParents] = useState<Set<string>>(new Set());
 
-  const currentTab = (searchParams.get('tab') as TabKey) || 'productCollection';
-
+  // 加载中文产品数据（仅父产品+变体）
   const loadData = useCallback(async () => {
     setLoading(true);
     try {
-      const timestamp = Date.now();
       const res = await fetch(
-        `/api/discovery/cn2en-sync?types=${currentTab}&_=${timestamp}`,
+        `/api/discovery/product-sync?sourceLocale=zh&_=${Date.now()}`,
         { cache: 'no-store' }
       );
       if (!res.ok) throw new Error('Failed to fetch');
       const data = await res.json();
-      setPages(data.pages || []);
-      setTotalTargetCount(data.totalTargetCount || 0);
+      // 只保留中文产品（sourceLocale=zh 已经指定，返回的就是中文）
+      setProducts(data.items || []);
       setSelectedIds(new Set());
-      // 默认全部折叠
       setExpandedParents(new Set());
     } catch (error) {
       console.error(error);
@@ -71,79 +59,64 @@ export default function Cn2EnSyncPage() {
     } finally {
       setLoading(false);
     }
-  }, [currentTab]);
+  }, []);
 
   useEffect(() => {
     loadData();
   }, [loadData]);
 
-  const handleTabChange = (tab: TabKey) => {
-    router.push(`/admin/discovery/cn2en-sync?tab=${tab}`);
-  };
+  // 构建层级结构（基于 parent_product_id）
+  const buildHierarchy = useCallback((items: ProductSyncItem[]): ProcessedProduct[] => {
+    const parentMap = new Map<string, ProcessedProduct>();
+    const childrenMap = new Map<string, ProcessedProduct[]>();
 
-  // 构建层级结构：根据 id 中的 '/' 区分父子
-  const buildHierarchy = useCallback((pages: SyncPage[]): ProcessedPage[] => {
-    const parentMap = new Map<string, ProcessedPage>();
-    const childrenMap = new Map<string, ProcessedPage[]>();
-
-    for (const page of pages) {
-      const parts = page.id.split('/');
-      if (parts.length === 1) {
+    for (const item of items) {
+      if (!item.parent_product_id) {
         // 父级
-        const processed: ProcessedPage = { ...page, level: 0, children: [] };
-        parentMap.set(page.id, processed);
-      } else if (parts.length === 2) {
-        // 子级：父ID/子ID
-        const parentId = parts[0];
-        if (!childrenMap.has(parentId)) childrenMap.set(parentId, []);
-        childrenMap.get(parentId)!.push({ ...page, level: 1 });
+        const processed: ProcessedProduct = { ...item, level: 0, children: [] };
+        parentMap.set(item.productId, processed);
       } else {
-        // 其他（如多层）暂时作为父级
-        const processed: ProcessedPage = { ...page, level: 0, children: [] };
-        parentMap.set(page.id, processed);
+        // 子级
+        const parentId = item.parent_product_id;
+        if (!childrenMap.has(parentId)) childrenMap.set(parentId, []);
+        childrenMap.get(parentId)!.push({ ...item, level: 1 });
       }
     }
 
-    // 将子级挂到父级下
-    const result: ProcessedPage[] = [];
+    const result: ProcessedProduct[] = [];
     for (const [parentId, parent] of parentMap) {
       const children = childrenMap.get(parentId) || [];
-      children.sort((a, b) => a.title.localeCompare(b.title));
+      children.sort((a, b) => a.product_name.localeCompare(b.product_name));
       parent.children = children;
       result.push(parent);
     }
-    // 按标题排序
-    result.sort((a, b) => a.title.localeCompare(b.title));
+    result.sort((a, b) => a.product_name.localeCompare(b.product_name));
     return result;
   }, []);
 
-  // 处理后的页面层级
-  const hierarchicalPages = useMemo(() => {
-    return buildHierarchy(pages);
-  }, [pages, buildHierarchy]);
+  const hierarchicalProducts = useMemo(() => buildHierarchy(products), [products, buildHierarchy]);
 
-  // 扁平化用于渲染的页面列表（根据展开状态）
-  const flattenedPages = useMemo(() => {
-    const result: ProcessedPage[] = [];
-    for (const parent of hierarchicalPages) {
+  const flattenedProducts = useMemo(() => {
+    const result: ProcessedProduct[] = [];
+    for (const parent of hierarchicalProducts) {
       result.push(parent);
-      if (expandedParents.has(parent.id)) {
+      if (expandedParents.has(parent.productId)) {
         result.push(...(parent.children || []));
       }
     }
     return result;
-  }, [hierarchicalPages, expandedParents]);
+  }, [hierarchicalProducts, expandedParents]);
 
-  // 可选页面：父级且 source_locale === null
+  // ✅ 所有父产品都可选（无论是否已同步）
   const selectableParents = useMemo(() => {
-    return hierarchicalPages.filter(p => p.source_locale === null);
-  }, [hierarchicalPages]);
+    return hierarchicalProducts;
+  }, [hierarchicalProducts]);
 
   const isAllSelected = selectableParents.length > 0 && selectedIds.size === selectableParents.length;
 
   const handleSelectAll = (checked: boolean) => {
     if (checked) {
-      const ids = selectableParents.map(p => p.id);
+      const ids = selectableParents.map(p => p.productId);
       setSelectedIds(new Set(ids));
     } else {
       setSelectedIds(new Set());
@@ -152,11 +125,8 @@ export default function Cn2EnSyncPage() {
 
   const handleSelect = (id: string, checked: boolean) => {
     const newSet = new Set(selectedIds);
-    if (checked) {
-      newSet.add(id);
-    } else {
-      newSet.delete(id);
-    }
+    if (checked) newSet.add(id);
+    else newSet.delete(id);
     setSelectedIds(newSet);
   };
 
@@ -169,31 +139,30 @@ export default function Cn2EnSyncPage() {
     });
   };
 
-  // 获取完整同步ID（包含子级）
+  // 获取完整同步 ID 列表（包含变体）
   const getFullSyncIds = useCallback(() => {
     const allIds = new Set<string>(selectedIds);
-    for (const page of pages) {
-      if (!page.id.includes('/') && selectedIds.has(page.id)) {
-        for (const child of pages) {
-          if (child.id.startsWith(page.id + '/')) {
-            allIds.add(child.id);
+    for (const product of products) {
+      if (selectedIds.has(product.productId) && !product.parent_product_id) {
+        for (const child of products) {
+          if (child.parent_product_id === product.productId) {
+            allIds.add(child.productId);
           }
         }
       }
     }
     return Array.from(allIds);
-  }, [selectedIds, pages]);
+  }, [selectedIds, products]);
 
   const handleBatchSync = () => {
     const fullIds = getFullSyncIds();
     if (fullIds.length === 0) {
-      setToast({ message: '请至少选择一个页面', type: 'error' });
+      setToast({ message: '请至少选择一个产品', type: 'error' });
       return;
     }
     setShowSyncDialog(true);
   };
 
-  // 同步确认回调
   const handleSyncConfirm = async (
     source: string,
     targets: string[],
@@ -201,13 +170,13 @@ export default function Cn2EnSyncPage() {
   ): Promise<{ success: boolean; message?: string }> => {
     try {
       const fullIds = getFullSyncIds();
-      const res = await fetch('/api/discovery/sync-batch', {
+      const res = await fetch('/api/discovery/product-sync/batch', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          sourceLocale: source,
-          targetLocales: targets,
-          pageIds: fullIds,
+          sourceLocale: 'zh',
+          targetLocales: ['en'],
+          productIds: fullIds,
           mode: options.mode,
         }),
       });
@@ -233,13 +202,31 @@ export default function Cn2EnSyncPage() {
     return '';
   };
 
-  // 渲染同步进度
-  const renderSyncProgress = (page: ProcessedPage) => {
-    return (
-      <span className={`text-sm ${page.needSync ? 'text-yellow-600' : 'text-green-600'}`}>
-        {page.needSync ? '待同步' : '已同步英文站'}
-      </span>
-    );
+  // ✅ 同步状态：显示进度条或“已从英文站同步”
+  const renderSyncStatus = (item: ProcessedProduct) => {
+    if (item.source_locale === 'en') {
+      return <span className="text-sm text-green-600">已从英文站同步</span>;
+    } else {
+      // 原始中文产品（source_locale === null）显示进度条
+      return (
+        <div className="flex items-center">
+          <div className="w-32 bg-gray-200 rounded-full h-2.5 mr-2">
+            <div
+              className="bg-green-600 h-2.5 rounded-full"
+              style={{ width: `${item.syncedCount > 0 ? 100 : 0}%` }}
+            />
+          </div>
+          <span className="text-sm text-gray-700">
+            {item.syncedCount}/{item.totalTargetCount}
+          </span>
+          {item.needSync && (
+            <span className="ml-2 inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-yellow-100 text-yellow-800">
+              待同步
+            </span>
+          )}
+        </div>
+      );
+    }
   };
 
   return (
@@ -247,30 +234,21 @@ export default function Cn2EnSyncPage() {
       <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 py-8">
         <div className="flex justify-between items-center mb-6">
           <h1 className="text-2xl font-bold text-gray-900">
-            中文 → 英文 站点同步
+            中文 → 英文 产品同步
           </h1>
-          <div className="text-sm text-gray-600">
-            源：中文站 &nbsp;→&nbsp; 目标：英文站
+          <div className="flex items-center gap-4">
+            <button
+              onClick={loadData}
+              className="p-2 rounded-full hover:bg-gray-200 transition"
+              title="刷新数据"
+              disabled={loading}
+            >
+              <RefreshCw size={20} className={`text-gray-600 ${loading ? 'animate-spin' : ''}`} />
+            </button>
+            <div className="text-sm text-gray-600">
+              源：中文站 &nbsp;→&nbsp; 目标：英文站
+            </div>
           </div>
-        </div>
-
-        <div className="border-b border-gray-200 mb-6">
-          <nav className="-mb-px flex space-x-8">
-            {TABS.map((tab) => (
-              <button
-                key={tab.key}
-                onClick={() => handleTabChange(tab.key)}
-                className={`
-                  py-2 px-1 border-b-2 font-medium text-sm
-                  ${currentTab === tab.key
-                    ? 'border-blue-500 text-blue-600'
-                    : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'}
-                `}
-              >
-                {tab.label}
-              </button>
-            ))}
-          </nav>
         </div>
 
         {/* 工具栏 */}
@@ -297,8 +275,8 @@ export default function Cn2EnSyncPage() {
         <div className="bg-white shadow overflow-hidden sm:rounded-md">
           {loading ? (
             <div className="text-center py-12 text-gray-500">加载中...</div>
-          ) : flattenedPages.length === 0 ? (
-            <div className="text-center py-12 text-gray-500">暂无数据</div>
+          ) : flattenedProducts.length === 0 ? (
+            <div className="text-center py-12 text-gray-500">暂无中文产品</div>
           ) : (
             <table className="min-w-full divide-y divide-gray-200">
               <thead className="bg-gray-50">
@@ -312,10 +290,10 @@ export default function Cn2EnSyncPage() {
                     />
                   </th>
                   <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                    标题
+                    产品名称
                   </th>
                   <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                    类型
+                    SKU
                   </th>
                   <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                     最后更新
@@ -329,19 +307,19 @@ export default function Cn2EnSyncPage() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-200">
-                {flattenedPages.map((page) => {
-                  const isParent = page.level === 0;
-                  const isChild = page.level === 1;
-                  const isSelectable = isParent && page.source_locale === null;
+                {flattenedProducts.map((item) => {
+                  const isParent = item.level === 0;
+                  const isChild = item.level === 1;
+                  const isSelectable = isParent; // ✅ 所有父产品均可选
 
                   return (
-                    <tr key={page.id} className={`hover:bg-gray-50 ${isParent ? 'bg-gray-50' : 'bg-white'}`}>
+                    <tr key={item.productId} className={`hover:bg-gray-50 ${isParent ? 'bg-gray-50' : 'bg-white'}`}>
                       <td className="min-w-[40px] w-10 px-6 py-4 whitespace-nowrap">
                         {isSelectable ? (
                           <input
                             type="checkbox"
-                            checked={selectedIds.has(page.id)}
-                            onChange={(e) => handleSelect(page.id, e.target.checked)}
+                            checked={selectedIds.has(item.productId)}
+                            onChange={(e) => handleSelect(item.productId, e.target.checked)}
                             className="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded"
                           />
                         ) : (
@@ -350,48 +328,56 @@ export default function Cn2EnSyncPage() {
                       </td>
                       <td className="px-6 py-4 text-left">
                         <div className="flex items-center">
-                          {isParent && page.children && page.children.length > 0 && (
+                          {isParent && item.children && item.children.length > 0 && (
                             <button
-                              onClick={() => toggleExpand(page.id)}
+                              onClick={() => toggleExpand(item.productId)}
                               className="mr-2 focus:outline-none"
                             >
-                              {expandedParents.has(page.id) ? (
+                              {expandedParents.has(item.productId) ? (
                                 <ChevronDown size={16} />
                               ) : (
                                 <ChevronRight size={16} />
                               )}
                             </button>
                           )}
-                          {isParent && (!page.children || page.children.length === 0) && (
+                          {isParent && (!item.children || item.children.length === 0) && (
                             <span className="inline-block w-6" />
                           )}
                           <div
                             className={`text-sm ${isChild ? 'ml-6' : 'font-medium'} text-gray-900`}
                           >
-                            {page.title}
+                            {item.product_name}
                           </div>
                         </div>
                       </td>
-                      <td className="px-6 py-4 whitespace-nowrap">
-                        <span className="px-2 inline-flex text-xs leading-5 font-semibold rounded-full bg-blue-100 text-blue-800">
-                          {page.type}
-                        </span>
+                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                        {item.sku}
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                        {new Date(page.updatedAt).toLocaleString()}
+                        {new Date(item.updatedAt).toLocaleString()}
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap">
-                        {renderSyncProgress(page)}
+                        {renderSyncStatus(item)}
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap text-sm">
                         <a
-                          href={`${getSiteBaseUrl()}/en${page.url}`}
+                          href={`${getSiteBaseUrl()}/zh/product/${item.slug || item.productId}`}
                           target="_blank"
                           rel="noopener noreferrer"
                           className="text-blue-600 hover:text-blue-900 flex items-center"
                         >
-                          访问英文页面 <ExternalLink className="w-4 h-4 ml-1" />
+                          查看中文页 <ExternalLink className="w-4 h-4 ml-1" />
                         </a>
+                        {item.syncedCount > 0 && (
+                          <a
+                            href={`${getSiteBaseUrl()}/en/product/${item.slug || item.productId}`}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="text-green-600 hover:text-green-900 flex items-center ml-3"
+                          >
+                            英文页 <ExternalLink className="w-4 h-4 ml-1" />
+                          </a>
+                        )}
                       </td>
                     </tr>
                   );
@@ -405,7 +391,7 @@ export default function Cn2EnSyncPage() {
       {/* 底部悬浮条 */}
       {selectedIds.size > 0 && (
         <div className="fixed bottom-0 left-0 right-0 bg-white border-t shadow-lg p-4 flex justify-between items-center z-50">
-          <span className="text-sm text-gray-700">已选择 {selectedIds.size} 个页面</span>
+          <span className="text-sm text-gray-700">已选择 {selectedIds.size} 个产品</span>
           <div className="flex gap-4">
             <button
               onClick={() => handleSelectAll(false)}
@@ -428,7 +414,7 @@ export default function Cn2EnSyncPage() {
         onClose={() => setShowSyncDialog(false)}
         onSync={handleSyncConfirm}
         selectedCount={getFullSyncIds().length}
-        title="同步中文到英文站"
+        title="同步中文产品到英文站"
         pageIds={getFullSyncIds()}
       />
 

@@ -1,3 +1,4 @@
+// app/admin/products/manage/variant/edit/page.tsx
 'use client';
 
 import { useEffect, useState, useRef } from 'react';
@@ -35,7 +36,7 @@ function generateSlugForProduct(text: string): string {
   return generateClientSlug(pinyinText);
 }
 
-// ---------- 骨架屏组件（模拟表单结构，带脉冲动画） ----------
+// ---------- 骨架屏组件 ----------
 function FormSkeleton() {
   return (
     <div className="animate-pulse space-y-6">
@@ -207,7 +208,6 @@ export default function VariantEditPage() {
           setTimeout(() => router.back(), 1500);
         }
       } finally {
-        // 确保骨架屏至少显示 500ms，避免一闪而过
         const elapsed = Date.now() - startTime;
         const minDisplay = 100;
         if (elapsed < minDisplay) {
@@ -274,6 +274,7 @@ export default function VariantEditPage() {
     }));
   };
 
+  // ---------- 异步提交（与产品编辑页保持一致） ----------
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!form.product_name) {
@@ -306,38 +307,52 @@ export default function VariantEditPage() {
     };
 
     setSaving(true);
-    const url = variantId
-      ? `/api/admin/products/manage?productId=${variantId}`
-      : '/api/admin/products/manage';
+    // 构建异步 URL（带 async=true）
+    const baseUrl = variantId
+      ? `/api/admin/products/manage?productId=${variantId}&async=true`
+      : '/api/admin/products/manage?async=true';
     const method = variantId ? 'PUT' : 'POST';
 
     try {
-      const res = await fetch(url, {
+      const res = await fetch(baseUrl, {
         method,
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
       });
-      const responseText = await res.text();
-      let result;
-      try {
-        result = JSON.parse(responseText);
-      } catch {
-        result = { error: `服务器返回非JSON: ${responseText.substring(0, 200)}` };
-      }
-      if (res.ok) {
-        setToast({ message: '保存成功', type: 'success' });
-        setTimeout(() => {
-          setSaving(false);
-          router.push(`/admin/products/manage?locale=${locale}`);
-        }, 1500);
-      } else {
-        console.error('Save failed:', result);
-        setToast({ message: result.error || `保存失败 (HTTP ${res.status})`, type: 'error' });
+      if (!res.ok) {
+        const errorText = await res.text();
+        let errorMsg;
+        try {
+          const errJson = JSON.parse(errorText);
+          errorMsg = errJson.error || `提交失败 (HTTP ${res.status})`;
+        } catch {
+          errorMsg = `提交失败 (HTTP ${res.status})`;
+        }
+        setToast({ message: errorMsg, type: 'error' });
         setSaving(false);
+        return;
       }
+      const result = await res.json();
+      if (!result.taskId) {
+        setToast({ message: '服务器未返回任务ID，请稍后查看列表', type: 'error' });
+        setSaving(false);
+        return;
+      }
+
+      // 存储任务信息到 localStorage（使用父产品 ID 以便列表页显示蒙层）
+      localStorage.setItem('pendingProductTask', JSON.stringify({
+        taskId: result.taskId,
+        productName: `变体“${form.product_name}”`, // 显示变体名称
+        productId: parentProduct.id, // 父产品 ID（用于蒙层）
+        variantId: variantId || 'new', // 可选，便于调试
+        isVariant: true,
+      }));
+
+      // 立即跳转到列表页
+      router.push(`/admin/products/manage?locale=${locale}`);
     } catch (err: any) {
       console.error('Network error:', err);
-      setToast({ message: '保存失败，请检查网络', type: 'error' });
+      setToast({ message: '提交失败，请检查网络', type: 'error' });
       setSaving(false);
     }
   };

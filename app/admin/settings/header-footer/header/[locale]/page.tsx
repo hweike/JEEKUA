@@ -6,7 +6,7 @@ import HeaderForm from '@/components/SiteHeadersFooters/HeaderForm';
 import { HeaderConfig } from '@/lib/SiteHeadersFooters/types';
 import { RefreshCw } from 'lucide-react';
 import Toast from '@/components/common/Toast';
-import { getLanguageDisplayName } from '@/lib/languages/config'; // 新增导入
+import { getLanguageDisplayName } from '@/lib/languages/config';
 
 export default function HeaderSettingsPage() {
   const params = useParams();
@@ -16,7 +16,7 @@ export default function HeaderSettingsPage() {
   const [loading, setLoading] = useState(true);
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
   const [saving, setSaving] = useState(false);
-  const containerRef = useRef<HTMLDivElement>(null);
+  const headerFormRef = useRef<{ submit: () => void }>(null);
 
   const loadConfig = async (lang: string) => {
     setLoading(true);
@@ -24,11 +24,7 @@ export default function HeaderSettingsPage() {
       const res = await fetch(`/api/SiteHeadersFooters/config?type=header&locale=${lang}`);
       if (!res.ok) throw new Error('加载失败');
       const data = await res.json();
-      if (data && Object.keys(data).length > 0) {
-        setConfig(data);
-      } else {
-        setConfig(null);
-      }
+      setConfig(data && Object.keys(data).length > 0 ? data : null);
     } catch (error) {
       console.error(error);
       setConfig(null);
@@ -58,21 +54,27 @@ export default function HeaderSettingsPage() {
     }
   };
 
-  // 触发表单提交
-  const handleSave = async () => {
-    setSaving(true);
-    try {
-      const form = containerRef.current?.querySelector('form');
-      if (form) {
-        form.requestSubmit();
-        // 假设表单提交成功后会由内部处理 Toast，这里只管理按钮状态
-        setTimeout(() => setSaving(false), 1500);
-      } else {
-        throw new Error('未找到表单');
-      }
-    } catch (error) {
-      setToast({ message: '保存失败，请检查表单', type: 'error' });
-      setSaving(false);
+  const handleSaveSuccess = (message: string) => {
+    console.log('✅ 保存成功回调');
+    setToast({ message, type: 'success' });
+    setSaving(false);
+  };
+
+  const handleSaveError = (message: string) => {
+    console.error('❌ 保存失败回调:', message);
+    setToast({ message, type: 'error' });
+    setSaving(false);
+  };
+
+  const handleSave = () => {
+    console.log('🟢 handleSave 被调用');
+    if (headerFormRef.current?.submit) {
+      console.log('🟢 调用 submit');
+      setSaving(true);
+      headerFormRef.current.submit();
+    } else {
+      console.warn('🟢 headerFormRef.current 或 submit 不存在', headerFormRef.current);
+      setToast({ message: '表单未就绪，请稍后重试', type: 'error' });
     }
   };
 
@@ -80,7 +82,6 @@ export default function HeaderSettingsPage() {
     loadConfig(locale);
   }, [locale]);
 
-  // 使用 getLanguageDisplayName 获取语言中文名
   const siteName = getLanguageDisplayName(locale, 'zh');
 
   if (loading) return <div className="min-h-screen bg-gray-100 flex items-center justify-center">加载中...</div>;
@@ -90,7 +91,7 @@ export default function HeaderSettingsPage() {
       <div className="min-h-screen bg-gray-100 py-8">
         <div className="w-4/5 mx-auto bg-white rounded-lg shadow p-6">
           <div className="flex justify-between items-center mb-6">
-            <h1 className="text-2xl font-bold">页头设置（{siteName}）</h1> {/* 修改标题 */}
+            <h1 className="text-2xl font-bold">页头设置（{siteName}）</h1>
             <button
               onClick={() => initConfig(locale)}
               className="bg-blue-600 text-white px-4 py-2 rounded inline-flex items-center gap-2"
@@ -111,21 +112,26 @@ export default function HeaderSettingsPage() {
     <div className="min-h-screen bg-gray-100 py-8 pb-24">
       <div className="w-4/5 mx-auto">
         <div className="flex justify-between items-center mb-6">
-          <h1 className="text-2xl font-bold">页头设置（{siteName}）</h1> {/* 修改标题 */}
+          <h1 className="text-2xl font-bold">页头设置（{siteName}）</h1>
           <button
             onClick={handleInitCurrent}
             className="bg-gray-200 hover:bg-gray-300 px-4 py-2 rounded text-sm inline-flex items-center gap-2"
           >
-            <RefreshCw size={14} /> 初始化设置
+            <RefreshCw size={14} /> 初始化数据
           </button>
         </div>
 
-        <div className="bg-white rounded-lg shadow p-[50px]" ref={containerRef}>
-          <HeaderForm initialConfig={config} locale={locale} />
+        <div className="bg-white rounded-lg shadow p-[50px]">
+          <HeaderForm
+            ref={headerFormRef}
+            initialConfig={config}
+            locale={locale}
+            onSuccess={handleSaveSuccess}
+            onError={handleSaveError}
+          />
         </div>
       </div>
 
-      {/* 悬浮按钮 */}
       <div className="fixed bottom-0 left-0 right-0 bg-white border-t shadow-lg p-4 flex justify-end gap-4 z-50">
         <button
           type="button"
@@ -135,7 +141,7 @@ export default function HeaderSettingsPage() {
           取消
         </button>
         <button
-          type="submit"
+          type="button"
           onClick={handleSave}
           disabled={saving}
           className="bg-blue-600 hover:bg-blue-700 text-white px-6 py-2 rounded disabled:bg-gray-400 disabled:cursor-not-allowed"

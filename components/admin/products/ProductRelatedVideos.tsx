@@ -21,6 +21,7 @@ import { restrictToVerticalAxis } from '@dnd-kit/modifiers';
 import { useSortable } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
 import VideoSelectorDialog from './VideoSelectorDialog';
+import VideoPreviewModal from '@/components/videosys-admin/VideoPreviewModal'; // 导入播放弹窗
 
 interface AssociatedVideo {
   videoId: string;
@@ -28,6 +29,8 @@ interface AssociatedVideo {
   thumbnail: string;
   duration?: number;
   sortOrder: number;
+  source_type?: 'youtube' | 'vimeo' | 'bilibili'; // 新增
+  video_id?: string; // 新增
 }
 
 interface ProductRelatedVideosProps {
@@ -36,17 +39,19 @@ interface ProductRelatedVideosProps {
   onSave?: () => void;
 }
 
-// 可拖拽视频项组件
+// 可拖拽视频项组件（增加点击预览）
 function SortableVideoItem({
   video,
   index,
   onRemove,
   saving,
+  onPlay, // 新增回调
 }: {
   video: AssociatedVideo;
   index: number;
   onRemove: (id: string) => void;
   saving: boolean;
+  onPlay: (video: AssociatedVideo) => void;
 }) {
   const {
     attributes,
@@ -65,18 +70,28 @@ function SortableVideoItem({
 
   const isFirst = index === 0;
 
+  const handlePlay = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (video.source_type && video.video_id) {
+      onPlay(video);
+    } else {
+      alert('该视频无法播放，缺少来源信息');
+    }
+  };
+
   return (
     <li
       ref={setNodeRef}
       style={style}
       className="flex items-center justify-between p-2 border rounded bg-gray-50"
     >
-      <div className="flex items-center gap-2 flex-1">
+      <div className="flex items-center gap-2 flex-1 cursor-pointer" onClick={handlePlay}>
         <button
           type="button"
           className="cursor-grab active:cursor-grabbing"
           {...attributes}
           {...listeners}
+          onClick={(e) => e.stopPropagation()}
         >
           <GripVertical size={16} className="text-gray-400" />
         </button>
@@ -124,6 +139,9 @@ export default function ProductRelatedVideos({
   const [loading, setLoading] = useState(true);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [saving, setSaving] = useState(false);
+  // 新增播放弹窗状态
+  const [playModalOpen, setPlayModalOpen] = useState(false);
+  const [playingVideo, setPlayingVideo] = useState<AssociatedVideo | null>(null);
 
   const sensors = useSensors(
     useSensor(PointerSensor),
@@ -136,7 +154,6 @@ export default function ProductRelatedVideos({
     if (!productId) return;
     setLoading(true);
     try {
-      // 假设后端 API 返回关联的视频列表
       const res = await fetch(`/api/admin/products/videos/${productId}`);
       const data = await res.json();
       setVideos(data.items || []);
@@ -198,6 +215,12 @@ export default function ProductRelatedVideos({
     }
   };
 
+  // 播放视频
+  const handlePlay = (video: AssociatedVideo) => {
+    setPlayingVideo(video);
+    setPlayModalOpen(true);
+  };
+
   if (loading) {
     return <div className="border rounded p-4 text-gray-500">加载中...</div>;
   }
@@ -237,6 +260,7 @@ export default function ProductRelatedVideos({
                   index={idx}
                   onRemove={handleRemove}
                   saving={saving}
+                  onPlay={handlePlay}
                 />
               ))}
             </ul>
@@ -244,9 +268,10 @@ export default function ProductRelatedVideos({
         </DndContext>
       )}
       {videos.length > 0 && (
-        <div className="text-xs text-gray-400 mt-2">拖拽左侧手柄可调整排序</div>
+        <div className="text-xs text-gray-400 mt-2">点击视频标题或缩略图可预览播放</div>
       )}
       {saving && <div className="text-right text-xs text-gray-400 mt-2">保存中...</div>}
+
       <VideoSelectorDialog
         open={dialogOpen}
         onClose={() => setDialogOpen(false)}
@@ -255,6 +280,17 @@ export default function ProductRelatedVideos({
         initialSelectedIds={videos.map(v => v.videoId)}
         locale={locale}
       />
+
+      {/* 视频播放弹窗 */}
+      {playModalOpen && playingVideo && (
+        <VideoPreviewModal
+          isOpen={playModalOpen}
+          onClose={() => setPlayModalOpen(false)}
+          source={playingVideo.source_type!}
+          videoId={playingVideo.video_id!}
+          title={playingVideo.title}
+        />
+      )}
     </div>
   );
 }

@@ -1,23 +1,28 @@
 'use client';
 
-import React from 'react';
+import React, { useState, useMemo } from 'react';
 import Link from 'next/link';
+import { useTranslations } from 'next-intl';
 import type { BlogCollectionBlockProps } from '@/lib/webbuilder/types';
 
 interface Props extends BlogCollectionBlockProps {
   puck?: { dragRef: (el: HTMLElement | null) => void };
 }
 
-/**
- * 智能处理图片 URL：
- * - 本地图片（以 / 开头或 localhost 域名）直接返回，不代理
- * - 外部 http/https 链接走代理（解决防盗链）
- */
+// ✅ 明确 BlogPost 类型
+interface BlogPost {
+  slug: string;
+  title: string;
+  date: string;
+  category?: string;
+  author?: string;
+  excerpt?: string;
+  image?: string;
+}
+
 function getProcessedImageUrl(url: string | null): string {
   if (!url) return '';
-  // 本地图片：相对路径 /uploads/...
   if (url.startsWith('/')) return url;
-  // 如果包含 localhost 或 127.0.0.1，尝试转换成相对路径
   if (url.includes('localhost') || url.includes('127.0.0.1')) {
     try {
       const urlObj = new URL(url);
@@ -26,137 +31,328 @@ function getProcessedImageUrl(url: string | null): string {
       return url;
     }
   }
-  // 外部链接，走代理
   if (url.startsWith('http://') || url.startsWith('https://')) {
     return `/api/proxy-image?url=${encodeURIComponent(url)}`;
   }
   return url;
 }
 
+// ============================================================
+// 公共样式常量
+// ============================================================
+const COLOR_TRANSITION = `color var(--transition-duration-150, 150ms) var(--transition-timing-ease, ease)`;
+const BG_COLOR_TRANSITION = `background-color var(--transition-duration-150, 150ms) var(--transition-timing-ease, ease)`;
+
 export function BlogCollectionBlock({
-  showSidebar = true,
+  showSidebar = false,
   postsPerRow = 1,
   __runtime,
   puck,
 }: Props) {
+  const t = useTranslations('Components.BlogBlock');
+  const [page, setPage] = useState(1);
+  const pageSize = 10;
+
+  // ============================================================
+  // ✅ 博客集合专属 CSS 变量（带最终 fallback）
+  // ============================================================
+  // ---- 容器 ----
+  const containerBg = 'var(--blog-container-bg, var(--background, #ffffff))';
+  const containerText = 'var(--blog-container-text, var(--foreground, #0f172a))';
+
+  // ---- 标题 ----
+  const titleColor = 'var(--blog-title-color, var(--foreground, #0f172a))';
+
+  // ---- 文章卡片 ----
+  const cardBorder = 'var(--blog-card-border, var(--border, #e2e8f0))';
+  const postTitleColor = 'var(--blog-post-title-color, var(--foreground, #0f172a))';
+  const postTitleHover = 'var(--blog-post-title-hover, var(--primary, #1e293b))';
+  const postMetaColor = 'var(--blog-post-meta-color, var(--muted-foreground, #64748b))';
+  const postExcerptColor = 'var(--blog-post-excerpt-color, var(--muted-foreground, #64748b))';
+
+  // ---- 分页 ----
+  const paginationBg = 'var(--blog-pagination-bg, transparent)';
+  const paginationText = 'var(--blog-pagination-text, var(--foreground, #0f172a))';
+  const paginationBorder = 'var(--blog-pagination-border, var(--border, #e2e8f0))';
+  const paginationHoverBg = 'var(--blog-pagination-hover-bg, var(--accent, #f1f5f9))';
+  const paginationDisabledOpacity = 'var(--blog-pagination-disabled-opacity, 0.5)';
+
+  // ---- 图片 ----
+  const imageRadius = 'var(--blog-image-radius, var(--radius, 0.625rem))';
+
+  // ---- 与下一区块/页脚的间距 ----
+  const marginBottom = 'var(--blog-margin-bottom, var(--section-gap, 100px))';
+
   if (!__runtime?.posts) {
     return (
       <div
-        className="border-2 border-dashed border-border p-8 text-center text-muted-foreground"
+        className="border-2 border-dashed"
         ref={puck?.dragRef}
+        style={{
+          padding: 'var(--spacing-8, 2rem)',
+          textAlign: 'center',
+          color: 'var(--muted-foreground, #64748b)',
+          borderColor: 'var(--border, #e2e8f0)',
+        }}
       >
-        〖博客集合展示区域〗
+        {t('placeholder')}
       </div>
     );
   }
 
-  const { categories, posts, currentCategorySlug, locale, basePath } = __runtime;
+  const { posts, locale, categories, currentCategorySlug } = __runtime as any;
 
-  // 图片加载失败时的处理（回退到占位图，避免重复请求代理）
+  const currentCategoryName = useMemo(() => {
+    if (!currentCategorySlug || !categories) return t('title');
+    const cat = categories.find((c: any) => c.slug === currentCategorySlug);
+    return cat?.name || t('title');
+  }, [currentCategorySlug, categories, t]);
+
+  const totalPages = Math.ceil(posts.length / pageSize);
+
+  // ✅ 显式指定返回类型为 BlogPost[]
+  const currentPosts = useMemo<BlogPost[]>(() => {
+    const start = (page - 1) * pageSize;
+    const end = start + pageSize;
+    return posts.slice(start, end);
+  }, [posts, page, pageSize]);
+
+  const handlePrevPage = () => {
+    if (page > 1) setPage(page - 1);
+  };
+
+  const handleNextPage = () => {
+    if (page < totalPages) setPage(page + 1);
+  };
+
   const handleImageError = (e: React.SyntheticEvent<HTMLImageElement, Event>) => {
     const img = e.currentTarget;
     const originalUrl = img.getAttribute('data-original-src');
-    // 如果当前 src 已经是代理链接，不再重试，直接显示占位图
     if (img.src.includes('/api/proxy-image')) {
       img.src = 'data:image/svg+xml,%3Csvg xmlns="http://www.w3.org/2000/svg" width="100" height="100" viewBox="0 0 24 24" fill="none" stroke="%23999"%3E%3Crect x="2" y="2" width="20" height="20" rx="2"%3E%3C/rect%3E%3C/svg%3E';
     } else if (originalUrl && (originalUrl.startsWith('http://') || originalUrl.startsWith('https://'))) {
-      // 外部图片加载失败，尝试走代理
       img.src = `/api/proxy-image?url=${encodeURIComponent(originalUrl)}`;
     } else {
-      // 本地图片加载失败，显示占位图
       img.src = 'data:image/svg+xml,%3Csvg xmlns="http://www.w3.org/2000/svg" width="100" height="100" viewBox="0 0 24 24" fill="none" stroke="%23999"%3E%3Crect x="2" y="2" width="20" height="20" rx="2"%3E%3C/rect%3E%3C/svg%3E';
     }
   };
 
-  return (
-    <div className="container mx-auto px-4 py-8">
-      <div className="flex flex-col lg:flex-row gap-8">
-        {/* 侧边栏 */}
-        {showSidebar && (
-          <aside className="lg:w-1/4">
-            <h2 className="text-lg font-semibold text-foreground mb-4">分类</h2>
-            <ul className="space-y-1">
-              <li>
-                <Link
-                  href={`/${locale}/blogs`}
-                  className={`block px-3 py-2 rounded-md text-sm ${
-                    !currentCategorySlug
-                      ? 'bg-primary/10 text-primary font-medium'
-                      : 'text-foreground hover:bg-accent'
-                  }`}
-                >
-                  全部
-                </Link>
-              </li>
-              {categories.map((cat) => (
-                <li key={cat.slug}>
-                  <Link
-                    href={`/${locale}/blogs/${cat.slug}`}
-                    className={`block px-3 py-2 rounded-md text-sm ${
-                      currentCategorySlug === cat.slug
-                        ? 'bg-primary/10 text-primary font-medium'
-                        : 'text-foreground hover:bg-accent'
-                    }`}
-                  >
-                    {cat.name}
-                  </Link>
-                </li>
-              ))}
-            </ul>
-          </aside>
-        )}
+  const truncateExcerpt = (text: string) => {
+    if (!text) return '';
+    return text.length > 200 ? text.slice(0, 200) + '...' : text;
+  };
 
-        {/* 文章列表 */}
-        <main className={showSidebar ? 'flex-1' : 'w-full'}>
-          <h1 className="text-3xl font-bold text-foreground mb-8">博客</h1>
+  return (
+    <div
+      className="mx-auto"
+      style={{
+        backgroundColor: containerBg,
+        color: containerText,
+        paddingLeft: 'var(--spacing-4, 1rem)',
+        paddingRight: 'var(--spacing-4, 1rem)',
+        paddingTop: 'var(--spacing-8, 2rem)',
+        paddingBottom: 'var(--spacing-8, 2rem)',
+        marginBottom: marginBottom,
+        maxWidth: '80rem',
+      }}
+    >
+      <div
+        className="flex flex-col lg:flex-row"
+        style={{ gap: 'var(--spacing-8, 2rem)' }}
+      >
+        <main className="w-full">
+          <h1
+            style={{
+              fontSize: 'var(--font-size-3xl, 1.875rem)',
+              fontWeight: 'var(--font-weight-bold, 700)',
+              color: titleColor,
+              marginBottom: 'var(--spacing-8, 2rem)',
+            }}
+          >
+            {currentCategoryName}
+          </h1>
+
           {posts.length === 0 ? (
-            <p className="text-muted-foreground">暂无文章</p>
+            <p style={{ color: 'var(--muted-foreground, #64748b)' }}>{t('noPosts')}</p>
           ) : (
-            <div className="space-y-8">
-              {posts.map((post) => {
-                const rawImageUrl = post.image || '';
-                const processedImageUrl = getProcessedImageUrl(rawImageUrl);
-                return (
-                  <article
-                    key={post.slug}
-                    className="flex flex-col md:flex-row gap-6 border-b border-border pb-8"
-                  >
-                    {/* 图片区域 */}
-                    {rawImageUrl && (
-                      <div className="md:w-1/4 flex-shrink-0">
-                        <Link href={`${basePath}/${post.slug}`} className="block overflow-hidden rounded-lg">
-                          <div className="relative aspect-video w-full">
-                            <img
-                              src={processedImageUrl}
-                              alt={post.title}
-                              className="w-full h-full object-cover transition-transform hover:scale-105"
-                              data-original-src={rawImageUrl}
-                              onError={handleImageError}
-                              loading="lazy"
-                            />
-                          </div>
-                        </Link>
-                      </div>
-                    )}
-                    {/* 内容区域 */}
-                    <div className={rawImageUrl ? 'flex-1' : 'w-full'}>
-                      <Link href={`${basePath}/${post.slug}`}>
-                        <h2 className="text-2xl font-semibold text-foreground hover:text-primary transition-colors line-clamp-2">
-                          {post.title}
-                        </h2>
-                      </Link>
-                      <div className="text-sm text-muted-foreground mt-2">
-                        {new Date(post.date).toLocaleDateString(locale)}
-                        {post.author && <span className="ml-4">作者：{post.author}</span>}
-                      </div>
-                      {post.excerpt && (
-                        <p className="mt-2 text-muted-foreground line-clamp-3">{post.excerpt}</p>
+            <>
+              <div
+                style={{
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: 'var(--spacing-8, 2rem)',
+                }}
+              >
+                {currentPosts.map((post: BlogPost, index: number) => {
+                  const rawImageUrl = post.image || '';
+                  const processedImageUrl = getProcessedImageUrl(rawImageUrl);
+                  const displayExcerpt = truncateExcerpt(post.excerpt || '');
+                  const isLast = index === currentPosts.length - 1;
+
+                  return (
+                    <article
+                      key={post.slug}
+                      className="flex flex-col md:flex-row"
+                      style={{
+                        gap: 'var(--spacing-6, 1.5rem)',
+                        paddingBottom: isLast ? 0 : 'var(--spacing-8, 2rem)',
+                        borderBottom: isLast ? 'none' : `1px solid ${cardBorder}`,
+                      }}
+                    >
+                      {rawImageUrl && (
+                        <div className="md:w-1/3 flex-shrink-0">
+                          <Link
+                            href={`/${locale}/blog/${post.slug}`}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="block overflow-hidden"
+                            style={{ borderRadius: imageRadius }}
+                          >
+                            <div className="relative aspect-video w-full">
+                              <img
+                                src={processedImageUrl}
+                                alt={post.title}
+                                className="w-full h-full object-cover transition-transform hover:scale-105"
+                                data-original-src={rawImageUrl}
+                                onError={handleImageError}
+                                loading="lazy"
+                              />
+                            </div>
+                          </Link>
+                        </div>
                       )}
-                    </div>
-                  </article>
-                );
-              })}
-            </div>
+
+                      <div className={rawImageUrl ? 'flex-1' : 'w-full'}>
+                        <Link
+                          href={`/${locale}/blog/${post.slug}`}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                        >
+                          <h2
+                            className="line-clamp-2"
+                            style={{
+                              fontSize: 'var(--font-size-2xl, 1.5rem)',
+                              fontWeight: 'var(--font-weight-semibold, 600)',
+                              color: postTitleColor,
+                              transition: COLOR_TRANSITION,
+                            }}
+                            onMouseEnter={(e) => {
+                              e.currentTarget.style.color = postTitleHover;
+                            }}
+                            onMouseLeave={(e) => {
+                              e.currentTarget.style.color = postTitleColor;
+                            }}
+                          >
+                            {post.title}
+                          </h2>
+                        </Link>
+
+                        <div
+                          style={{
+                            fontSize: 'var(--font-size-sm, 0.875rem)',
+                            color: postMetaColor,
+                            marginTop: 'var(--spacing-2, 0.5rem)',
+                          }}
+                        >
+                          {new Date(post.date).toLocaleDateString(locale)}
+                        </div>
+
+                        {displayExcerpt && (
+                          <p
+                            className="line-clamp-3"
+                            style={{
+                              color: postExcerptColor,
+                              marginTop: 'var(--spacing-2, 0.5rem)',
+                            }}
+                          >
+                            {displayExcerpt}
+                          </p>
+                        )}
+                      </div>
+                    </article>
+                  );
+                })}
+              </div>
+
+              {totalPages > 1 && (
+                <div
+                  className="flex justify-center items-center"
+                  style={{
+                    gap: 'var(--spacing-4, 1rem)',
+                    marginTop: 'var(--spacing-8, 2rem)',
+                  }}
+                >
+                  <button
+                    onClick={handlePrevPage}
+                    disabled={page === 1}
+                    className="border rounded-md"
+                    style={{
+                      paddingLeft: 'var(--spacing-4, 1rem)',
+                      paddingRight: 'var(--spacing-4, 1rem)',
+                      paddingTop: 'var(--spacing-2, 0.5rem)',
+                      paddingBottom: 'var(--spacing-2, 0.5rem)',
+                      borderRadius: 'var(--radius-md, 0.625rem)',
+                      backgroundColor: paginationBg,
+                      color: paginationText,
+                      borderColor: paginationBorder,
+                      opacity: page === 1 ? paginationDisabledOpacity : 1,
+                      cursor: page === 1 ? 'not-allowed' : 'pointer',
+                      transition: BG_COLOR_TRANSITION,
+                    }}
+                    onMouseEnter={(e) => {
+                      if (page > 1) {
+                        e.currentTarget.style.backgroundColor = paginationHoverBg;
+                      }
+                    }}
+                    onMouseLeave={(e) => {
+                      if (page > 1) {
+                        e.currentTarget.style.backgroundColor = paginationBg;
+                      }
+                    }}
+                  >
+                    {t('prev') || '上一页'}
+                  </button>
+                  <span
+                    style={{
+                      fontSize: 'var(--font-size-sm, 0.875rem)',
+                      color: paginationText,
+                    }}
+                  >
+                    {t('page') || '第'} {page} / {totalPages} {t('of') || '页'}
+                  </span>
+                  <button
+                    onClick={handleNextPage}
+                    disabled={page === totalPages}
+                    className="border rounded-md"
+                    style={{
+                      paddingLeft: 'var(--spacing-4, 1rem)',
+                      paddingRight: 'var(--spacing-4, 1rem)',
+                      paddingTop: 'var(--spacing-2, 0.5rem)',
+                      paddingBottom: 'var(--spacing-2, 0.5rem)',
+                      borderRadius: 'var(--radius-md, 0.625rem)',
+                      backgroundColor: paginationBg,
+                      color: paginationText,
+                      borderColor: paginationBorder,
+                      opacity: page === totalPages ? paginationDisabledOpacity : 1,
+                      cursor: page === totalPages ? 'not-allowed' : 'pointer',
+                      transition: BG_COLOR_TRANSITION,
+                    }}
+                    onMouseEnter={(e) => {
+                      if (page < totalPages) {
+                        e.currentTarget.style.backgroundColor = paginationHoverBg;
+                      }
+                    }}
+                    onMouseLeave={(e) => {
+                      if (page < totalPages) {
+                        e.currentTarget.style.backgroundColor = paginationBg;
+                      }
+                    }}
+                  >
+                    {t('next') || '下一页'}
+                  </button>
+                </div>
+              )}
+            </>
           )}
         </main>
       </div>

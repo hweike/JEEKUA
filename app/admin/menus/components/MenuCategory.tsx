@@ -18,6 +18,8 @@ interface MenuCategoryProps {
   type: 'navigation' | 'footer' | 'custom';
   onInit?: (locale: string, menuType: 'navigation' | 'footer') => void;
   onDelete?: (locale: string, menuId: string) => void;
+  onClear?: (locale: string, menuType: 'navigation' | 'footer') => void;
+  onAiTranslate?: (locale: string, menuType: 'navigation' | 'footer' | 'custom_menus', menuId?: string) => void;
   initLoading?: { type: string; locale: string; loading: boolean } | null;
   availableLocales: string[];
   onRefresh: () => void;
@@ -34,6 +36,8 @@ export default function MenuCategory({
   type,
   onInit,
   onDelete,
+  onClear,
+  onAiTranslate,
   initLoading,
   availableLocales,
   onRefresh,
@@ -42,12 +46,104 @@ export default function MenuCategory({
 
   const toggleCollapse = () => setCollapsed(!collapsed);
 
-  const hasData = entries.some((entry) => {
+  // 根据类型计算语言数量（只统计有数据的语言）
+  const languageCount = type === 'custom'
+    ? new Set(
+        entries
+          .filter((entry) => entry.menu)
+          .map((entry) => entry.locale)
+      ).size
+    : entries.filter((entry) => entry.locale).length;
+
+  const renderEntries = () => {
     if (type === 'custom') {
-      return entry.menus && entry.menus.length > 0;
+      // 按 locale 分组，只处理有 menu 的条目
+      const grouped: Record<string, any[]> = {};
+      
+      for (const entry of entries) {
+        if (entry.menu) {
+          if (!grouped[entry.locale]) grouped[entry.locale] = [];
+          grouped[entry.locale].push(entry.menu);
+        }
+      }
+
+      const sortedLocales = Object.keys(grouped).sort();
+
+      // 如果没有有数据的语言，显示提示
+      if (sortedLocales.length === 0) {
+        return <p className="text-gray-400 text-sm">暂无自定义菜单数据</p>;
+      }
+
+      return (
+        <div className="space-y-3">
+          {sortedLocales.map((locale) => {
+            const menus = grouped[locale];
+            const showAiTranslate = (locale === 'zh' || locale === 'en') && onAiTranslate;
+            const lang = LANGUAGES.find(l => l.code === locale);
+            const displayName = lang ? `${lang.zhName}站` : locale.toUpperCase();
+
+            return (
+              <div key={locale} className="border-b border-gray-100 last:border-0 pb-2 last:pb-0">
+                <div className="flex items-center justify-between mb-1">
+                  <div className="text-sm font-bold text-gray-700">{displayName}</div>
+                  {showAiTranslate && (
+                    <button
+                      onClick={() => onAiTranslate?.(locale, 'custom_menus')}
+                      className="text-purple-600 hover:text-purple-800 text-xs px-2 py-0.5 rounded border border-purple-200 hover:bg-purple-50 transition"
+                    >
+                      🤖 AI翻译
+                    </button>
+                  )}
+                </div>
+                <div className="space-y-2 pl-2">
+                  {menus.map((menu) => (
+                    <MenuEntry
+                      key={menu.id}
+                      locale={locale}
+                      menu={menu}
+                      type="custom"
+                      onDelete={onDelete}
+                      availableLocales={availableLocales}
+                      onRefresh={onRefresh}
+                    />
+                  ))}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      );
+    } else {
+      // navigation 或 footer：每个 entry 是一个语言一个菜单
+      return (
+        <div className="space-y-3">
+          {entries.map((entry) => {
+            const menu = entry.menu;
+            const isLoading =
+              initLoading?.type === type &&
+              initLoading.locale === entry.locale &&
+              initLoading.loading;
+
+            return (
+              <MenuEntry
+                key={entry.locale}
+                locale={entry.locale}
+                menu={menu}
+                type={type}
+                onInit={onInit}
+                onDelete={onDelete}
+                onClear={onClear}
+                onAiTranslate={onAiTranslate}
+                isLoading={isLoading}
+                availableLocales={availableLocales}
+                onRefresh={onRefresh}
+              />
+            );
+          })}
+        </div>
+      );
     }
-    return entry.menu !== null;
-  });
+  };
 
   return (
     <div className="bg-white rounded-lg shadow-sm border border-gray-200 overflow-hidden">
@@ -57,10 +153,9 @@ export default function MenuCategory({
       >
         <div className="flex items-center gap-3">
           <h2 className="text-lg font-semibold text-gray-800">{title}</h2>
-          <span className="text-sm text-gray-400">
-            ({entries.filter(e => e.locale).length} 个语言)
-          </span>
-          {!hasData && <span className="text-xs text-gray-400 ml-2">(暂无数据)</span>}
+          {languageCount > 0 && (
+            <span className="text-sm text-gray-400">({languageCount} 个语言)</span>
+          )}
         </div>
         <button className="p-1 rounded-full hover:bg-gray-200">
           {collapsed ? <ChevronRight className="w-5 h-5" /> : <ChevronDown className="w-5 h-5" />}
@@ -72,57 +167,7 @@ export default function MenuCategory({
           {entries.length === 0 ? (
             <p className="text-gray-400 text-sm">未找到任何语言配置</p>
           ) : (
-            <div className="space-y-3">
-              {entries.map((entry) => {
-                if (type === 'custom') {
-                  return entry.menus && entry.menus.length > 0 ? (
-                    <div key={entry.locale} className="border-b border-gray-100 last:border-0 pb-2 last:pb-0">
-                      <div className="text-sm font-medium text-gray-600 mb-1">
-                        {getLocaleDisplay(entry.locale)}
-                      </div>
-                      <div className="space-y-2 pl-2">
-                        {entry.menus.map((menu) => (
-                          <MenuEntry
-                            key={menu.id}
-                            locale={entry.locale}
-                            menu={menu}
-                            type="custom"
-                            onDelete={onDelete}
-                            availableLocales={availableLocales}
-                            onRefresh={onRefresh}
-                          />
-                        ))}
-                      </div>
-                    </div>
-                  ) : (
-                    <div key={entry.locale} className="border-b border-gray-100 last:border-0 pb-2 last:pb-0">
-                      <div className="text-sm font-medium text-gray-600 mb-1">
-                        {getLocaleDisplay(entry.locale)}
-                      </div>
-                      <p className="text-xs text-gray-400 pl-2">暂无自定义菜单</p>
-                    </div>
-                  );
-                } else {
-                  const menu = entry.menu;
-                  const isLoading =
-                    initLoading?.type === type &&
-                    initLoading.locale === entry.locale &&
-                    initLoading.loading;
-                  return (
-                    <MenuEntry
-                      key={entry.locale}
-                      locale={entry.locale}
-                      menu={menu}
-                      type={type}
-                      onInit={onInit}
-                      isLoading={isLoading}
-                      availableLocales={availableLocales}
-                      onRefresh={onRefresh}
-                    />
-                  );
-                }
-              })}
-            </div>
+            renderEntries()
           )}
         </div>
       )}

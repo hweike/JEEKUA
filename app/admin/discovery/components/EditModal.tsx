@@ -15,8 +15,9 @@ import {
 } from 'lucide-react';
 import { StatusBadge } from './StatusBadge';
 import { SeoScoreCard } from './SeoScoreCard';
-import { calculateSeoScore } from '@/lib/seo/utils/score';
+import { calculateSeoScore, getWeightedLength } from '@/lib/seo/utils/score';
 import type { SeoScoreResult } from '@/lib/seo/types';
+import { DEFAULT_SEO_LIMITS } from '@/lib/seo/constants';
 
 // =====================================================
 // 类型定义
@@ -106,10 +107,10 @@ export function EditModal({
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
   const [keywords, setKeywords] = useState('');
-  const [selectedLocales, setSelectedLocales] = useState<string[]>([]);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [isGenerating, setIsGenerating] = useState(false);
   const [isApproving, setIsApproving] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
 
@@ -127,15 +128,41 @@ export function EditModal({
     }
   }, [seoData]);
 
-  // 默认选中当前页面的语言
+  // ============================================================
+  // 🔍 调试日志：监控数据变化
+  // ============================================================
   useEffect(() => {
-    if (page && languages.length > 0) {
-      const defaultLocale = page.locale || languages[0]?.code || 'en';
-      if (!selectedLocales.includes(defaultLocale)) {
-        setSelectedLocales([defaultLocale]);
+    console.log('========================================');
+    console.log('🔍 [EditModal] 调试日志');
+    console.log('========================================');
+    console.log('📝 description 原始文本:', description);
+    console.log('📊 description.length (原始长度):', description.length);
+    
+    const weightedLen = getWeightedLength(description);
+    console.log('📊 getWeightedLength(description):', weightedLen);
+    
+    // 逐字符分析
+    console.log('🔤 字符分析:');
+    let weightedTotal = 0;
+    for (let i = 0; i < description.length; i++) {
+      const char = description[i];
+      const code = char.charCodeAt(0);
+      const isLatin = (code >= 0x0020 && code <= 0x007F) || 
+                      (code >= 0x00C0 && code <= 0x00FF) ||
+                      (code >= 0x0100 && code <= 0x017F) ||
+                      (code >= 0x0180 && code <= 0x024F) ||
+                      (code >= 0x1E00 && code <= 0x1EFF);
+      const weight = isLatin ? 1 : 2;
+      weightedTotal += weight;
+      if (i < 20) { // 只显示前20个字符
+        console.log(`  字符[${i}]: '${char}' (U+${code.toString(16).toUpperCase()}) → ${weight} 字符`);
       }
     }
-  }, [page, languages]);
+    console.log('📊 手动计算加权总长度:', weightedTotal);
+    console.log('📊 getWeightedLength 返回:', weightedLen);
+    console.log('✅ 两者是否一致:', weightedTotal === weightedLen ? '✅ 是' : '❌ 否');
+    console.log('========================================');
+  }, [description]);
 
   // ========== 加载已发布数据 ==========
   const loadPublishedData = async () => {
@@ -170,21 +197,23 @@ export function EditModal({
     setError(null);
   };
 
-  // ========== 实时评分（基于草稿数据） ==========
+  // ========== 实时评分 ==========
   const strategy = strategies.find((s) => s.page_type === page?.type);
   const titleConfig = strategy?.fields?.seo_title;
   const descConfig = strategy?.fields?.seo_description;
   const keywordConfig = strategy?.fields?.seo_keywords;
 
+  // 使用 DEFAULT_SEO_LIMITS 作为回退值
   const seoConfig = {
-    titleMinLength: titleConfig?.minLength || 30,
-    titleMaxLength: titleConfig?.maxLength || 60,
-    descMinLength: descConfig?.minLength || 80,
-    descMaxLength: descConfig?.maxLength || 160,
-    keywordMinCount: keywordConfig?.minCount || 2,
-    keywordMaxCount: keywordConfig?.maxCount || 5,
+    titleMinLength: titleConfig?.minLength ?? DEFAULT_SEO_LIMITS.seo_title.min,
+    titleMaxLength: titleConfig?.maxLength ?? DEFAULT_SEO_LIMITS.seo_title.max,
+    descMinLength: descConfig?.minLength ?? DEFAULT_SEO_LIMITS.seo_description.min,
+    descMaxLength: descConfig?.maxLength ?? DEFAULT_SEO_LIMITS.seo_description.max,
+    keywordMinCount: keywordConfig?.minCount ?? DEFAULT_SEO_LIMITS.seo_keywords.minCount,
+    keywordMaxCount: keywordConfig?.maxCount ?? DEFAULT_SEO_LIMITS.seo_keywords.maxCount,
   };
 
+  // ✅ 计算评分（score.ts 内部已处理字符加权）
   const currentScore = useMemo<SeoScoreResult | null>(() => {
     if (!seoData) return null;
 
@@ -196,19 +225,39 @@ export function EditModal({
       return null;
     }
 
-    return calculateSeoScore(
+    const result = calculateSeoScore(
       title,
       description,
       keywordsArray,
       [],
       seoConfig
     );
+
+    // 🔍 调试日志：评分计算
+    console.log('🔍 [评分计算]');
+    console.log('  description:', description);
+    console.log('  seoConfig.descMinLength:', seoConfig.descMinLength);
+    console.log('  seoConfig.descMaxLength:', seoConfig.descMaxLength);
+    console.log('  result dimensions:', result?.dimensions);
+
+    return result;
   }, [title, description, keywords, seoConfig]);
 
   if (!page || !seoData) return null;
 
-  const titleLength = title.length;
-  const descLength = description.length;
+  // ✅ 使用加权长度计算字符数
+  const titleWeightedLen = getWeightedLength(title);
+  const descWeightedLen = getWeightedLength(description);
+  const titleRawLen = title.length;
+  const descRawLen = description.length;
+
+  // 🔍 调试日志：显示长度
+  console.log('🔍 [渲染] descWeightedLen:', descWeightedLen, 'descRawLen:', descRawLen);
+
+  // 显示长度范围
+  const titleRangeLabel = `${seoConfig.titleMinLength}-${seoConfig.titleMaxLength}`;
+  const descRangeLabel = `${seoConfig.descMinLength}-${seoConfig.descMaxLength}`;
+  const keywordRangeLabel = `${seoConfig.keywordMinCount}-${seoConfig.keywordMaxCount}`;
 
   const getStatusColor = (status: GenerationStatus) => {
     const colors: Record<GenerationStatus, string> = {
@@ -230,19 +279,24 @@ export function EditModal({
     return labels[status] || status;
   };
 
+  // ✅ 保存草稿
   const handleSave = async () => {
     setError(null);
     setSuccess(null);
+    setIsSaving(true);
     try {
       await onSave({
         seo_title: title || undefined,
         seo_description: description || undefined,
         seo_keywords: keywords ? keywords.split(',').map((k) => k.trim()).filter(Boolean) : undefined,
       });
-      setSuccess('草稿保存成功');
-      setTimeout(() => setSuccess(null), 3000);
+      setSuccess('✅ 草稿保存成功');
+      setTimeout(() => setSuccess(null), 6000);
     } catch (err) {
       setError(err instanceof Error ? err.message : '保存失败');
+      setTimeout(() => setError(null), 6000);
+    } finally {
+      setIsSaving(false);
     }
   };
 
@@ -252,61 +306,52 @@ export function EditModal({
     setSuccess(null);
     try {
       await onAnalyze();
-      setSuccess('内容分析完成');
-      setTimeout(() => setSuccess(null), 3000);
+      setSuccess('✅ 内容分析完成');
+      setTimeout(() => setSuccess(null), 6000);
     } catch (err) {
       setError(err instanceof Error ? err.message : '分析失败');
+      setTimeout(() => setError(null), 6000);
     } finally {
       setIsAnalyzing(false);
     }
   };
 
   const handleGenerate = async () => {
-    if (selectedLocales.length === 0) {
-      setError('请至少选择一个目标语言');
-      return;
-    }
+    if (!page) return;
     setIsGenerating(true);
     setError(null);
     setSuccess(null);
     try {
-      await onGenerate(selectedLocales);
-      setSuccess('AI 生成完成');
-      setTimeout(() => setSuccess(null), 3000);
+      await onGenerate([page.locale]);
+      setSuccess('✅ AI 生成完成');
+      setTimeout(() => setSuccess(null), 6000);
     } catch (err) {
       setError(err instanceof Error ? err.message : '生成失败');
+      setTimeout(() => setError(null), 6000);
     } finally {
       setIsGenerating(false);
     }
   };
 
-  // ✅ 修改：确认发布时，先保存草稿，再发布
   const handleApprove = async () => {
     setIsApproving(true);
     setError(null);
     setSuccess(null);
     try {
-      // 1. 先保存草稿（使用当前编辑框的值）
       await onSave({
         seo_title: title || undefined,
         seo_description: description || undefined,
         seo_keywords: keywords ? keywords.split(',').map((k) => k.trim()).filter(Boolean) : undefined,
       });
-      // 2. 再确认发布
       await onApprove();
-      setSuccess('已确认发布');
-      setTimeout(() => setSuccess(null), 3000);
+      setSuccess('✅ 已确认发布！');
+      setTimeout(() => setSuccess(null), 6000);
     } catch (err) {
       setError(err instanceof Error ? err.message : '保存或发布失败');
+      setTimeout(() => setError(null), 6000);
     } finally {
       setIsApproving(false);
     }
-  };
-
-  const toggleLocale = (locale: string) => {
-    setSelectedLocales((prev) =>
-      prev.includes(locale) ? prev.filter((l) => l !== locale) : [...prev, locale]
-    );
   };
 
   // ============================================================
@@ -314,7 +359,7 @@ export function EditModal({
   // ============================================================
   if (isPreview) {
     return (
-      <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+      <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[100]">
         <div className="bg-white rounded-lg shadow-xl w-full max-w-4xl max-h-[90vh] overflow-y-auto">
           {/* 头部 */}
           <div className="sticky top-0 z-10 flex justify-between items-center p-4 border-b bg-white rounded-t-lg">
@@ -414,7 +459,7 @@ export function EditModal({
   // 渲染：编辑模式
   // ============================================================
   return (
-    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[100]">
       <div className="bg-white rounded-lg shadow-xl w-full max-w-4xl max-h-[90vh] overflow-y-auto">
         {/* 头部 */}
         <div className="sticky top-0 z-10 flex justify-between items-center p-4 border-b bg-white rounded-t-lg">
@@ -439,7 +484,7 @@ export function EditModal({
           </button>
         </div>
 
-        {/* ✅ 查看已发布数据链接 */}
+        {/* 查看已发布数据链接 */}
         <div className="px-6 pt-4">
           <button
             onClick={handleShowPreview}
@@ -464,9 +509,9 @@ export function EditModal({
           </div>
         )}
         {success && (
-          <div className="mx-6 mt-4 p-3 bg-green-50 border border-green-200 rounded-lg text-green-700 flex items-center gap-2">
+          <div className="mx-6 mt-4 p-3 bg-green-50 border border-green-200 rounded-lg text-green-700 flex items-center gap-2 shadow-sm">
             <CheckCircle className="w-5 h-5 flex-shrink-0" />
-            <span className="text-sm">{success}</span>
+            <span className="text-sm font-medium">{success}</span>
           </div>
         )}
 
@@ -520,16 +565,21 @@ export function EditModal({
             </div>
           </div>
 
-          {/* ========== AI 多语言生成 ========== */}
+          {/* ========== AI 生成 ========== */}
           <div className="border rounded-lg p-4 bg-purple-50 border-purple-200">
-            <div className="flex items-center justify-between mb-3">
-              <h3 className="font-medium flex items-center gap-2 text-purple-700">
-                <Sparkles className="w-4 h-4" />
-                AI 多语言生成
-              </h3>
+            <div className="flex items-center justify-between">
+              <div>
+                <h3 className="font-medium flex items-center gap-2 text-purple-700">
+                  <Sparkles className="w-4 h-4" />
+                  AI 生成 SEO
+                </h3>
+                <p className="text-xs text-gray-500 mt-0.5">
+                  为当前页面（{page.locale}）生成 SEO 标题、描述和关键词
+                </p>
+              </div>
               <button
                 onClick={handleGenerate}
-                disabled={isGenerating || loading || selectedLocales.length === 0}
+                disabled={isGenerating || loading}
                 className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-purple-600 text-white text-sm rounded-lg hover:bg-purple-700 disabled:opacity-50 transition-colors"
               >
                 {isGenerating ? (
@@ -540,28 +590,6 @@ export function EditModal({
                 {isGenerating ? '生成中...' : 'AI 生成'}
               </button>
             </div>
-            <div className="flex flex-wrap gap-2">
-              {languages.map((lang) => (
-                <label
-                  key={lang.code}
-                  className="inline-flex items-center gap-1.5 text-sm cursor-pointer"
-                >
-                  <input
-                    type="checkbox"
-                    checked={selectedLocales.includes(lang.code)}
-                    onChange={() => toggleLocale(lang.code)}
-                    className="rounded border-gray-300 text-purple-600 focus:ring-purple-500"
-                  />
-                  {lang.zhName || lang.nativeName} ({lang.code})
-                </label>
-              ))}
-            </div>
-            {selectedLocales.length === 0 && (
-              <p className="text-xs text-amber-600 mt-2">请至少选择一个目标语言</p>
-            )}
-            {seoData.source_locale && (
-              <p className="text-xs text-gray-500 mt-2">基于源语言: {seoData.source_locale}</p>
-            )}
           </div>
 
           {/* ========== SEO 字段编辑 ========== */}
@@ -573,16 +601,20 @@ export function EditModal({
                   {titleConfig?.required && <span className="text-red-500 ml-1">*</span>}
                   {titleConfig && (
                     <span className="text-xs text-gray-400 ml-2 font-normal">
-                      ({titleConfig.minLength || 0}-{titleConfig.maxLength || 0} 字符)
+                      ({titleRangeLabel} 字符)
                     </span>
                   )}
                 </label>
+                {/* ✅ 显示加权长度 */}
                 <span
                   className={`text-xs ${
-                    titleLength > (titleConfig?.maxLength || 60) ? 'text-red-500' : 'text-gray-400'
+                    titleWeightedLen > seoConfig.titleMaxLength ? 'text-red-500' : 'text-gray-400'
                   }`}
                 >
-                  {titleLength} 字符
+                  {titleWeightedLen} 字符
+                  {titleRawLen !== titleWeightedLen && (
+                    <span className="text-gray-400 ml-1">（原始 {titleRawLen}）</span>
+                  )}
                 </span>
               </div>
               <input
@@ -601,16 +633,20 @@ export function EditModal({
                   {descConfig?.required && <span className="text-red-500 ml-1">*</span>}
                   {descConfig && (
                     <span className="text-xs text-gray-400 ml-2 font-normal">
-                      ({descConfig.minLength || 0}-{descConfig.maxLength || 0} 字符)
+                      ({descRangeLabel} 字符)
                     </span>
                   )}
                 </label>
+                {/* ✅ 显示加权长度 */}
                 <span
                   className={`text-xs ${
-                    descLength > (descConfig?.maxLength || 160) ? 'text-red-500' : 'text-gray-400'
+                    descWeightedLen > seoConfig.descMaxLength ? 'text-red-500' : 'text-gray-400'
                   }`}
                 >
-                  {descLength} 字符
+                  {descWeightedLen} 字符
+                  {descRawLen !== descWeightedLen && (
+                    <span className="text-gray-400 ml-1">（原始 {descRawLen}）</span>
+                  )}
                 </span>
               </div>
               <textarea
@@ -629,7 +665,7 @@ export function EditModal({
                   {keywordConfig?.required && <span className="text-red-500 ml-1">*</span>}
                   {keywordConfig && (
                     <span className="text-xs text-gray-400 ml-2 font-normal">
-                      ({keywordConfig.minCount || 1}-{keywordConfig.maxCount || 5} 个)
+                      ({keywordRangeLabel} 个)
                     </span>
                   )}
                 </label>
@@ -684,23 +720,37 @@ export function EditModal({
           </button>
           <button
             onClick={handleSave}
-            disabled={loading}
-            className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 transition-colors flex items-center gap-2"
+            disabled={loading || isSaving}
+            className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 transition-colors flex items-center gap-2 min-w-[120px] justify-center"
           >
-            <Save className="w-4 h-4" />
-            保存草稿
+            {isSaving ? (
+              <>
+                <Loader2 className="w-4 h-4 animate-spin" />
+                保存中...
+              </>
+            ) : (
+              <>
+                <Save className="w-4 h-4" />
+                保存草稿
+              </>
+            )}
           </button>
           <button
             onClick={handleApprove}
             disabled={loading || isApproving}
-            className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:opacity-50 transition-colors flex items-center gap-2"
+            className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:opacity-50 transition-colors flex items-center gap-2 min-w-[120px] justify-center"
           >
             {isApproving ? (
-              <Loader2 className="w-4 h-4 animate-spin" />
+              <>
+                <Loader2 className="w-4 h-4 animate-spin" />
+                发布中...
+              </>
             ) : (
-              <CheckCircle className="w-4 h-4" />
+              <>
+                <CheckCircle className="w-4 h-4" />
+                确认发布
+              </>
             )}
-            确认发布
           </button>
         </div>
       </div>

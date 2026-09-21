@@ -2,8 +2,9 @@
 
 import Link from 'next/link';
 import { useLocale } from 'next-intl';
+import { useState } from 'react';
 import { HeaderConfig } from '@/lib/config-loader';
-import { getImageUrl } from '@/lib/files/url'; // 公共函数
+import { getImageUrl } from '@/lib/files/url';
 
 interface LogoProps {
   logoConfig: HeaderConfig['logo'];
@@ -15,7 +16,8 @@ export default function Logo({ logoConfig, siteName }: LogoProps) {
   const homeUrl = `/${locale}`;
   const logoSrc = logoConfig.imageUrl;
   const width = logoConfig.width || 120;
-  
+  const [imageError, setImageError] = useState(false);
+
   // 根据位置设置对齐类
   const positionClass = {
     left: 'justify-start',
@@ -23,38 +25,37 @@ export default function Logo({ logoConfig, siteName }: LogoProps) {
     right: 'justify-end',
     'middle-left': 'justify-start',
     'middle-right': 'justify-end',
+    'middle-center': 'justify-center',
+    'top-center': 'justify-center',
   }[logoConfig.position] || 'justify-start';
-  
+
   const mobilePositionClass = {
     left: 'justify-start',
     center: 'justify-center',
     right: 'justify-end',
   }[logoConfig.mobilePosition] || 'justify-start';
-  
+
+  // ✅ 文字样式（从主题变量读取，带 fallback）
+  const textStyle: React.CSSProperties = {
+    fontSize: 'var(--font-size-xl, 1.25rem)',
+    fontWeight: 'var(--font-weight-semibold, 600)',
+    color: 'var(--navbar-text, var(--foreground, #0f172a))',
+  };
+
   return (
-    <div className={`flex ${positionClass} md:${mobilePositionClass} items-center`}>
+    <div className={`flex ${positionClass} items-center`}>
       <Link href={homeUrl} className="flex items-center">
-        {logoSrc ? (
-          <img 
-            src={getImageUrl(logoSrc)} // 使用公共函数转换
-            alt={siteName} 
-            width={width} 
+        {logoSrc && !imageError ? (
+          <img
+            src={getImageUrl(logoSrc)}
+            alt={siteName}
+            width={width}
             height="auto"
             className="h-auto object-contain"
-            onError={(e) => {
-              // 图片加载失败时隐藏图片并显示文本
-              e.currentTarget.style.display = 'none';
-              const parent = e.currentTarget.parentElement;
-              if (parent) {
-                const fallbackSpan = document.createElement('span');
-                fallbackSpan.className = 'text-xl font-semibold';
-                fallbackSpan.textContent = siteName;
-                parent.appendChild(fallbackSpan);
-              }
-            }}
+            onError={() => setImageError(true)}
           />
         ) : (
-          <span className="text-xl font-semibold">{siteName}</span>
+          <span style={textStyle}>{siteName}</span>
         )}
       </Link>
     </div>

@@ -6,6 +6,12 @@ import { getImageUrl } from '@/lib/files/url';
 import { DEFAULT_ACCORDION } from '@/lib/webbuilder/defaults/Accordion';
 import { getAltSuffix } from '@/lib/webbuilder/alt-suffix-config';
 
+// ✅ 动画参数（硬编码）
+const ANIMATION_DURATION_MS = 600;
+const ANIMATION_DELAY_STEP_MS = 100;
+// ✅ 展开内容动画时长
+const CONTENT_EXPAND_DURATION_MS = 300;
+
 function getDisplayImageUrl(url: string, isEditMode: boolean): string {
   if (!url) return '';
   const fullUrl = getImageUrl(url);
@@ -26,6 +32,8 @@ export function Accordion(props: any) {
   const mergedPaddingGroup = { ...DEFAULT_ACCORDION.paddingGroup, ...props.paddingGroup };
   const mergedSpacingGroup = { ...DEFAULT_ACCORDION.spacingGroup, ...props.spacingGroup };
   const mergedItems = props.items ?? DEFAULT_ACCORDION.items;
+
+  const mergedBorderColor = props.borderColor ?? DEFAULT_ACCORDION.borderColor ?? '#e5e7eb';
 
   const mobileScaleFactor = DEFAULT_ACCORDION.spacingGroup.mobileScaleFactor;
 
@@ -50,7 +58,7 @@ export function Accordion(props: any) {
     paddingBottom,
   } = mergedPaddingGroup;
 
-  // 手风琴展开状态（编辑模式下默认展开第一个项目）
+  // 手风琴展开状态
   const [expandedIndex, setExpandedIndex] = useState<number | null>(() => {
     if (isEditMode && mergedItems.length > 0) {
       return 0;
@@ -67,7 +75,39 @@ export function Accordion(props: any) {
   const locale = __runtime.locale || 'zh';
   const suffix = getAltSuffix('Accordion', locale);
 
-  // 编辑联动：检测 items 变化，自动展开被编辑的项目
+  // ✅ 滚动进入动画状态
+  const containerRef = useRef<HTMLDivElement>(null);
+  const [visible, setVisible] = useState(false);
+
+  useEffect(() => {
+    if (isEditMode) {
+      setVisible(true);
+      return;
+    }
+
+    const el = containerRef.current;
+    if (!el) {
+      setVisible(true);
+      return;
+    }
+
+    const observer = new IntersectionObserver(
+      (entries) => {
+        entries.forEach((entry) => {
+          if (entry.isIntersecting) {
+            setVisible(true);
+            observer.unobserve(entry.target);
+          }
+        });
+      },
+      { threshold: 0.15 }
+    );
+
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [isEditMode]);
+
+  // 编辑联动
   useEffect(() => {
     if (!isEditMode || mergedItems.length === 0) return;
 
@@ -90,7 +130,6 @@ export function Accordion(props: any) {
     prevItemsRef.current = mergedItems;
   }, [isEditMode, mergedItems]);
 
-  // 当 items 长度变化但展开索引超出范围时，重置为 0
   useEffect(() => {
     if (isEditMode && mergedItems.length > 0) {
       if (expandedIndex === null || expandedIndex >= mergedItems.length) {
@@ -159,15 +198,33 @@ export function Accordion(props: any) {
     <div ref={props.puck?.dragRef} className={outerClasses} style={outerStyle}>
       <div className="relative w-full">
         <div style={contentStyle}>
-          <div className="space-y-4">
+          {/* ✅ 用 containerRef 监听进入视口 */}
+          <div className="space-y-4" ref={containerRef}>
             {mergedItems.map((item: any, idx: number) => {
               const titleText = item.title || `Accordion Title ${idx + 1}`;
               const contents = item.contents || [];
               const isExpanded = expandedIndex === idx;
 
+              // ✅ 每行的显示状态
+              const showThisItem = isEditMode || visible;
+
               return (
-                // ✅ 使用 id + 索引作为唯一 key
-                <div key={item.id ? `${item.id}-${idx}` : idx} className="border rounded-lg overflow-hidden">
+                <div
+                  key={item.id ? `${item.id}-${idx}` : idx}
+                  className="border rounded-lg overflow-hidden"
+                  style={{
+                    borderColor: mergedBorderColor,
+                    // ✅ 入场动画：从下方 24px + 透明 → 原位 + 不透明
+                    opacity: showThisItem ? 1 : 0,
+                    transform: showThisItem ? 'translateY(0)' : 'translateY(24px)',
+                    transition: `opacity ${ANIMATION_DURATION_MS}ms ease-out ${
+                      idx * ANIMATION_DELAY_STEP_MS
+                    }ms, transform ${ANIMATION_DURATION_MS}ms ease-out ${
+                      idx * ANIMATION_DELAY_STEP_MS
+                    }ms`,
+                    willChange: 'opacity, transform',
+                  }}
+                >
                   <div
                     className="flex items-center justify-between p-4 cursor-pointer transition hover:opacity-80"
                     style={{ backgroundColor: rowHeaderBgColor }}
@@ -188,81 +245,96 @@ export function Accordion(props: any) {
                     {isExpanded ? <ChevronDown size={20} /> : <ChevronRight size={20} />}
                   </div>
 
-                  {isExpanded && (
-                    <div className="p-6">
-                      {contents.length === 0 ? (
-                        <div className="text-center text-gray-400 py-8">
-                          暂无内容项，请在右侧属性面板中添加内容项
-                        </div>
-                      ) : (
-                        <div style={gridStyle}>
-                          {contents.map((content: any, cidx: number) => {
-                            const contentTitle = content.title || '';
-                            const paragraph = content.paragraph || '';
-                            const imageUrl = content.imageUrl || '';
-                            const link = content.link || '';
-                            const displayImageUrl = getDisplayImageUrl(imageUrl, isEditMode);
-                            const alt = seoTitle ? `${seoTitle} - ${suffix} ${idx + 1}-${cidx + 1}` : `${suffix} ${idx + 1}-${cidx + 1}`;
+                  {/* ✅ 展开内容：用 max-height + opacity 平滑过渡 */}
+                  <div
+                    style={{
+                      display: 'grid',
+                      gridTemplateRows: isExpanded ? '1fr' : '0fr',
+                      transition: `grid-template-rows ${CONTENT_EXPAND_DURATION_MS}ms ease-in-out`,
+                    }}
+                  >
+                    <div style={{ overflow: 'hidden' }}>
+                      <div
+                        className="p-6"
+                        style={{
+                          opacity: isExpanded ? 1 : 0,
+                          transition: `opacity ${CONTENT_EXPAND_DURATION_MS}ms ease-in-out`,
+                        }}
+                      >
+                        {contents.length === 0 ? (
+                          <div className="text-center text-gray-400 py-8">
+                            暂无内容项，请在右侧属性面板中添加内容项
+                          </div>
+                        ) : (
+                          <div style={gridStyle}>
+                            {contents.map((content: any, cidx: number) => {
+                              const contentTitle = content.title || '';
+                              const paragraph = content.paragraph || '';
+                              const imageUrl = content.imageUrl || '';
+                              const link = content.link || '';
+                              const displayImageUrl = getDisplayImageUrl(imageUrl, isEditMode);
+                              const alt = seoTitle ? `${seoTitle} - ${suffix} ${idx + 1}-${cidx + 1}` : `${suffix} ${idx + 1}-${cidx + 1}`;
 
-                            const WrapperTag = link ? 'a' : 'div';
-                            const wrapperProps = link
-                              ? { href: link, target: '_blank', rel: 'noopener noreferrer', className: 'block group' }
-                              : { className: 'block' };
+                              const WrapperTag = link ? 'a' : 'div';
+                              const wrapperProps = link
+                                ? { href: link, target: '_blank', rel: 'noopener noreferrer', className: 'block group' }
+                                : { className: 'block' };
 
-                            return (
-                              // ✅ 使用 id + 索引作为唯一 key
-                              <WrapperTag key={content.id ? `${content.id}-${cidx}` : cidx} {...wrapperProps}>
-                                <div className="flex flex-col items-center text-center">
-                                  {imageUrl && (
-                                    <div className="mb-4 overflow-hidden rounded-lg w-full">
-                                      <div className="relative w-full" style={{ aspectRatio: '16 / 9' }}>
-                                        {displayImageUrl ? (
-                                          <img
-                                            src={displayImageUrl}
-                                            alt={alt}
-                                            className="absolute inset-0 w-full h-full object-cover transition-transform group-hover:scale-105"
-                                            loading="lazy"
-                                          />
-                                        ) : (
-                                          <div className="absolute inset-0 flex items-center justify-center bg-gray-100 text-gray-400">
-                                            图片加载失败
-                                          </div>
-                                        )}
+                              return (
+                                <WrapperTag key={content.id ? `${content.id}-${cidx}` : cidx} {...wrapperProps}>
+                                  <div className="flex flex-col items-center text-center">
+                                    {imageUrl && (
+                                      <div className="mb-4 overflow-hidden rounded-lg w-full">
+                                        <div className="relative w-full" style={{ aspectRatio: '16 / 9' }}>
+                                          {displayImageUrl ? (
+                                            <img
+                                              src={displayImageUrl}
+                                              alt={alt}
+                                              className="absolute inset-0 w-full h-full object-cover transition-transform group-hover:scale-105"
+                                              loading="lazy"
+                                              decoding="async"
+                                            />
+                                          ) : (
+                                            <div className="absolute inset-0 flex items-center justify-center bg-gray-100 text-gray-400">
+                                              图片加载失败
+                                            </div>
+                                          )}
+                                        </div>
                                       </div>
-                                    </div>
-                                  )}
-                                  {contentTitle && (
-                                    <h3
-                                      className="font-semibold mb-2"
-                                      style={{
-                                        fontSize: contentTitleClamp,
-                                        textAlign: contentTitleAlign,
-                                        display: 'block',
-                                        width: '100%',
-                                      }}
-                                    >
-                                      {contentTitle}
-                                    </h3>
-                                  )}
-                                  {paragraph && (
-                                    <p
-                                      style={{
-                                        fontSize: contentTextClamp,
-                                        textAlign: contentTextAlign,
-                                        color: '#666',
-                                      }}
-                                    >
-                                      {paragraph}
-                                    </p>
-                                  )}
-                                </div>
-                              </WrapperTag>
-                            );
-                          })}
-                        </div>
-                      )}
+                                    )}
+                                    {contentTitle && (
+                                      <h3
+                                        className="font-semibold mb-2"
+                                        style={{
+                                          fontSize: contentTitleClamp,
+                                          textAlign: contentTitleAlign,
+                                          display: 'block',
+                                          width: '100%',
+                                        }}
+                                      >
+                                        {contentTitle}
+                                      </h3>
+                                    )}
+                                    {paragraph && (
+                                      <p
+                                        style={{
+                                          fontSize: contentTextClamp,
+                                          textAlign: contentTextAlign,
+                                          color: '#666',
+                                        }}
+                                      >
+                                        {paragraph}
+                                      </p>
+                                    )}
+                                  </div>
+                                </WrapperTag>
+                              );
+                            })}
+                          </div>
+                        )}
+                      </div>
                     </div>
-                  )}
+                  </div>
                 </div>
               );
             })}

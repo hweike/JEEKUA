@@ -8,8 +8,15 @@ interface SearchButtonProps {
   placeholder?: string;
 }
 
+// ============================================================
+// 公共样式常量
+// ============================================================
+const COLOR_TRANSITION = `color var(--transition-duration-150, 150ms) var(--transition-timing-ease, ease)`;
+const BG_COLOR_TRANSITION = `background-color var(--transition-duration-150, 150ms) var(--transition-timing-ease, ease)`;
+const BORDER_TRANSITION = `border-color var(--transition-duration-150, 150ms) var(--transition-timing-ease, ease)`;
+
 export default function SearchButton({ placeholder: configPlaceholder = '' }: SearchButtonProps) {
-  const t = useTranslations('Common');
+  const t = useTranslations('Shared');
   const [isOpen, setIsOpen] = useState(false);
   const [query, setQuery] = useState('');
   const inputRef = useRef<HTMLInputElement>(null);
@@ -17,18 +24,8 @@ export default function SearchButton({ placeholder: configPlaceholder = '' }: Se
   const [navbarBottom, setNavbarBottom] = useState(0);
   const [navbarHeight, setNavbarHeight] = useState(70);
 
-  // 安全获取翻译，若缺失则使用降级文本
-  const getSearchPlaceholder = () => {
-    if (configPlaceholder) return configPlaceholder;
-    try {
-      // 尝试获取翻译
-      return t('search_placeholder');
-    } catch {
-      // 降级为默认英文
-      return 'Search...';
-    }
-  };
-  const finalPlaceholder = getSearchPlaceholder();
+  // 优先使用翻译，若翻译不可用则使用传入的占位符（降级）
+  const finalPlaceholder = t('searchPlaceholder') || configPlaceholder;
 
   // 获取导航栏位置和高度
   useEffect(() => {
@@ -81,30 +78,53 @@ export default function SearchButton({ placeholder: configPlaceholder = '' }: Se
 
   return (
     <>
+      {/* ============================================================
+          搜索触发按钮
+          ============================================================ */}
       <button
         onClick={toggleOpen}
-        className="p-2 rounded-md hover:bg-accent transition-colors"
-        aria-label="Search"
+        className="rounded-md"
+        style={{
+          color: 'var(--navbar-text, var(--foreground, #0f172a))',
+          padding: 'var(--spacing-2, 0.5rem)',
+          borderRadius: 'var(--radius-md, 0.625rem)',
+          transition: COLOR_TRANSITION,
+        }}
+        onMouseEnter={(e) => {
+          e.currentTarget.style.color = 'var(--navbar-hover-text, var(--primary, #1e293b))';
+        }}
+        onMouseLeave={(e) => {
+          e.currentTarget.style.color = 'var(--navbar-text, var(--foreground, #0f172a))';
+        }}
+        aria-label={t('search')}
       >
         <Search className="w-5 h-5" />
       </button>
 
+      {/* ============================================================
+          搜索面板
+          ============================================================ */}
       {isOpen && (
         <div
           ref={containerRef}
-          className="fixed left-0 w-full z-50 shadow-lg"
+          className="fixed left-0 w-full z-50"
           style={{
             top: `${navbarBottom}px`,
-            backgroundColor: 'var(--navbar-bg, var(--background))',
-            borderTop: '1px solid rgba(0, 0, 0, 0.05)',
-            borderBottom: '1px solid rgba(0, 0, 0, 0.05)',
+            backgroundColor: 'var(--navbar-bg, var(--background, #ffffff))',
+            borderTop: '1px solid var(--navbar-divider-color, rgba(0, 0, 0, 0.05))',
+            // ✅ 移除 borderBottom
+            boxShadow: 'var(--shadow-lg, 0 10px 15px -3px rgb(0 0 0 / 0.1))',
             height: `${navbarHeight}px`,
             display: 'flex',
             alignItems: 'center',
           }}
         >
           <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 w-full">
-            <form onSubmit={handleSearch} className="flex items-center gap-4">
+            <form
+              onSubmit={handleSearch}
+              className="flex items-center"
+              style={{ gap: 'var(--spacing-4, 1rem)' }}
+            >
               <div className="flex-1 flex justify-center">
                 <div className="w-[70%] relative">
                   <input
@@ -113,15 +133,45 @@ export default function SearchButton({ placeholder: configPlaceholder = '' }: Se
                     value={query}
                     onChange={(e) => setQuery(e.target.value)}
                     placeholder={finalPlaceholder}
-                    className="w-full px-4 py-2 text-base border border-input rounded-full bg-background focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent transition-all"
+                    className="w-full rounded-full border focus:outline-none focus:ring-2"
+                    style={{
+                      paddingLeft: 'var(--spacing-4, 1rem)',
+                      paddingRight: 'var(--spacing-4, 1rem)',
+                      paddingTop: 'var(--spacing-2, 0.5rem)',
+                      paddingBottom: 'var(--spacing-2, 0.5rem)',
+                      fontSize: 'var(--font-size-base, 1rem)',
+                      backgroundColor: 'var(--background, #ffffff)',
+                      borderColor: 'var(--border, #e5e7eb)',
+                      color: 'var(--foreground, #1f2937)',
+                      transition: `${BORDER_TRANSITION}, box-shadow var(--transition-duration-150, 150ms) var(--transition-timing-ease, ease)`,
+                      '--tw-ring-color': 'var(--ring, var(--primary, #3b82f6))',
+                    } as React.CSSProperties}
+                    onFocus={(e) => {
+                      e.currentTarget.style.borderColor = 'var(--ring, var(--primary, #3b82f6))';
+                    }}
+                    onBlur={(e) => {
+                      e.currentTarget.style.borderColor = 'var(--border, #e5e7eb)';
+                    }}
                   />
                 </div>
               </div>
               <button
                 type="button"
                 onClick={toggleOpen}
-                className="p-2 rounded-full hover:bg-accent transition-colors"
-                aria-label="Close"
+                className="rounded-md"
+                style={{
+                  color: 'var(--navbar-text, var(--foreground, #0f172a))',
+                  padding: 'var(--spacing-2, 0.5rem)',
+                  borderRadius: 'var(--radius-md, 0.625rem)',
+                  transition: COLOR_TRANSITION,
+                }}
+                onMouseEnter={(e) => {
+                  e.currentTarget.style.color = 'var(--navbar-hover-text, var(--primary, #1e293b))';
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.color = 'var(--navbar-text, var(--foreground, #0f172a))';
+                }}
+                aria-label={t('close')}
               >
                 <X className="w-7 h-7" />
               </button>

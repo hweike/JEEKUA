@@ -1,7 +1,12 @@
 // app/api/admin/pages/route.ts
 import { NextRequest, NextResponse } from 'next/server';
-import { createPage, getPageList } from '@/lib/pages/pageService';
+import { getPageList } from '@/lib/pages/pageService';
 
+/**
+ * GET /api/admin/pages?locale=zh
+ * GET /api/admin/pages?locales=zh,en,ja
+ * 获取页面列表（轻量，不含 content 和 templateData）
+ */
 export async function GET(request: NextRequest) {
   const searchParams = request.nextUrl.searchParams;
   const locale = searchParams.get('locale');
@@ -20,7 +25,7 @@ export async function GET(request: NextRequest) {
       }));
       return NextResponse.json(result);
     } catch (error) {
-      console.error('批量获取页面失败:', error);
+      console.error('[GET /api/admin/pages] 批量获取失败:', error);
       return NextResponse.json({ error: '批量获取失败' }, { status: 500 });
     }
   }
@@ -33,33 +38,7 @@ export async function GET(request: NextRequest) {
     const pages = await getPageList(locale);
     return NextResponse.json({ pages });
   } catch (error) {
-    console.error('获取页面列表失败:', error);
+    console.error('[GET /api/admin/pages] 获取失败:', error);
     return NextResponse.json({ error: '获取失败' }, { status: 500 });
-  }
-}
-
-export async function POST(request: NextRequest) {
-  try {
-    const body = await request.json();
-    const { locale, id, ...data } = body;  // 从请求体中读取 id（可选）
-    if (!locale) {
-      return NextResponse.json({ error: 'Missing locale' }, { status: 400 });
-    }
-    // 仅允许 zh 和 en 创建页面（可根据需求调整）
-    if (locale !== 'zh' && locale !== 'en') {
-      return NextResponse.json({ error: 'Cannot create page for this locale' }, { status: 403 });
-    }
-    // 传入 id（如果存在）给 createPage
-    const page = await createPage(locale, data, id);
-    return NextResponse.json(page, { status: 201 });
-  } catch (error: any) {
-    const message = error.message;
-    // 尝试解析为 JSON 错误（原逻辑保留）
-    try {
-      const errors = JSON.parse(message);
-      return NextResponse.json({ errors }, { status: 400 });
-    } catch {
-      return NextResponse.json({ error: message }, { status: 400 });
-    }
   }
 }

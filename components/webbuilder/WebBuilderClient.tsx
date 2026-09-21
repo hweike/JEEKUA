@@ -1,9 +1,9 @@
 'use client';
 
 import { Puck, Render, legacySideBarPlugin } from '@puckeditor/core';
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { toast } from 'sonner';
-import config from '@/lib/webbuilder/config';
+import { createConfig } from '@/lib/webbuilder/config';
 import { customFieldTypes } from '@/lib/webbuilder/field-types';
 import '@puckeditor/core/puck.css';
 import './puck-overrides.css';
@@ -37,7 +37,7 @@ interface WebBuilderClientProps {
   onPublish?: (data: any) => void;
   readOnly?: boolean;
   initialTitle?: string;
-  initialCategory?: string;
+  initialCategory?: string;   // ✅ 模板分类（如 'product', 'blog'）
 }
 
 const componentIconMap: Record<string, React.ElementType> = {
@@ -66,6 +66,17 @@ const componentIconMap: Record<string, React.ElementType> = {
   BlogBlock: Newspaper,
   BlogCollectionBlock: Newspaper,
   VideoCategoryBlock: Video,
+  // ✅ 新增组件的图标
+  IndustrialProductLineBlock: Package,
+  InquiryBlock: FileText,
+  PricingBlock: Table,
+  ComparisonTableBlock: Table,
+  TabbedContentBlock: Layers,
+  ProductShowcaseBlock: LayoutGrid,
+  ProductCarouselBlock: Sliders,
+  ProductRankingBlock: List,
+  ProductCategoriesBlock: FolderTree,
+  BlogPostsBlock: Newspaper,
 };
 
 const legacySideBar = legacySideBarPlugin();
@@ -75,11 +86,18 @@ export default function WebBuilderClient({
   onSave,
   onPublish,
   readOnly = false,
+  initialTitle,
+  initialCategory,   // ✅ 解构
 }: WebBuilderClientProps) {
   const [data, setData] = useState(() => {
     if (initialData && Array.isArray(initialData.content)) return initialData;
     return { root: { props: {} }, content: [], zones: {} };
   });
+
+  // ✅ 根据 initialCategory 动态生成 config
+  const dynamicConfig = useMemo(() => {
+    return createConfig(initialCategory);
+  }, [initialCategory]);
 
   // 清除分组标题按钮样式（保持不变）
   useEffect(() => {
@@ -110,18 +128,17 @@ export default function WebBuilderClient({
   const handlePublish = async (puckData: any) => {
     setData(puckData);
     if (onPublish) {
-      // 不再显示 Toast，由父组件控制
       await onPublish(puckData);
     }
   };
 
   if (readOnly) {
-    return <Render config={config} data={data} />;
+    return <Render config={dynamicConfig} data={data} />;
   }
 
   return (
     <Puck
-      config={config}
+      config={dynamicConfig}
       data={data}
       onPublish={handlePublish}
       plugins={[legacySideBar]}

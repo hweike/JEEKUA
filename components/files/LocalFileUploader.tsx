@@ -2,15 +2,21 @@
 import { useState, useCallback } from 'react';
 import { useDropzone } from 'react-dropzone';
 import { X, Upload, Loader2, CheckCircle, AlertCircle, Copy, ExternalLink } from 'lucide-react';
-import { getImageUrl } from '@/lib/files/url'; // 公共函数，用于转换图片URL
+import { getImageUrl } from '@/lib/files/url';
 
 interface LocalFileUploaderProps {
   open: boolean;
   onClose: () => void;
   onUploadSuccess: () => void;
+  categoryId?: string | null; // 新增：从父页面传入
 }
 
-export default function LocalFileUploader({ open, onClose, onUploadSuccess }: LocalFileUploaderProps) {
+export default function LocalFileUploader({ 
+  open, 
+  onClose, 
+  onUploadSuccess,
+  categoryId // 接收 categoryId
+}: LocalFileUploaderProps) {
   const [file, setFile] = useState<File | null>(null);
   const [uploading, setUploading] = useState(false);
   const [progress, setProgress] = useState(0);
@@ -31,6 +37,11 @@ export default function LocalFileUploader({ open, onClose, onUploadSuccess }: Lo
       const xhr = new XMLHttpRequest();
       const formData = new FormData();
       formData.append('file', fileToUpload);
+      
+      // 如果有 categoryId，自动添加到表单
+      if (categoryId) {
+        formData.append('categoryId', categoryId);
+      }
 
       xhr.upload.addEventListener('progress', (event) => {
         if (event.lengthComputable) {
@@ -74,7 +85,7 @@ export default function LocalFileUploader({ open, onClose, onUploadSuccess }: Lo
         setResult({
           success: true,
           message: `文件已存在：${data.displayName}`,
-          existingUrl: data.url, // 后端应返回相对路径（storage_key）
+          existingUrl: data.url,
         });
       } else {
         setResult({ success: true, message: `上传成功：${data.displayName}` });

@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react';
 import { useSearchParams, useRouter } from 'next/navigation';
 import dynamic from 'next/dynamic';
-import { ArrowLeft, Save } from 'lucide-react';
+import { ArrowLeft } from 'lucide-react';
 import pinyin from 'pinyin';
 import SeoFields from '@/components/common/SeoFields';
 import { generateSeoTitle, generateSeoDescription } from '@/lib/products/seoGenerator';
@@ -37,10 +37,19 @@ export default function DocsEditPage() {
   const searchParams = useSearchParams();
   const { showToast } = useToast();
 
-  const locale = searchParams.get('locale') || 'zh';
-  const docsLibId = searchParams.get('docsLibId');
-  const id = searchParams.get('id');
-  const parentIdFromUrl = searchParams.get('parentId') || null; // 获取父文档 ID
+  const getParam = (key: string): string | null => {
+    if (typeof window !== 'undefined') {
+      const params = new URLSearchParams(window.location.search);
+      const val = params.get(key);
+      if (val) return val;
+    }
+    return searchParams.get(key);
+  };
+
+  const locale = getParam('locale') || 'zh';
+  const docsLibId = getParam('docsLibId');
+  const id = getParam('id');
+  const parentIdFromUrl = getParam('parentId') || null;
 
   const [loading, setLoading] = useState(!!id);
   const [saving, setSaving] = useState(false);
@@ -48,7 +57,7 @@ export default function DocsEditPage() {
     id: id || '',
     title: '',
     slug: '',
-    parentId: parentIdFromUrl, // 初始化时传入，但会被后续加载覆盖
+    parentId: parentIdFromUrl,
     order: 0,
     content: '',
     seo_keywords: '',
@@ -57,6 +66,7 @@ export default function DocsEditPage() {
   });
   const [isSlugAuto, setIsSlugAuto] = useState(true);
   const [docsLibName, setDocsLibName] = useState<string>('');
+  const [parentDocTitle, setParentDocTitle] = useState<string>('');
 
   // 加载文档库名称
   useEffect(() => {
@@ -72,19 +82,38 @@ export default function DocsEditPage() {
     }
   }, [docsLibId]);
 
+  // 加载父文档标题
+  useEffect(() => {
+    const parentId = docData?.parentId;
+    if (!parentId || !docsLibId) {
+      setParentDocTitle('');
+      return;
+    }
+    fetch(`/api/admin/docs?locale=${locale}&docsLibId=${docsLibId}&id=${parentId}`)
+      .then(res => {
+        if (!res.ok) throw new Error('父文档不存在');
+        return res.json();
+      })
+      .then(data => {
+        setParentDocTitle(data.title || '');
+      })
+      .catch(() => {
+        setParentDocTitle('未知文档');
+      });
+  }, [docData?.parentId, docsLibId, locale]);
+
   // 加载文档（编辑模式）
   useEffect(() => {
     if (id && docsLibId) {
       fetch(`/api/admin/docs?locale=${locale}&docsLibId=${docsLibId}&id=${id}`)
         .then(res => {
           if (res.status === 404) {
-            // 文档不存在，视为新建（保留 id，并应用 parentId）
-            setDocData(prev => ({
+            setDocData((prev: any) => ({
               ...prev,
               id: id,
               title: '',
               slug: '',
-              parentId: parentIdFromUrl, // 使用 URL 中的 parentId
+              parentId: parentIdFromUrl,
               order: 0,
               content: '',
               seo_keywords: '',
@@ -119,8 +148,7 @@ export default function DocsEditPage() {
         })
         .finally(() => setLoading(false));
     } else {
-      // 新建模式：初始化空白数据，使用 URL 中的 parentId
-      setDocData(prev => ({
+      setDocData((prev: any) => ({
         ...prev,
         id: '',
         title: '',
@@ -180,6 +208,23 @@ export default function DocsEditPage() {
     showToast('已自动生成 SEO 信息', 'info');
   };
 
+  const getFinalReturnUrl = () => {
+    if (typeof window !== 'undefined') {
+      const params = new URLSearchParams(window.location.search);
+      const returnUrl = params.get('returnUrl');
+      const fromParam = params.get('from');
+      const localeParam = params.get('locale');
+      const docsLibIdParam = params.get('docsLibId');
+
+      if (returnUrl) return returnUrl;
+      if (fromParam === 'docs-libs') {
+        return `/admin/docs/docs-libs?locale=${localeParam || 'zh'}`;
+      }
+      return `/admin/docs?locale=${localeParam || 'zh'}&docsLibId=${docsLibIdParam || ''}`;
+    }
+    return `/admin/docs?locale=${locale}&docsLibId=${docsLibId}`;
+  };
+
   const handleSave = async () => {
     if (!docData || !docData.title) {
       showToast('请填写标题', 'error');
@@ -208,14 +253,17 @@ export default function DocsEditPage() {
         const err = await res.json();
         throw new Error(err.error || '保存失败');
       }
-      const result = await res.json();
       showToast('保存成功', 'success');
-      router.push(`/admin/docs?locale=${locale}&docsLibId=${docsLibId}`);
+      window.location.href = getFinalReturnUrl();
     } catch (err: any) {
       showToast(err.message || '保存失败', 'error');
     } finally {
       setSaving(false);
     }
+  };
+
+  const handleCancel = () => {
+    window.location.href = getFinalReturnUrl();
   };
 
   if (loading) return <div className="p-6 text-center">加载中...</div>;
@@ -225,20 +273,16 @@ export default function DocsEditPage() {
 
   return (
     <div className="p-6 max-w-4xl mx-auto pb-24">
-      {/* 头部 */}
       <div className="flex justify-between items-center mb-4">
         <div className="flex items-center gap-4">
-          <button
-            onClick={() => router.push(`/admin/docs?locale=${locale}&docsLibId=${docsLibId}`)}
-            className="text-gray-600 hover:text-gray-800"
-          >
+          <button onClick={handleCancel} className="text-gray-600 hover:text-gray-800">
             <ArrowLeft size={20} />
           </button>
           <h1 className="text-2xl font-bold">{pageTitle}</h1>
         </div>
       </div>
 
-      {/* 信息卡片 */}
+      {/* 信息卡片：父文档显示名称 */}
       <div className="bg-gray-50 border border-gray-200 rounded-lg p-4 mb-6 flex flex-wrap gap-6">
         <div>
           <span className="text-sm text-gray-500">当前站点：</span>
@@ -250,14 +294,13 @@ export default function DocsEditPage() {
         </div>
         {docData.parentId && (
           <div>
-            <span className="text-sm text-gray-500">父文档 ID：</span>
-            <span className="font-medium">{docData.parentId}</span>
+            <span className="text-sm text-gray-500">父文档：</span>
+            <span className="font-medium">{parentDocTitle || '加载中...'}</span>
           </div>
         )}
       </div>
 
       <form onSubmit={e => { e.preventDefault(); handleSave(); }} className="space-y-6">
-        {/* 基本信息卡片 */}
         <div className="border rounded-lg p-4 shadow-sm bg-white">
           <h3 className="font-medium text-lg mb-3">基本信息</h3>
           <div className="space-y-4">
@@ -281,7 +324,6 @@ export default function DocsEditPage() {
           </div>
         </div>
 
-        {/* 相关商品卡片 */}
         <div className="bg-white rounded-lg shadow p-6">
           <h2 className="text-lg font-semibold mb-4">相关商品</h2>
           {docData.id ? (
@@ -297,7 +339,6 @@ export default function DocsEditPage() {
           )}
         </div>
 
-        {/* SEO 设置卡片 */}
         <div className="border rounded-lg p-4 shadow-sm bg-white">
           <div className="flex justify-between items-center mb-3">
             <h2 className="text-lg font-semibold">搜索引擎优化</h2>
@@ -321,11 +362,10 @@ export default function DocsEditPage() {
         </div>
       </form>
 
-      {/* 悬浮按钮条 */}
       <div className="fixed bottom-0 left-0 right-0 bg-white border-t shadow-lg p-4 flex justify-end gap-4 z-50">
         <button
           type="button"
-          onClick={() => router.push(`/admin/docs?locale=${locale}&docsLibId=${docsLibId}`)}
+          onClick={handleCancel}
           className="bg-gray-200 hover:bg-gray-300 px-4 py-2 rounded transition"
         >
           取消

@@ -1,35 +1,58 @@
+// lib/videosys/index.ts
 import { supabase } from '@/lib/supabase/client';
+import { unstable_cache } from 'next/cache';
+import { getPrivateStorage } from '@/lib/storage/factory';
 import type { VideoIndex, VideoData } from './types';
-import { getFullVideo } from './video-service'; // 复用已有的完整获取函数
+import { getFullVideo, listVideos } from './video-service';
+import { getCategoriesList } from './services/category.service';
 
 const DEFAULT_SITE_ID = process.env.NEXT_PUBLIC_SITE_ID || '000001';
 
-// 获取所有视频分类（包含 slug）
+// ============================================================
+// 原始（无缓存）查询函数
+// ============================================================
+
+// 获取所有视频分类（包含 slug）- 从云存储读取
 export async function getVideoCategories(locale: string): Promise<{ key: string; name: string; slug: string }[]> {
-  const fs = await import('fs/promises');
-  const path = await import('path');
-  const categoriesPath = path.join(process.cwd(), 'data', 'videosys', locale, 'categories.json');
   try {
-    const content = await fs.readFile(categoriesPath, 'utf-8');
-    const data = JSON.parse(content);
-    return Object.entries(data).map(([key, cat]: [string, any]) => ({
-      key,
-      name: cat.name,
-      slug: cat.slug || key,
+    const list = await getCategoriesList(locale);
+    return list.map(item => ({
+      key: item.key,
+      name: item.name,
+      slug: item.slug || item.key,
     }));
-  } catch {
+  } catch (error) {
+    console.error('getVideoCategories error:', error);
     return [];
   }
 }
 
-// 获取视频列表（按分类 key 过滤）
+// 获取视频配置（从云存储读取 settings.json）
+export async function getVideoConfig(locale: string): Promise<{ name: string; seoTitle?: string; seoDescription?: string; image?: string }> {
+  const storage = getPrivateStorage();
+  const key = `video/${locale}/settings.json`;
+  try {
+    const content = await storage.read(key, 'utf8');
+    const parsed = JSON.parse(content as string);
+    return {
+      name: parsed.name || 'Video',
+      seoTitle: parsed.seoTitle || '',
+      seoDescription: parsed.seoDescription || '',
+      image: parsed.image || '',
+    };
+  } catch {
+    return { name: 'Video', seoTitle: '', seoDescription: '', image: '' };
+  }
+}
+
+// 获取视频列表（按分类 key 过滤，全部数据，无分页）
 export async function getVideos(locale: string, categoryKey?: string): Promise<VideoIndex[]> {
   let query = supabase
     .from('videos')
     .select('*')
     .eq('site_id', DEFAULT_SITE_ID)
     .eq('locale', locale)
-    .eq('visible', 1);
+    .eq('visible', 1);   // ✅ 已过滤
 
   if (categoryKey && categoryKey !== 'all') {
     query = query.eq('category_key', categoryKey);
@@ -44,7 +67,6 @@ export async function getVideos(locale: string, categoryKey?: string): Promise<V
     return [];
   }
 
-  // 转换布尔字段（数据库中以 0/1 存储）
   return (data || []).map(item => ({
     ...item,
     visible: item.visible === 1,
@@ -60,7 +82,7 @@ export async function getVideoBySlug(slug: string, locale: string): Promise<(Vid
     .eq('site_id', DEFAULT_SITE_ID)
     .eq('slug', slug)
     .eq('locale', locale)
-    .eq('visible', 1)
+    .eq('visible', 1)   // ✅ 已过滤
     .maybeSingle();
 
   if (error || !videoIndex) {
@@ -68,14 +90,12 @@ export async function getVideoBySlug(slug: string, locale: string): Promise<(Vid
     return null;
   }
 
-  // 转换布尔字段
   const video: VideoIndex = {
     ...videoIndex,
     visible: videoIndex.visible === 1,
     flagged: videoIndex.flagged === 1,
   };
 
-  // 复用已有函数：从数据库索引 + Markdown 文件获取完整数据（包含 content）
   const fullVideo = await getFullVideo(video.id, locale);
   if (!fullVideo) return null;
 
@@ -86,5 +106,67 @@ export async function getVideoBySlug(slug: string, locale: string): Promise<(Vid
   return { ...fullVideo, categorySlug };
 }
 
-// 导出其他需要的方法（复用已有实现）
-export { getFullVideo as getVideoById, insertVideo, updateVideo, deleteVideo, listVideos } from './video-service';
+// 根据 ID 列表批量获取视频详情（用于关联资源）
+export async function getVideosByIds(ids: string[], locale: string): Promise<VideoData[]> {
+  if (ids.length === 0) return [];
+  const { data, error } = await supabase
+    .from('videos')
+    .select('*')
+    .eq('site_id', DEFAULT_SITE_ID)
+    .eq('locale', locale)
+    .eq('visible', 1)   // ✅ 新增：过滤隐藏视频
+    .in('id', ids);
+
+  if (error) {
+    console.error('getVideosByIds error:', error);
+    return [];
+  }
+  return (data || []).map(item => ({
+    ...item,
+    visible: item.visible === 1,
+    flagged: item.flagged === 1,
+  })) as VideoData[];
+}
+
+// 导出 video-service 中的方法（供外部使用）
+export { getFullVideo as getVideoById, listVideos } from './video-service';
+
+// ============================================================
+// 缓存版本（使用 unstable_cache）
+// ============================================================
+
+export const getCachedVideoCategories = unstable_cache(
+  async (locale: string) => getVideoCategories(locale),
+  ['video-categories'],
+  { revalidate: 3600, tags: ['video-categories'] }
+);
+
+export const getCachedVideoConfig = unstable_cache(
+  async (locale: string) => getVideoConfig(locale),
+  ['video-config'],
+  { revalidate: 3600, tags: ['video-config'] }
+);
+
+/**
+ * 获取视频列表（缓存版本，支持分页和分类过滤）
+ */
+export const getCachedVideos = unstable_cache(
+  async (locale: string, categoryKey?: string, page: number = 1, pageSize: number = 15) => {
+    const result = await listVideos({
+      locale,
+      category: categoryKey,
+      page,
+      limit: pageSize,
+      includeInvisible: false,   // ✅ 明确只显示可见视频
+    });
+    return result;
+  },
+  ['video-list'],
+  { revalidate: 3600, tags: ['video-list'] }
+);
+
+export const getCachedVideoBySlug = unstable_cache(
+  async (locale: string, slug: string) => getVideoBySlug(slug, locale),
+  ['video-detail'],
+  { revalidate: 3600, tags: ['video-detail'] }
+);

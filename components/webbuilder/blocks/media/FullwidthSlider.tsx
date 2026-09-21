@@ -6,6 +6,13 @@ import { getImageUrl } from '@/lib/files/url';
 import { DEFAULT_FULLWIDTH_SLIDER } from '@/lib/webbuilder/defaults/FullwidthSlider';
 import { getAltSuffix } from '@/lib/webbuilder/alt-suffix-config';
 
+// ✅ 切换动画：700ms + 缓动
+const SLIDE_TRANSITION_MS = 700;
+const SLIDE_EASING = 'cubic-bezier(0.4, 0, 0.2, 1)';
+
+// ✅ 首次进入动画：800ms
+const ENTER_TRANSITION_MS = 800;
+
 function getDisplayImageUrl(url: string, isEditMode: boolean): string {
   if (!url) return '';
   const fullUrl = getImageUrl(url);
@@ -41,7 +48,12 @@ export function FullwidthSlider({
   const isEditMode = !!puck?.isEditing;
   const slideCount = images?.length || 0;
   const [currentSlide, setCurrentSlide] = useState(0);
+  const [prevSlideIndex, setPrevSlideIndex] = useState<number | null>(null);
   const [isTransitioning, setIsTransitioning] = useState(false);
+
+  // ✅ 首次进入动画状态
+  const [hasEntered, setHasEntered] = useState(false);
+  const containerRef = useRef<HTMLDivElement>(null);
 
   const [loadedImages, setLoadedImages] = useState<Set<number>>(new Set());
   const [allImagesLoaded, setAllImagesLoaded] = useState(false);
@@ -76,6 +88,37 @@ export function FullwidthSlider({
     setIsTransitioning(false);
   }, []);
 
+  // ✅ 首次进入动画：滚动到视口时触发
+  useEffect(() => {
+    if (isEditMode) {
+      // 编辑模式：直接显示
+      setHasEntered(true);
+      return;
+    }
+
+    const el = containerRef.current;
+    if (!el) {
+      setHasEntered(true);
+      return;
+    }
+
+    const observer = new IntersectionObserver(
+      (entries) => {
+        entries.forEach((entry) => {
+          if (entry.isIntersecting) {
+            setHasEntered(true);
+            observer.unobserve(entry.target);
+          }
+        });
+      },
+      { threshold: 0.15 }
+    );
+
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [isEditMode]);
+
+  // ✅ 预加载所有图片（首次进入）
   useEffect(() => {
     if (slideCount === 0 || isEditMode) return;
 
@@ -87,7 +130,6 @@ export function FullwidthSlider({
           return;
         }
         const image = new Image();
-        image.crossOrigin = 'anonymous';
         image.src = getDisplayImageUrl(img.imageUrl, false);
         image.onload = () => {
           setLoadedImages((prev) => new Set(prev).add(index));
@@ -105,47 +147,62 @@ export function FullwidthSlider({
     });
   }, [images, slideCount, isEditMode]);
 
+  // ✅ 预加载下一张（当前 slide 变化时）
+  useEffect(() => {
+    if (isEditMode || slideCount <= 1) return;
+    const nextIndex = (currentSlide + 1) % slideCount;
+    const nextUrl = images[nextIndex]?.imageUrl;
+    if (nextUrl) {
+      const img = new Image();
+      img.src = getDisplayImageUrl(nextUrl, false);
+    }
+  }, [currentSlide, images, slideCount, isEditMode]);
+
   useEffect(() => {
     if (slideCount > 0 && currentSlide >= slideCount) {
       setCurrentSlide(0);
     }
   }, [slideCount, currentSlide]);
 
+  // ✅ 核心：切换逻辑（双层叠加 + 位移/缩放/模糊）
   const performSlideChange = useCallback(
     (newIndex: number, withAnimation: boolean = true) => {
       if (newIndex === currentSlide) return;
-      if (isTransitioning && withAnimation) return;
 
       clearAllTimers();
 
       if (withAnimation) {
-        setIsTransitioning(true);
+        setPrevSlideIndex(currentSlide);
         setCurrentSlide(newIndex);
+        setIsTransitioning(true);
+
         transitionTimerRef.current = setTimeout(() => {
           setIsTransitioning(false);
+          setPrevSlideIndex(null);
           transitionTimerRef.current = null;
           if (!isEditMode && autoplay !== 'none' && slideCount > 1) {
             scheduleNext();
           }
-        }, 600);
+        }, SLIDE_TRANSITION_MS + 50);
       } else {
+        setPrevSlideIndex(null);
         setCurrentSlide(newIndex);
       }
     },
-    [currentSlide, isTransitioning, clearAllTimers, isEditMode, autoplay, slideCount]
+    [currentSlide, clearAllTimers, isEditMode, autoplay, slideCount]
   );
 
   const goToPrev = useCallback(() => {
-    if (isTransitioning || slideCount <= 1) return;
+    if (slideCount <= 1) return;
     const prevIndex = currentSlide === 0 ? slideCount - 1 : currentSlide - 1;
     performSlideChange(prevIndex, true);
-  }, [isTransitioning, slideCount, currentSlide, performSlideChange]);
+  }, [slideCount, currentSlide, performSlideChange]);
 
   const goToNext = useCallback(() => {
-    if (isTransitioning || slideCount <= 1) return;
+    if (slideCount <= 1) return;
     const nextIndex = (currentSlide + 1) % slideCount;
     performSlideChange(nextIndex, true);
-  }, [isTransitioning, slideCount, currentSlide, performSlideChange]);
+  }, [slideCount, currentSlide, performSlideChange]);
 
   const isImageLoaded = useCallback(
     (index: number): boolean => loadedImages.has(index) || isEditMode,
@@ -182,6 +239,7 @@ export function FullwidthSlider({
     };
   }, [allImagesLoaded, isEditMode, slideCount, autoplay, scheduleNext, clearAllTimers]);
 
+  // ✅ 编辑联动
   useEffect(() => {
     if (!isEditMode || slideCount === 0) return;
 
@@ -219,10 +277,14 @@ export function FullwidthSlider({
   if (slideCount === 0) return null;
 
   const safeCurrentSlide = Math.min(currentSlide, slideCount - 1);
+  const safePrevSlideIndex =
+    prevSlideIndex !== null && prevSlideIndex < slideCount ? prevSlideIndex : null;
 
   const currentImage = images[safeCurrentSlide];
-  const hasValidImage = currentImage?.imageUrl?.trim();
-  const imageUrl = getDisplayImageUrl(currentImage?.imageUrl || '', isEditMode);
+  const prevImage = safePrevSlideIndex !== null ? images[safePrevSlideIndex] : null;
+
+  const currentImageUrl = getDisplayImageUrl(currentImage?.imageUrl || '', isEditMode);
+  const prevImageUrl = getDisplayImageUrl(prevImage?.imageUrl || '', isEditMode);
 
   const heightStyle = {
     minHeight: `${height}px`,
@@ -231,7 +293,6 @@ export function FullwidthSlider({
 
   const isFullwidth = bannerType === 'fullwidth';
 
-  // 外层容器样式：标准模式限制宽度，全屏模式全屏背景
   const outerContainerStyle: React.CSSProperties = {
     backgroundColor,
     marginTop: bannerType === 'standard' ? '10px' : 0,
@@ -251,7 +312,6 @@ export function FullwidthSlider({
         }),
   };
 
-  // 内容包装器：标准模式不设 maxWidth（由外层控制），全屏模式设 maxWidth 并居中
   const contentWrapperStyle: React.CSSProperties = {
     paddingTop: typeof paddingTop === 'number' ? `${paddingTop}px` : 0,
     paddingBottom: typeof paddingBottom === 'number' ? `${paddingBottom}px` : 0,
@@ -358,54 +418,94 @@ export function FullwidthSlider({
     </div>
   );
 
-  const slideWidth = 100;
-  const translateX = -safeCurrentSlide * slideWidth;
+  const nextSlideIndex = slideCount > 1 ? (safeCurrentSlide + 1) % slideCount : -1;
+  const nextImageUrl =
+    nextSlideIndex >= 0
+      ? getDisplayImageUrl(images[nextSlideIndex]?.imageUrl || '', false)
+      : '';
 
   return (
     <div ref={puck?.dragRef} style={outerContainerStyle}>
       <div style={contentWrapperStyle}>
         <div
+          ref={containerRef}
           className="relative w-full overflow-hidden"
           style={{
             ...heightStyle,
             borderRadius: `${imageBorderRadius}px`,
           }}
         >
+          {/* ✅ 上一张：淡出 + 左移 + 放大 + 模糊 */}
+          {safePrevSlideIndex !== null && prevImageUrl && (
+            <div
+              className="absolute inset-0"
+              style={{
+                opacity: isTransitioning ? 0 : 1,
+                transform: isTransitioning
+                  ? 'translateX(-80px) scale(1.15)'
+                  : 'translateX(0) scale(1)',
+                filter: isTransitioning ? 'blur(8px)' : 'blur(0px)',
+                transition: `opacity ${SLIDE_TRANSITION_MS}ms ${SLIDE_EASING}, transform ${SLIDE_TRANSITION_MS}ms ${SLIDE_EASING}, filter ${SLIDE_TRANSITION_MS}ms ${SLIDE_EASING}`,
+                pointerEvents: 'none',
+                zIndex: 1,
+                willChange: 'opacity, transform, filter',
+              }}
+            >
+              <img
+                src={prevImageUrl}
+                alt=""
+                className="w-full h-full object-cover object-center"
+                decoding="async"
+              />
+            </div>
+          )}
+
+          {/* ✅ 当前：首次进入动画 + 切换动画 */}
           <div
-            className="flex transition-transform duration-600 ease-in-out will-change-transform"
+            className="absolute inset-0"
             style={{
-              transform: `translateX(${translateX}%)`,
-              width: '100%',
-              height: '100%',
-              minHeight: 'inherit',
+              // 首次未进入：0；已进入且切换中：0；否则：1
+              opacity: !hasEntered ? 0 : (isTransitioning ? 0 : 1),
+              transform: !hasEntered
+                ? 'scale(1.15)'
+                : (isTransitioning ? 'translateX(80px) scale(1.2)' : 'translateX(0) scale(1)'),
+              filter: !hasEntered
+                ? 'blur(10px)'
+                : (isTransitioning ? 'blur(8px)' : 'blur(0px)'),
+              // 首次进入用 800ms；切换用 700ms
+              transition: !hasEntered
+                ? `opacity ${ENTER_TRANSITION_MS}ms ${SLIDE_EASING}, transform ${ENTER_TRANSITION_MS}ms ${SLIDE_EASING}, filter ${ENTER_TRANSITION_MS}ms ${SLIDE_EASING}`
+                : `opacity ${SLIDE_TRANSITION_MS}ms ${SLIDE_EASING}, transform ${SLIDE_TRANSITION_MS}ms ${SLIDE_EASING}, filter ${SLIDE_TRANSITION_MS}ms ${SLIDE_EASING}`,
+              zIndex: 2,
+              willChange: 'opacity, transform, filter',
             }}
           >
-            {images.map((img: any, idx: number) => {
-              const imgUrl = getDisplayImageUrl(img.imageUrl || '', isEditMode);
-              return (
-                <div
-                  key={idx}
-                  className="flex-shrink-0 w-full h-full relative"
-                  style={{ flex: '0 0 100%' }}
-                >
-                  {imgUrl ? (
-                    <img
-                      src={imgUrl}
-                      alt={`${seoTitle} - ${suffix} ${idx + 1}`}
-                      className="w-full h-full object-cover object-center"
-                      loading="lazy"
-                      decoding="async"
-                    />
-                  ) : (
-                    <div className="w-full h-full bg-gray-200 flex items-center justify-center text-gray-500">
-                      暂无图片
-                    </div>
-                  )}
-                </div>
-              );
-            })}
+            {currentImageUrl ? (
+              <img
+                src={currentImageUrl}
+                alt={slideAlt}
+                className="w-full h-full object-cover object-center"
+                decoding="async"
+                fetchPriority="high"
+              />
+            ) : (
+              <div className="w-full h-full bg-gray-200 flex items-center justify-center text-gray-500">
+                暂无图片
+              </div>
+            )}
           </div>
 
+          {/* 隐藏预加载下一张 */}
+          {nextImageUrl && (
+            <img
+              src={nextImageUrl}
+              alt=""
+              style={{ display: 'none' }}
+              aria-hidden="true"
+            />
+          )}
+
+          {/* 文字内容层 */}
           <div
             style={{
               position: 'absolute',
@@ -414,6 +514,7 @@ export function FullwidthSlider({
               gridTemplateColumns: '1fr',
               gridTemplateRows: '1fr',
               pointerEvents: 'none',
+              zIndex: 10,
             }}
           >
             <div
@@ -424,41 +525,53 @@ export function FullwidthSlider({
                 display: 'inline-block',
                 maxWidth: '100%',
                 margin: 'clamp(1rem, 4vw, 2rem)',
-                zIndex: 10,
               }}
             >
               {renderContent()}
             </div>
           </div>
 
+          {/* 箭头（首次延迟淡入） */}
           {(slideCount > 1 || isEditMode) && (
-            <>
+            <div
+              style={{
+                opacity: hasEntered ? 1 : 0,
+                transition: `opacity 400ms ease-out 300ms`,
+                pointerEvents: hasEntered ? 'auto' : 'none',
+              }}
+            >
               <button
                 onClick={goToPrev}
-                disabled={isTransitioning}
-                className="absolute left-4 top-1/2 -translate-y-1/2 bg-black/50 hover:bg-black/70 text-white p-2 rounded-full transition z-20 disabled:opacity-40 disabled:cursor-not-allowed"
+                className="absolute left-4 top-1/2 -translate-y-1/2 bg-black/50 hover:bg-black/70 text-white p-2 rounded-full transition z-20"
                 aria-label="上一张"
               >
                 <ChevronLeft size={24} />
               </button>
               <button
                 onClick={goToNext}
-                disabled={isTransitioning}
-                className="absolute right-4 top-1/2 -translate-y-1/2 bg-black/50 hover:bg-black/70 text-white p-2 rounded-full transition z-20 disabled:opacity-40 disabled:cursor-not-allowed"
+                className="absolute right-4 top-1/2 -translate-y-1/2 bg-black/50 hover:bg-black/70 text-white p-2 rounded-full transition z-20"
                 aria-label="下一张"
               >
                 <ChevronRight size={24} />
               </button>
-            </>
+            </div>
           )}
 
+          {/* 圆点（首次延迟淡入） */}
           {slideCount > 1 && (
-            <div className="absolute bottom-4 left-1/2 -translate-x-1/2 flex gap-2 z-20">
+            <div
+              className="absolute bottom-4 left-1/2 -translate-x-1/2 flex gap-2 z-20"
+              style={{
+                opacity: hasEntered ? 1 : 0,
+                transition: `opacity 400ms ease-out 300ms`,
+                pointerEvents: hasEntered ? 'auto' : 'none',
+              }}
+            >
               {images.map((_: any, idx: number) => (
                 <button
                   key={idx}
                   onClick={() => {
-                    if (idx === safeCurrentSlide || isTransitioning) return;
+                    if (idx === safeCurrentSlide) return;
                     performSlideChange(idx, true);
                   }}
                   className={`w-3 h-3 rounded-full transition-colors ${

@@ -15,7 +15,7 @@ interface PageItem {
   slug: string;
   visible: string;
   updatedAt: string;
-  type: 'home' | 'policy' | 'custom';
+  type: 'home' | 'policy' | 'custom' | 'Inquiry';
   preset: boolean;
   locale: string;
 }
@@ -29,21 +29,43 @@ export default function PagesAdmin() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const [locale, setLocale] = useState(searchParams.get('locale') || 'zh');
+  const initialTab = searchParams.get('tab') as 'pages' | 'policies' | null;
+  const [activeTab, setActiveTab] = useState<'pages' | 'policies'>(initialTab === 'policies' ? 'policies' : 'pages');
   const [availableLocales, setAvailableLocales] = useState<string[]>([]);
   const [allData, setAllData] = useState<Record<string, PageItem[]>>({});
   const [groups, setGroups] = useState<PageGroup[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
-  const [activeTab, setActiveTab] = useState<'pages' | 'policies'>('pages');
   const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set());
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
   const [showAiHelper, setShowAiHelper] = useState(false);
   const [selectedPage, setSelectedPage] = useState<{ id: string; title: string } | null>(null);
   const initialLoadRef = useRef(false);
 
+  // ========== 处理 refresh 参数（清除缓存） ==========
+  useEffect(() => {
+    const refresh = searchParams.get('refresh');
+    if (refresh === 'true') {
+      console.log('[缓存] 检测到 refresh=true，清除缓存');
+      // 清除所有 pages_all_ 开头的缓存
+      const keys = Object.keys(sessionStorage);
+      keys.forEach(key => {
+        if (key.startsWith('pages_all_')) {
+          sessionStorage.removeItem(key);
+        }
+      });
+      // 移除 refresh 参数
+      const params = new URLSearchParams(searchParams.toString());
+      params.delete('refresh');
+      const newUrl = `/admin/pages?${params.toString()}`;
+      router.replace(newUrl, { scroll: false });
+    }
+  }, [searchParams, router]);
+
   // 获取所有启用的语言
   const fetchAvailableLocales = useCallback(async () => {
+    console.time('[性能] fetchAvailableLocales');
     try {
       const res = await fetch('/api/languages/enabled');
       const data = await res.json();
@@ -58,23 +80,82 @@ export default function PagesAdmin() {
         locales = data.locales;
       }
       setAvailableLocales(locales.length > 0 ? locales : ['zh', 'en']);
+      console.timeEnd('[性能] fetchAvailableLocales');
     } catch {
       setAvailableLocales(['zh', 'en']);
+      console.timeEnd('[性能] fetchAvailableLocales');
     }
   }, []);
 
-  // 加载所有语言的页面数据
+  // 清除缓存（工具函数）
+  const clearCache = useCallback(() => {
+    if (availableLocales.length === 0) return;
+    const cacheKey = `pages_all_${availableLocales.sort().join(',')}`;
+    sessionStorage.removeItem(cacheKey);
+    console.log('[缓存] 已清除');
+  }, [availableLocales]);
+
+  // 后台刷新数据
+  const refreshDataInBackground = useCallback(
+    async (cacheKey: string) => {
+      try {
+        console.log('[缓存] 后台刷新开始');
+        const res = await fetch(`/api/admin/pages?locales=${availableLocales.join(',')}`);
+        if (res.ok) {
+          const data = await res.json();
+          setAllData(data);
+          sessionStorage.setItem(cacheKey, JSON.stringify({ data, timestamp: Date.now() }));
+          console.log('[缓存] 后台刷新完成，已更新缓存');
+        } else {
+          console.warn('[缓存] 后台刷新失败，保留旧缓存');
+        }
+      } catch (e) {
+        console.warn('[缓存] 后台刷新出错，保留旧缓存', e);
+      }
+    },
+    [availableLocales]
+  );
+
+  // 加载所有语言的页面数据（带缓存）
   const loadAllPages = useCallback(async () => {
     if (availableLocales.length === 0) return;
+    console.time('[性能] loadAllPages 总耗时');
+
+    const cacheKey = `pages_all_${availableLocales.sort().join(',')}`;
+    const cached = sessionStorage.getItem(cacheKey);
+    const now = Date.now();
+
+    if (cached) {
+      try {
+        const { data, timestamp } = JSON.parse(cached);
+        if (now - timestamp < 5 * 60 * 1000) {
+          console.log('[缓存] 命中，使用 sessionStorage 缓存，数据量:', Object.keys(data).length);
+          setAllData(data);
+          setLoading(false);
+          refreshDataInBackground(cacheKey);
+          console.timeEnd('[性能] loadAllPages 总耗时');
+          return;
+        } else {
+          console.log('[缓存] 已过期，重新请求');
+        }
+      } catch (e) {
+        console.log('[缓存] 解析失败，重新请求', e);
+      }
+    }
+
     setLoading(true);
     setError(null);
     try {
       let data: Record<string, PageItem[]>;
+      console.time('[性能] fetch /api/admin/pages (批量)');
       const res = await fetch(`/api/admin/pages?locales=${availableLocales.join(',')}`);
+      console.timeEnd('[性能] fetch /api/admin/pages (批量)');
       if (res.ok) {
+        console.time('[性能] 解析 JSON');
         data = await res.json();
+        console.timeEnd('[性能] 解析 JSON');
       } else {
-        // 降级
+        console.time('[性能] 降级: 逐个请求语言');
         const results = await Promise.all(
           availableLocales.map(async (loc) => {
             const r = await fetch(`/api/admin/pages?locale=${loc}`);
@@ -83,17 +164,21 @@ export default function PagesAdmin() {
             return { locale: loc, pages: d.pages || [] };
           })
         );
+        console.timeEnd('[性能] 降级: 逐个请求语言');
         data = {};
         results.forEach(({ locale, pages }) => { data[locale] = pages; });
       }
       setAllData(data);
+      sessionStorage.setItem(cacheKey, JSON.stringify({ data, timestamp: now }));
+      console.log(`[性能] 加载完成，语言数: ${Object.keys(data).length}`);
     } catch (err) {
       console.error(err);
       setError('加载页面失败，请刷新重试');
     } finally {
       setLoading(false);
+      console.timeEnd('[性能] loadAllPages 总耗时');
     }
-  }, [availableLocales]);
+  }, [availableLocales, refreshDataInBackground]);
 
   // 初始化
   useEffect(() => {
@@ -111,6 +196,7 @@ export default function PagesAdmin() {
 
   // 聚合分组
   useEffect(() => {
+    console.time('[性能] 聚合分组和排序');
     const allLocaleCodes = Array.from(new Set([...availableLocales, ...Object.keys(allData)]));
     const idMap: Record<string, PageGroup> = {};
 
@@ -141,6 +227,8 @@ export default function PagesAdmin() {
     });
     setGroups(groupsArray);
     setExpandedIds(new Set());
+    console.timeEnd('[性能] 聚合分组和排序');
+    console.log(`[性能] 分组完成，组数: ${groupsArray.length}`);
   }, [allData, availableLocales, locale]);
 
   const getCurrentPage = (group: PageGroup): PageItem | null => {
@@ -149,11 +237,12 @@ export default function PagesAdmin() {
 
   // 搜索过滤
   const filteredGroups = useMemo(() => {
+    console.time('[性能] useMemo filteredGroups');
     let result = groups;
     if (activeTab === 'pages') {
       result = result.filter(group => {
         const current = group.versions[locale];
-        return current && (current.type === 'custom' || current.type === 'home');
+        return current && (current.type === 'custom' || current.type === 'home' || current.type === 'Inquiry');
       });
     } else {
       result = result.filter(group => {
@@ -168,18 +257,21 @@ export default function PagesAdmin() {
         return current && (current.title.toLowerCase().includes(lower) || current.slug.toLowerCase().includes(lower));
       });
     }
+    console.timeEnd('[性能] useMemo filteredGroups');
     return result;
   }, [groups, activeTab, searchTerm, locale]);
 
   const currentLocalePages = useMemo(() => {
+    console.time('[性能] useMemo currentLocalePages');
     const list = allData[locale] || [];
     let result = activeTab === 'pages'
-      ? list.filter(p => p.type === 'custom' || p.type === 'home')
+      ? list.filter(p => p.type === 'custom' || p.type === 'home' || p.type === 'Inquiry')
       : list.filter(p => p.type === 'policy');
     if (searchTerm.trim()) {
       const lower = searchTerm.toLowerCase();
       result = result.filter(p => p.title.toLowerCase().includes(lower) || p.slug.toLowerCase().includes(lower));
     }
+    console.timeEnd('[性能] useMemo currentLocalePages');
     return result;
   }, [allData, locale, activeTab, searchTerm]);
 
@@ -189,6 +281,7 @@ export default function PagesAdmin() {
       const res = await fetch(`/api/admin/pages/${id}?locale=${locale}`, { method: 'DELETE' });
       if (!res.ok) throw new Error('删除失败');
       setToast({ message: '删除成功', type: 'success' });
+      clearCache();
       await loadAllPages();
     } catch (err) {
       setToast({ message: err instanceof Error ? err.message : '删除失败', type: 'error' });
@@ -204,13 +297,15 @@ export default function PagesAdmin() {
 
   const handleLocaleChange = (newLocale: string) => {
     setLocale(newLocale);
-    router.push(`/admin/pages?locale=${newLocale}`);
+    const currentTab = activeTab === 'pages' ? 'pages' : 'policies';
+    router.push(`/admin/pages?locale=${newLocale}&tab=${currentTab}`);
   };
 
   const handleTabChange = (tab: 'pages' | 'policies') => {
     setActiveTab(tab);
     setSearchTerm('');
     setExpandedIds(new Set());
+    router.push(`/admin/pages?locale=${locale}&tab=${tab}`);
   };
 
   const isCollapsibleMode = locale === 'zh' || locale === 'en';
@@ -245,6 +340,7 @@ export default function PagesAdmin() {
                 const data = await res.json();
                 if (res.ok) {
                   setToast({ message: `初始化完成 (${locale})，共处理 ${data.total} 个页面`, type: 'success' });
+                  clearCache();
                   await loadAllPages();
                 } else {
                   setToast({ message: data.error || '初始化失败', type: 'error' });
@@ -290,7 +386,7 @@ export default function PagesAdmin() {
         </button>
       </div>
 
-      {/* 表格 - 使用 table-fixed 控制宽度 */}
+      {/* 表格 */}
       <div className="overflow-x-hidden bg-white rounded-lg shadow">
         <table className="w-full table-fixed divide-y divide-gray-200">
           <thead className="bg-gray-50">
@@ -316,6 +412,7 @@ export default function PagesAdmin() {
                 const isExpanded = expandedIds.has(group.id);
                 const hasChildren = Object.values(group.versions).some(v => v !== null);
                 const otherLocales = Array.from(new Set([...availableLocales, ...Object.keys(allData)])).filter(loc => loc !== locale);
+                const addLabel = locale === 'zh' ? '发布中文版' : locale === 'en' ? '发布英文版' : '新增';
 
                 return (
                   <React.Fragment key={group.id}>
@@ -331,15 +428,22 @@ export default function PagesAdmin() {
                               {isExpanded ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
                             </button>
                           )}
-                          <Link
-                            href={`/${locale}/${current?.slug || ''}`}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="text-blue-600 hover:underline font-medium truncate"
-                            title={current?.title || ''}
-                          >
-                            {current?.title || `${getLanguageDisplayName(locale, 'zh')}（未设置）`}
-                          </Link>
+                          <span className="text-sm font-medium text-gray-500 flex-shrink-0 mr-1">
+                            {getLanguageDisplayName(locale, 'zh')}站
+                          </span>
+                          {current ? (
+                            <Link
+                              href={`/${locale}/${current.slug}`}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="text-blue-600 hover:underline font-medium truncate"
+                              title={current.title}
+                            >
+                              {current.title}
+                            </Link>
+                          ) : (
+                            <span className="text-gray-400 truncate">未发布</span>
+                          )}
                           {current?.preset && (
                             <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-blue-100 text-blue-800 flex-shrink-0 ml-1">
                               预设
@@ -394,11 +498,11 @@ export default function PagesAdmin() {
                           </div>
                         ) : (
                           <Link
-                            href={`/admin/pages/new?locale=${locale}&id=${group.id}`}
+                            href={`/admin/pages/new?locale=${locale}&id=${group.id}&type=${current?.type || 'custom'}`}
                             className="text-blue-600 hover:text-blue-800 whitespace-nowrap"
                             onClick={(e) => e.stopPropagation()}
                           >
-                            <Plus size={16} className="inline" /> 新增
+                            <Plus size={16} className="inline" /> {addLabel}
                           </Link>
                         )}
                       </td>
@@ -410,20 +514,28 @@ export default function PagesAdmin() {
                         const page = group.versions[loc] || null;
                         const exists = page !== null;
                         const isZhOrEn = loc === 'zh' || loc === 'en';
+                        const childAddLabel = loc === 'zh' ? '发布中文版' : loc === 'en' ? '发布英文版' : '新增';
 
                         return (
                           <tr key={`${group.id}-${loc}`} className="bg-gray-50 hover:bg-gray-100">
                             <td className="px-6 py-3 pl-12 w-[50%] min-w-0 overflow-hidden">
                               <div className="flex items-center gap-2 min-w-0">
                                 <span className="text-sm font-medium text-gray-500 w-16 flex-shrink-0">
-                                  {getLanguageDisplayName(loc, 'zh')}
+                                  {getLanguageDisplayName(loc, 'zh')}站
                                 </span>
-                                <span
-                                  className={`text-sm ${exists ? 'text-gray-900' : 'text-gray-400'} truncate`}
-                                  title={exists ? page.title : ''}
-                                >
-                                  {exists ? page.title : '（未设置）'}
-                                </span>
+                                {exists ? (
+                                  <Link
+                                    href={`/${loc}/${page.slug}`}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    className="text-blue-600 hover:underline truncate"
+                                    title={page.title}
+                                  >
+                                    {page.title}
+                                  </Link>
+                                ) : (
+                                  <span className="text-sm text-gray-400 truncate">未发布</span>
+                                )}
                                 {exists && page.preset && (
                                   <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-blue-100 text-blue-800 flex-shrink-0">
                                     预设
@@ -477,10 +589,10 @@ export default function PagesAdmin() {
                               ) : (
                                 isZhOrEn ? (
                                   <Link
-                                    href={`/admin/pages/new?locale=${loc}&id=${group.id}`}
+                                    href={`/admin/pages/new?locale=${loc}&id=${group.id}&type=${page?.type || current?.type || 'custom'}`}
                                     className="text-blue-600 hover:text-blue-800 whitespace-nowrap"
                                   >
-                                    <Plus size={14} className="inline" /> 新增
+                                    <Plus size={14} className="inline" /> {childAddLabel}
                                   </Link>
                                 ) : null
                               )}
@@ -576,6 +688,7 @@ export default function PagesAdmin() {
           pageTitle={selectedPage.title}
           onClose={() => setShowAiHelper(false)}
           onImportSuccess={() => {
+            clearCache();
             loadAllPages();
             setShowAiHelper(false);
           }}

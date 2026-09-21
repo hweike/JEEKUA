@@ -2,48 +2,47 @@
 import { NextRequest, NextResponse } from 'next/server';
 
 // ============================================================
-// 配置区域
+// 配置
 // ============================================================
 const R2_PUBLIC_URL = process.env.R2_PUBLIC_URL || '';
-const MAX_IMAGE_SIZE = 10 * 1024 * 1024; // 10MB（防止超大图片）
-const HEAD_TIMEOUT = 4000; // 4秒（HEAD 超时）
-const FETCH_TIMEOUT = 10000; // 10秒（代理下载超时）
+const MAX_IMAGE_SIZE = 5 * 1024 * 1024;
+const FETCH_TIMEOUT = 5000;
+const CACHE_TTL = 60 * 60 * 24 * 30;
+const PROXY_CACHE_TTL = 60 * 5;
 
-// 可信任的直接访问域名（这些域名跳过 HEAD 检测，直接走代理或直接加载）
-const DIRECT_ACCESS_DOMAINS = [
+// ✅ 特殊站点 Referer（仅列出"源站 origin 会失败"的少数站点）
+const SPECIAL_REFERER_DOMAINS: Record<string, string> = {
+    'hdslb.com': 'https://www.bilibili.com/',
+  'bilivideo.com': 'https://www.bilibili.com/',
+  'sinaimg.cn': 'https://weibo.com/',
+  'taobao.com': 'https://www.taobao.com/',
+  'tmall.com': 'https://www.taobao.com/',
+  'jd.com': 'https://www.jd.com/',
+  'douban.com': 'https://www.douban.com/',
+  'zhimg.com': 'https://www.zhihu.com/',
+};
+
+// 白名单：直接 302 重定向（无需代理）
+const DIRECT_REDIRECT_DOMAINS = [
   'r2.dev',
   'cloudflare.com',
   'picsum.photos',
   'unsplash.com',
+  'githubusercontent.com',
+  'imgur.com',
 ];
-
-// 针对特定域名设置 Referer（代理时使用）
-function getRefererForUrl(url: string): string {
-  if (url.includes('hdslb.com') || url.includes('bilivideo.com')) return 'https://www.bilibili.com/';
-  if (url.includes('sinaimg.cn')) return 'https://weibo.com/';
-  if (url.includes('taobao.com') || url.includes('tmall.com')) return 'https://www.taobao.com/';
-  if (url.includes('jd.com')) return 'https://www.jd.com/';
-  return 'https://www.google.com/';
-}
 
 // ============================================================
 // 辅助函数
 // ============================================================
-function normalizeUrl(base: string, path: string): string {
-  const baseClean = base.replace(/\/+$/, '');
-  const pathClean = path.replace(/^\/+/, '');
-  return `${baseClean}/${pathClean}`;
-}
 
 function isValidImageUrl(url: string): boolean {
   try {
     const parsed = new URL(url);
-    // 只允许 http/https 协议
-    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
-      return false;
-    }
-    // 基本长度限制
-    if (url.length > 2048) {
+    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return false;
+    if (url.length > 2048) return false;
+    const hostname = parsed.hostname;
+    if (/^(127\.0\.0\.1|localhost|10\.|172\.(1[6-9]|2[0-9]|3[0-1])\.|192\.168\.)/.test(hostname)) {
       return false;
     }
     return true;
@@ -52,170 +51,265 @@ function isValidImageUrl(url: string): boolean {
   }
 }
 
-function shouldProxyDirect(url: string): boolean {
+/**
+ * ✅ 获取 Referer 候选列表（多级降级）
+ */
+function getRefererCandidates(url: string): (string | null)[] {
+  const candidates: (string | null)[] = [];
+  
   try {
     const hostname = new URL(url).hostname;
-    return DIRECT_ACCESS_DOMAINS.some(domain => hostname.includes(domain));
+    
+    // 1. 特殊站点 Referer（优先）
+    for (const [domain, referer] of Object.entries(SPECIAL_REFERER_DOMAINS)) {
+      if (hostname.includes(domain)) {
+        candidates.push(referer);
+        break;
+      }
+    }
+    
+    // 2. 源站 origin（覆盖大多数场景）
+    candidates.push(new URL(url).origin + '/');
+    
+    // 3. 无 Referer
+    candidates.push(null);
+    
+    // 4. Google Referer（模拟搜索引擎）
+    candidates.push('https://www.google.com/');
+    
+    return candidates;
+  } catch {
+    return [null];
+  }
+}
+
+function canDirectRedirect(url: string): boolean {
+  try {
+    const hostname = new URL(url).hostname;
+    return DIRECT_REDIRECT_DOMAINS.some(domain => hostname.includes(domain));
   } catch {
     return false;
   }
 }
 
+function getCacheControl(url: string, isR2: boolean): string {
+  if (isR2 || canDirectRedirect(url)) {
+    return `public, max-age=${CACHE_TTL}, immutable`;
+  }
+  return `public, max-age=${PROXY_CACHE_TTL}, stale-while-revalidate=${PROXY_CACHE_TTL * 2}`;
+}
+
 // ============================================================
-// 主逻辑
+// 内存缓存
 // ============================================================
+interface CacheEntry {
+  buffer: Buffer;
+  contentType: string;
+  expires: number;
+  size: number;
+}
+
+const MAX_CACHE_ENTRIES = 50;
+const memoryCache = new Map<string, CacheEntry>();
+
+function setCache(key: string, buffer: Buffer, contentType: string, ttl: number): void {
+  if (memoryCache.size >= MAX_CACHE_ENTRIES) {
+    const oldestKey = memoryCache.keys().next().value;
+    if (oldestKey) memoryCache.delete(oldestKey);
+  }
+  memoryCache.set(key, {
+    buffer,
+    contentType,
+    expires: Date.now() + ttl * 1000,
+    size: buffer.length,
+  });
+}
+
+function getCache(key: string): CacheEntry | null {
+  const entry = memoryCache.get(key);
+  if (!entry) return null;
+  if (entry.expires < Date.now()) {
+    memoryCache.delete(key);
+    return null;
+  }
+  return entry;
+}
+
+// ============================================================
+// 核心：多级 Referer 尝试
+// ============================================================
+
+async function fetchImageWithFallback(url: string): Promise<Response> {
+  const referers = getRefererCandidates(url);
+  
+  for (let i = 0; i < referers.length; i++) {
+    const referer = referers[i];
+    
+    try {
+      const headers: Record<string, string> = {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'Accept': 'image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8',
+        'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8',
+      };
+      
+      if (referer) {
+        headers['Referer'] = referer;
+      }
+      
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), FETCH_TIMEOUT);
+      
+      const response = await fetch(url, {
+        headers,
+        signal: controller.signal,
+        redirect: 'follow',
+      });
+      
+      clearTimeout(timeoutId);
+      
+      if (response.ok) {
+        console.log(`[proxy-image] ✅ 尝试 ${i + 1}/${referers.length} 成功 (Referer: ${referer || '无'}): ${url}`);
+        return response;
+      }
+      
+      console.log(`[proxy-image] 尝试 ${i + 1}/${referers.length} 失败 (${response.status}, Referer: ${referer || '无'}): ${url}`);
+    } catch (err: any) {
+      console.log(`[proxy-image] 尝试 ${i + 1}/${referers.length} 异常 (Referer: ${referer || '无'}): ${err.message}`);
+    }
+  }
+  
+  throw new Error('所有 Referer 策略都失败');
+}
+
+// ============================================================
+// 核心逻辑
+// ============================================================
+
 export async function GET(request: NextRequest) {
+  const startTime = Date.now();
   const url = request.nextUrl.searchParams.get('url');
+
   if (!url) {
     return new NextResponse('Missing url parameter', { status: 400 });
   }
 
-  // 1. URL 合法性验证
   if (!isValidImageUrl(url)) {
-    console.warn(`Invalid URL: ${url}`);
     return new NextResponse('Invalid URL', { status: 400 });
   }
 
-  // 2. 处理本地上传图片（R2）
+  // R2 图片：302 重定向
   if (url.startsWith('uploads/')) {
     if (!R2_PUBLIC_URL) {
-      console.error('R2_PUBLIC_URL not configured');
       return new NextResponse('Image service misconfigured', { status: 500 });
     }
-    const fullUrl = normalizeUrl(R2_PUBLIC_URL, url);
-    try {
-      const response = await fetch(fullUrl, {
-        signal: AbortSignal.timeout(FETCH_TIMEOUT),
-      });
-      if (!response.ok) {
-        console.error(`R2 fetch failed: ${fullUrl}, status: ${response.status}`);
-        return new NextResponse(`Failed to fetch image: ${response.status}`, { status: response.status });
-      }
-      const buffer = await response.arrayBuffer();
-      const contentType = response.headers.get('content-type') || 'image/jpeg';
-      return new NextResponse(buffer, {
-        headers: {
-          'Content-Type': contentType,
-          'Cache-Control': 'public, max-age=86400, immutable',
-          'Access-Control-Allow-Origin': '*',
-          'Content-Length': buffer.byteLength.toString(),
-        },
-      });
-    } catch (error) {
-      console.error('R2 fetch error:', error);
-      return new NextResponse('Internal Server Error', { status: 500 });
-    }
-  }
-
-  // 3. 智能检测：如果是可信任域名，直接走代理（跳过 HEAD）
-  //    因为 HEAD 检测可能误判（如淘宝图片 HEAD 200 但 GET 需要 Referer）
-  const skipHeadCheck = shouldProxyDirect(url);
-
-  // 4. 智能检测：HEAD 判断图片是否可直接访问（仅对非信任域名）
-  if (!skipHeadCheck) {
-    try {
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), HEAD_TIMEOUT);
-
-      const headRes = await fetch(url, {
-        method: 'HEAD',
-        headers: {
-          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-        },
-        signal: controller.signal,
-      });
-      clearTimeout(timeoutId);
-
-      if (headRes.ok) {
-        const contentType = headRes.headers.get('content-type') || '';
-        const contentLength = parseInt(headRes.headers.get('content-length') || '0', 10);
-
-        // 仅对图片类型且大小合理的资源进行 302 重定向
-        if (contentType.startsWith('image/') && contentLength <= MAX_IMAGE_SIZE) {
-          return new NextResponse(null, {
-            status: 302,
-            headers: {
-              'Location': url,
-              'Cache-Control': 'public, max-age=3600',
-              'Access-Control-Allow-Origin': '*',
-            },
-          });
-        }
-        // 非图片或超大图片，继续走代理
-      }
-    } catch (error) {
-      // HEAD 请求失败，继续走代理
-      console.debug(`HEAD check failed for ${url}, falling back to proxy`);
-    }
-  }
-
-  // 5. Fallback：代理模式
-  try {
-    const referer = getRefererForUrl(url);
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), FETCH_TIMEOUT);
-
-    const response = await fetch(url, {
+    const cleanUrl = url.replace(/^\/+/, '');
+    const fullUrl = R2_PUBLIC_URL.replace(/\/+$/, '') + '/' + cleanUrl;
+    return new NextResponse(null, {
+      status: 302,
       headers: {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-        'Referer': referer,
-        'Accept': 'image/webp,image/apng,image/*,*/*;q=0.8',
-        'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8',
-        'Accept-Encoding': 'gzip, deflate, br',
-      },
-      signal: controller.signal,
-    });
-    clearTimeout(timeoutId);
-
-    if (!response.ok) {
-      // 降级重试（无 Referer）
-      if (response.status === 403 || response.status === 401) {
-        const retryController = new AbortController();
-        const retryTimeoutId = setTimeout(() => retryController.abort(), FETCH_TIMEOUT);
-        const retryRes = await fetch(url, {
-          headers: {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)',
-            'Accept': 'image/webp,image/apng,image/*,*/*;q=0.8',
-          },
-          signal: retryController.signal,
-        });
-        clearTimeout(retryTimeoutId);
-        if (retryRes.ok) {
-          const buffer = await retryRes.arrayBuffer();
-          if (buffer.byteLength > MAX_IMAGE_SIZE) {
-            return new NextResponse('Image too large', { status: 413 });
-          }
-          const contentType = retryRes.headers.get('content-type') || 'image/jpeg';
-          return new NextResponse(buffer, {
-            headers: {
-              'Content-Type': contentType,
-              'Cache-Control': 'public, max-age=86400, immutable',
-              'Access-Control-Allow-Origin': '*',
-              'Content-Length': buffer.byteLength.toString(),
-            },
-          });
-        }
-      }
-      return new NextResponse(`Failed to fetch image: ${response.status}`, { status: response.status });
-    }
-
-    // 读取响应体，限制大小
-    const buffer = await response.arrayBuffer();
-    if (buffer.byteLength > MAX_IMAGE_SIZE) {
-      return new NextResponse('Image too large', { status: 413 });
-    }
-
-    const contentType = response.headers.get('content-type') || 'image/jpeg';
-    return new NextResponse(buffer, {
-      headers: {
-        'Content-Type': contentType,
-        'Cache-Control': 'public, max-age=86400, immutable',
+        'Location': fullUrl,
+        'Cache-Control': `public, max-age=${CACHE_TTL}, immutable`,
         'Access-Control-Allow-Origin': '*',
-        'Content-Length': buffer.byteLength.toString(),
       },
     });
-  } catch (error) {
-    console.error('Proxy image error:', error);
-    return new NextResponse('Internal Server Error', { status: 500 });
   }
+
+  // 白名单：302 重定向
+  if (canDirectRedirect(url)) {
+    return new NextResponse(null, {
+      status: 302,
+      headers: {
+        'Location': url,
+        'Cache-Control': `public, max-age=${CACHE_TTL}, immutable`,
+        'Access-Control-Allow-Origin': '*',
+      },
+    });
+  }
+
+  // 检查内存缓存
+  const cacheKey = `proxy:${url}`;
+  const cached = getCache(cacheKey);
+  if (cached) {
+    return new NextResponse(cached.buffer, {
+      headers: {
+        'Content-Type': cached.contentType,
+        'Cache-Control': `public, max-age=${PROXY_CACHE_TTL}, stale-while-revalidate=${PROXY_CACHE_TTL * 2}`,
+        'Access-Control-Allow-Origin': '*',
+        'Cross-Origin-Resource-Policy': 'cross-origin',
+        'Content-Length': cached.size.toString(),
+      },
+    });
+  }
+
+  // ✅ 多级降级下载
+  try {
+    const response = await fetchImageWithFallback(url);
+    return await handleSuccessfulResponse(response, url, startTime);
+  } catch (error: any) {
+    if (error.name === 'AbortError') {
+      return new NextResponse('Request timeout', { status: 504 });
+    }
+    console.error(`[proxy-image] 所有策略失败: ${url}`, error.message);
+    return new NextResponse('Failed to fetch image', { status: 502 });
+  }
+}
+
+// ============================================================
+// 响应处理
+// ============================================================
+
+async function handleSuccessfulResponse(
+  response: Response,
+  url: string,
+  startTime: number
+): Promise<NextResponse> {
+  const contentType = response.headers.get('content-type') || 'image/jpeg';
+
+  if (!contentType.startsWith('image/')) {
+    return new NextResponse('Not an image', { status: 415 });
+  }
+
+  const buffer = Buffer.from(await response.arrayBuffer());
+
+  if (buffer.length > MAX_IMAGE_SIZE) {
+    return new NextResponse('Image too large', { status: 413 });
+  }
+
+  if (buffer.length === 0) {
+    return new NextResponse('Empty image', { status: 502 });
+  }
+
+  const isR2 = url.startsWith('uploads/');
+  if (!isR2 && !canDirectRedirect(url)) {
+    setCache(`proxy:${url}`, buffer, contentType, PROXY_CACHE_TTL);
+  }
+
+  const cacheControl = getCacheControl(url, isR2);
+
+  return new NextResponse(buffer, {
+    headers: {
+      'Content-Type': contentType,
+      'Cache-Control': cacheControl,
+      'Access-Control-Allow-Origin': '*',
+      'Access-Control-Allow-Methods': 'GET, OPTIONS',
+      'Cross-Origin-Resource-Policy': 'cross-origin',
+      'Content-Length': buffer.length.toString(),
+      'X-Proxy-Time': `${Date.now() - startTime}ms`,
+    },
+  });
+}
+
+// ============================================================
+// OPTIONS
+// ============================================================
+
+export async function OPTIONS() {
+  return new NextResponse(null, {
+    status: 200,
+    headers: {
+      'Access-Control-Allow-Origin': '*',
+      'Access-Control-Allow-Methods': 'GET, OPTIONS',
+      'Access-Control-Allow-Headers': '*',
+    },
+  });
 }

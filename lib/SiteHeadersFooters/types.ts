@@ -1,3 +1,5 @@
+// lib/SiteHeadersFooters/types.ts
+
 // 页头相关类型
 export interface LogoConfig {
   imageUrl: string;
@@ -23,11 +25,11 @@ export interface UtilitiesConfig {
 export interface Announcement {
   id: string;
   text: string;
-  link?: string; // 可选链接
+  link?: string;
 }
 
 export interface HeaderConfig {
-  style: 'simple' | 'classic' | 'luxury'; // 新增
+  style: 'simple' | 'classic' | 'luxury';
   logo: LogoConfig;
   menu: MenuConfig;
   utilities: UtilitiesConfig;
@@ -62,8 +64,15 @@ export interface MenuColumn {
 }
 
 export interface SocialLink {
-  platform: 'facebook' | 'instagram' | 'youtube' | 'tiktok' | 'twitter' | 'snapchat' | 'pinterest' | 'tumblr' | 'vimeo';
+  platform: 'facebook' | 'instagram' | 'youtube' | 'tiktok' | 'twitter' | 'linkedin' | 'snapchat' | 'pinterest' | 'vimeo';
   url: string;
+}
+
+// ✅ 新增：文本信息配置
+export interface TextInfoConfig {
+  enabled: boolean;
+  title: string;
+  content: string;
 }
 
 export interface FooterConfig {
@@ -84,5 +93,5 @@ export interface FooterConfig {
     topSpacing: number;
     bottomSpacing: number;
   };
-  textInfo: TextInfoConfig; // 新增
+  textInfo: TextInfoConfig; // 现在已定义
 }

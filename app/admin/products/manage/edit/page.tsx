@@ -1,3 +1,4 @@
+// app/admin/products/manage/edit/page.tsx
 'use client';
 
 import { useEffect, useState, useCallback, useRef } from 'react';
@@ -259,7 +260,7 @@ export default function ProductEditPage() {
           setTitleLength(productData.product_name?.length || 0);
           // 获取分类路径和属性模板（使用缓存的分类）
           if (productData.categoryId) {
-            await loadCategoryInfo(productData.categoryId, productData.seriesId, settingsData, signal);
+            await loadCategoryInfo(productData.categoryId, productData.seriesId, settingsData, signal, true, productData);
           }
         } else if (parentId) {
           // 从父产品复制（新建变体，但此页面是父商品编辑，可能是创建类似产品？保留原有逻辑）
@@ -277,7 +278,7 @@ export default function ProductEditPage() {
           }));
           setTitleLength(`${productData.product_name} (变体)`.length);
           if (productData.categoryId) {
-            await loadCategoryInfo(productData.categoryId, productData.seriesId, settingsData, signal);
+            await loadCategoryInfo(productData.categoryId, productData.seriesId, settingsData, signal, true, productData);
           }
         } else {
           // 新建产品：应用默认设置和 URL 参数
@@ -293,7 +294,7 @@ export default function ProductEditPage() {
             seriesId: urlSeriesId,
           }));
           if (urlCategoryId) {
-            await loadCategoryInfo(urlCategoryId, urlSeriesId, settingsData, signal);
+            await loadCategoryInfo(urlCategoryId, urlSeriesId, settingsData, signal, false);
           }
         }
 
@@ -337,7 +338,9 @@ export default function ProductEditPage() {
     categoryId: string,
     seriesId: string | undefined,
     settingsData: any,
-    signal: AbortSignal
+    signal: AbortSignal,
+    isEditMode: boolean = false,
+    productData?: any
   ) => {
     try {
       const cacheValid = Date.now() - staticCache.timestamp < staticCache.TTL;
@@ -360,9 +363,41 @@ export default function ProductEditPage() {
           if (series) seriesName = series.name;
         }
         setCategoryPath(`${productLine?.name || '无'} >> ${cat.name}${seriesName ? ` >> ${seriesName}` : ''}`);
-        if (cat.attributeTemplateId && settingsData.attributeTemplates) {
-          const tpl = settingsData.attributeTemplates.find((t: any) => t.id === cat.attributeTemplateId);
-          if (tpl) setAttributeTemplate(tpl);
+
+        // ===== 属性模板加载逻辑（区分编辑/新建） =====
+        // 编辑模式下使用 productData.attributes 判断是否已有属性数据
+        const hasAttributes = isEditMode
+          ? (productData?.attributes && Object.keys(productData.attributes).length > 0)
+          : false;
+
+        if (isEditMode) {
+          // 编辑模式
+          if (hasAttributes) {
+            // 产品已有属性数据，不加载模板（使用已有数据）
+            setAttributeTemplate(null);
+          } else if (cat.attributeTemplateId && settingsData.attributeTemplates) {
+            // 没有属性数据，但有模板，加载模板作为默认
+            const tpl = settingsData.attributeTemplates.find((t: any) => t.id === cat.attributeTemplateId);
+            if (tpl) {
+              setAttributeTemplate(tpl);
+            } else {
+              setAttributeTemplate(null);
+            }
+          } else {
+            setAttributeTemplate(null);
+          }
+        } else {
+          // 新建模式：直接加载属性模板（如果有）
+          if (cat.attributeTemplateId && settingsData.attributeTemplates) {
+            const tpl = settingsData.attributeTemplates.find((t: any) => t.id === cat.attributeTemplateId);
+            if (tpl) {
+              setAttributeTemplate(tpl);
+            } else {
+              setAttributeTemplate(null);
+            }
+          } else {
+            setAttributeTemplate(null);
+          }
         }
       }
     } catch (err: any) {
@@ -371,7 +406,7 @@ export default function ProductEditPage() {
     }
   };
 
-  // ---------- 表单处理函数（不变） ----------
+  // ---------- 表单处理函数 ----------
   const handleChange = (field: string, value: any) => {
     setForm((prev: any) => ({ ...prev, [field]: value }));
     if (field === 'product_name') setTitleLength(value?.length || 0);
@@ -394,6 +429,7 @@ export default function ProductEditPage() {
     }));
   };
 
+  // ---------- 修改后的异步提交 ----------
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
@@ -450,34 +486,46 @@ export default function ProductEditPage() {
     if (parentId) (payload as any).parent_product_id = parentId;
 
     setSaving(true);
-    const url = productId
-      ? `/api/admin/products/manage?productId=${productId}`
-      : '/api/admin/products/manage';
+    // 构建异步 URL（带 async=true）
+    const baseUrl = productId
+      ? `/api/admin/products/manage?productId=${productId}&async=true`
+      : '/api/admin/products/manage?async=true';
     const method = productId ? 'PUT' : 'POST';
 
     try {
-      const res = await fetch(url, { method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
-      const responseText = await res.text();
-      let result;
-      try {
-        result = JSON.parse(responseText);
-      } catch {
-        result = { error: `服务器返回非JSON: ${responseText.substring(0, 200)}` };
-      }
-      if (res.ok) {
-        setToast({ message: '保存成功', type: 'success' });
-        setTimeout(() => {
-          setSaving(false);
-          router.push(`/admin/products/manage?locale=${locale}`);
-        }, 1500);
-      } else {
-        console.error('Save failed:', result);
-        setToast({ message: result.error || `保存失败 (HTTP ${res.status})`, type: 'error' });
+      const res = await fetch(baseUrl, { method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+      if (!res.ok) {
+        const errorText = await res.text();
+        let errorMsg;
+        try {
+          const errJson = JSON.parse(errorText);
+          errorMsg = errJson.error || `提交失败 (HTTP ${res.status})`;
+        } catch {
+          errorMsg = `提交失败 (HTTP ${res.status})`;
+        }
+        setToast({ message: errorMsg, type: 'error' });
         setSaving(false);
+        return;
       }
+      const result = await res.json();
+      if (!result.taskId) {
+        setToast({ message: '服务器未返回任务ID，请稍后查看列表', type: 'error' });
+        setSaving(false);
+        return;
+      }
+
+      // 存储任务信息到 localStorage，供列表页轮询
+      localStorage.setItem('pendingProductTask', JSON.stringify({
+        taskId: result.taskId,
+        productName: form.product_name || '新商品',
+        productId: form.id || 'new',
+      }));
+
+      // 立即跳转到列表页
+      router.push(`/admin/products/manage?locale=${locale}`);
     } catch (err: any) {
       console.error('Network error:', err);
-      setToast({ message: '保存失败，请检查网络', type: 'error' });
+      setToast({ message: '提交失败，请检查网络', type: 'error' });
       setSaving(false);
     }
   };
@@ -582,26 +630,45 @@ export default function ProductEditPage() {
               </div>
             </div>
 
-            {attributeTemplate && attributeTemplate.attributes.length > 0 && (
-              <div className="border rounded-lg p-4 bg-white shadow-sm">
-                <h2 className="text-lg font-semibold mb-3">自定义属性</h2>
-                <div className="space-y-3">
-                  {attributeTemplate.attributes.map((attr) => (
-                    <div key={attr.name}>
-                      <label className="block font-medium mb-1">{attr.name}</label>
-                      <input
-                        type="text"
-                        placeholder={attr.rule.replace('{属性名}', attr.name)}
-                        value={form.attributes[attr.name] || ''}
-                        onChange={(e) => handleAttributeChange(attr.name, e.target.value)}
-                        className="border rounded p-2 w-full"
-                      />
-                      <p className="text-xs text-gray-500 mt-0.5">{attr.rule}</p>
-                    </div>
-                  ))}
+            {/* 自定义属性 - 显示条件 */}
+              {(attributeTemplate && attributeTemplate.attributes.length > 0) || 
+              (productId && form.attributes && Object.keys(form.attributes).length > 0) ? (
+                <div className="border rounded-lg p-4 bg-white shadow-sm">
+                  <h2 className="text-lg font-semibold mb-3">自定义属性</h2>
+                  <div className="space-y-3">
+                    {attributeTemplate && attributeTemplate.attributes.length > 0 ? (
+                      // 有模板：显示模板定义的字段
+                      attributeTemplate.attributes.map((attr) => (
+                        <div key={attr.name}>
+                          <label className="block font-medium mb-1">{attr.name}</label>
+                          <input
+                            type="text"
+                            placeholder={attr.rule.replace('{属性名}', attr.name)}
+                            value={form.attributes[attr.name] || ''}
+                            onChange={(e) => handleAttributeChange(attr.name, e.target.value)}
+                            className="border rounded p-2 w-full"
+                          />
+                          <p className="text-xs text-gray-500 mt-0.5">{attr.rule}</p>
+                        </div>
+                      ))
+                    ) : (
+                      // 没有模板，但有已有属性数据（编辑模式）
+                      productId && form.attributes && Object.keys(form.attributes).length > 0 &&
+                      Object.keys(form.attributes).map((key) => (
+                        <div key={key}>
+                          <label className="block font-medium mb-1">{key}</label>
+                          <input
+                            type="text"
+                            value={form.attributes[key] || ''}
+                            onChange={(e) => handleAttributeChange(key, e.target.value)}
+                            className="border rounded p-2 w-full"
+                          />
+                        </div>
+                      ))
+                    )}
+                  </div>
                 </div>
-              </div>
-            )}
+              ) : null}
 
             {/* 相关视频卡片 */}
             <div className="border rounded-lg p-4 bg-white shadow-sm">

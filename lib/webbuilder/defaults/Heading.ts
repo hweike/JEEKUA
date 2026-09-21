@@ -8,6 +8,7 @@ export const DEFAULT_HEADING = {
   underline: false,
   fontSize: '2xl' as const,
   link: '',
+  color: '#000000', 
   spacingGroup: {
     mobileScaleFactor: 0.7,
   },

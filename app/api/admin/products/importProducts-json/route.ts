@@ -22,7 +22,6 @@ interface PriceTier {
   price: number;
 }
 
-// 批次内缓存和并发控制
 const imageCache = new Map<string, string>();
 const pendingDownloads = new Map<string, Promise<string>>();
 
@@ -189,8 +188,9 @@ async function processProductItem(
   defaultSettings: any,
   siteName: string,
   skuRule: string,
-  generateUniqueId: () => string
-): Promise<{ success: boolean; productId?: string; error?: string }> {
+  generateUniqueId: () => string,
+  ifoverwrite: boolean
+): Promise<{ success: boolean; productId?: string; error?: string; skipped?: boolean }> {
   const rawData = item.rawData;
   if (!rawData) {
     return { success: false, error: '缺少 rawData 字段' };
@@ -207,7 +207,6 @@ async function processProductItem(
   }
   const { categoryId, seriesId } = categoryInfo;
 
-  // 修改：父产品名称 = 品牌 + 产品名称（不再加一级分类名）
   const productName = `${brand} ${parent_product_name}`.trim();
 
   let productLineId = '';
@@ -219,6 +218,7 @@ async function processProductItem(
   if (!sku) sku = generateSkuFromRule(skuRule);
   else sku = sku.trim();
 
+  // 检查父商品是否存在
   const { data: existingProduct, error: queryError } = await supabase
     .from('products')
     .select('productId, createdAt')
@@ -233,6 +233,12 @@ async function processProductItem(
   }
 
   const isUpdate = !!existingProduct;
+
+  // 如果 !ifoverwrite 且商品已存在，直接跳过
+  if (isUpdate && !ifoverwrite) {
+    return { success: true, productId: existingProduct.productId, skipped: true };
+  }
+
   const productId = isUpdate ? existingProduct.productId : generateUniqueId();
 
   // 处理主图
@@ -262,7 +268,8 @@ async function processProductItem(
     };
   }));
 
-  const description = attributesToHtml(attributes);
+  // description 和 short_description 强制为空
+  const description = '';
   const shortDescription = '';
 
   const priceTiers: PriceTier[] = [{ min_qty: 10, max_qty: null, price: 0 }];
@@ -327,6 +334,19 @@ async function processProductItem(
     productData.variants = existingMd?.variants || [];
   }
 
+  // ★ 强制清空函数
+  const sanitizeProductData = (data: any) => {
+    data.description = '';
+    data.short_description = '';
+    if (data.variants) {
+      data.variants.forEach((v: any) => {
+        v.description = '';
+        v.short_description = '';
+      });
+    }
+    return data;
+  };
+
   const now = new Date().toISOString();
   await upsertProductIndex({
     productId,
@@ -349,6 +369,10 @@ async function processProductItem(
     updatedAt: now,
     createdAt: isUpdate ? existingProduct.createdAt : now,
   });
+
+  // ★ 第一次写入前强制清空
+  sanitizeProductData(productData);
+  console.log(`[IMPORT] Writing parent product ${productId}, description: "${productData.description}"`);
   await writeProduct(locale, productId, productData, '');
 
   // 处理变体
@@ -373,34 +397,37 @@ async function processProductItem(
     }
 
     const isVariantUpdate = !!existingVariant;
+
+    if (isVariantUpdate && !ifoverwrite) {
+      continue;
+    }
+
     const variantId = isVariantUpdate ? existingVariant.productId : generateUniqueId();
 
     const variantName = variant.product_name || `${productName} - ${variantSku}`;
     const variantSlug = generateSlug(variantName);
     const variantImageKey = variant.localImageKey || '';
 
-    // 生成变体的富文本描述（基于属性）
-    const variantDescription = attributesToHtml(variant.attributes || {});
+    // 变体 description 和 short_description 为空
+    const variantDescription = '';
     const variantShortDesc = '';
 
     const variantSeoTitle = generateSeoTitle(
       variantName, brand, minOrderQuantity, siteName,
       defaultSettings.auto_seo_title_template || ''
     );
-    // 使用 variantDescription 作为 SEO 描述的基础
     const variantSeoDescription = generateSeoDescription(
       variantDescription, priceTiers, '',
       defaultSettings.auto_seo_desc_template || '',
       defaultSettings.default_currency || 'USD'
     );
 
-    // 变体数据（存入父产品的 variants 数组，包含 description）
     const variantData = {
       id: variantId,
       product_name: variantName,
       sku: variantSku,
       short_description: variantShortDesc,
-      description: variantDescription,        // 富文本描述，仅存于 MD 文件
+      description: variantDescription,
       main_image_url: variantImageKey,
       additional_images: [],
       attributes: variant.attributes || {},
@@ -419,7 +446,7 @@ async function processProductItem(
       productData.variants.push(variantData);
     }
 
-    // 写入 products 表（不包含 description 字段）
+    // 写入 products 表
     const variantRecord = {
       productId: variantId,
       site_id: DEFAULT_SITE_ID,
@@ -475,8 +502,11 @@ async function processProductItem(
     variantItems.push(variantData);
   }
 
-  // 如果有变体，更新父产品的 MD 文件（因为变体数据已修改）
-  if (variantItems.length > 0) {
+  // 更新父产品的 MD 文件（变体可能已变更）
+  if (variantItems.length > 0 || isUpdate) {
+    // ★ 第二次写入前强制清空
+    sanitizeProductData(productData);
+    console.log(`[IMPORT] Updating parent product ${productId} after variant processing, description: "${productData.description}"`);
     await writeProduct(locale, productId, productData, '');
     const parentIndex = await getProductIndex(productId, locale);
     if (parentIndex) {
@@ -501,6 +531,9 @@ export async function POST(req: NextRequest) {
   const formData = await req.formData();
   const file = formData.get('file') as File;
   const locale = (formData.get('locale') as string) || 'zh';
+  const ifoverwrite = formData.get('ifoverwrite') === 'true';
+
+  console.log(`[IMPORT] ifoverwrite = ${ifoverwrite}`);
 
   if (!file) {
     return NextResponse.json({ error: '未上传文件' }, { status: 400 });
@@ -534,7 +567,7 @@ export async function POST(req: NextRequest) {
 
     const tasks = items.map((item) => async () => {
       return await processProductItem(
-        item, locale, defaultSettings, siteName, skuRule, generateUniqueId
+        item, locale, defaultSettings, siteName, skuRule, generateUniqueId, ifoverwrite
       );
     });
 
@@ -542,12 +575,13 @@ export async function POST(req: NextRequest) {
     const results = await runWithConcurrency(tasks, CONCURRENT_LIMIT);
 
     const successCount = results.filter(r => r.success).length;
+    const skipCount = results.filter(r => r.skipped).length;
     const failCount = results.length - successCount;
     const message = failCount === 0
-      ? `成功导入 ${successCount} 个产品系列`
-      : `成功 ${successCount} 个，失败 ${failCount} 个`;
+      ? `成功导入 ${successCount} 个产品系列${skipCount > 0 ? `，跳过 ${skipCount} 个已存在产品` : ''}`
+      : `成功 ${successCount} 个，失败 ${failCount} 个${skipCount > 0 ? `，跳过 ${skipCount} 个` : ''}`;
     console.log(`导入完成，总耗时 ${Date.now() - startTime}ms`);
-    return NextResponse.json({ message, results });
+    return NextResponse.json({ message, results, skipCount });
   } catch (error: any) {
     console.error('JSON 导入失败:', error);
     return NextResponse.json({ error: error.message || '导入失败' }, { status: 500 });

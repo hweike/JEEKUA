@@ -234,6 +234,11 @@ export default function BlogList() {
     return vis === 'visible' ? '可见' : '隐藏';
   };
 
+  // 将语言代码转为 "XX站" 格式
+  const getLocaleStationLabel = (loc: string) => {
+    return `${getLanguageDisplayName(loc, 'zh')}站`;
+  };
+
   if (loading) return <div className="p-6 text-center">加载中...</div>;
 
   return (
@@ -256,30 +261,32 @@ export default function BlogList() {
         </div>
       </div>
 
-      {/* 搜索栏 + 分类筛选 */}
-      <div className="mb-6 flex flex-wrap items-center gap-3">
-        <input
-          type="text"
-          placeholder="搜索当前语言文章标题或 URL..."
-          value={searchTerm}
-          onChange={(e) => setSearchTerm(e.target.value)}
-          className="border rounded-lg px-3 py-2 w-64 focus:outline-none focus:ring-2 focus:ring-blue-500"
-        />
-        <select
-          value={selectedCategory}
-          onChange={(e) => setSelectedCategory(e.target.value)}
-          className="border rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
-        >
-          <option value="">全部分类</option>
-          {categories.map((cat) => (
-            <option key={cat.id} value={cat.id}>
-              {cat.title}
-            </option>
-          ))}
-        </select>
-        <button className="bg-gray-100 hover:bg-gray-200 px-4 py-2 rounded-lg flex items-center gap-1">
-          <Search size={16} /> 搜索
-        </button>
+      {/* 搜索栏 + 分类筛选（全宽） */}
+      <div className="mb-6 w-full">
+        <div className="flex flex-wrap items-center gap-3 w-full">
+          <input
+            type="text"
+            placeholder="搜索当前语言文章标题或 URL..."
+            value={searchTerm}
+            onChange={(e) => setSearchTerm(e.target.value)}
+            className="border rounded-lg px-3 py-2 flex-1 focus:outline-none focus:ring-2 focus:ring-blue-500"
+          />
+          <select
+            value={selectedCategory}
+            onChange={(e) => setSelectedCategory(e.target.value)}
+            className="border rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500 flex-shrink-0"
+          >
+            <option value="">全部分类</option>
+            {categories.map((cat) => (
+              <option key={cat.id} value={cat.id}>
+                {cat.title}
+              </option>
+            ))}
+          </select>
+          <button className="bg-gray-100 hover:bg-gray-200 px-4 py-2 rounded-lg flex items-center gap-1 flex-shrink-0">
+            <Search size={16} /> 搜索
+          </button>
+        </div>
       </div>
 
       {/* 表格容器 - 添加 overflow-x-hidden 防止横向滚动 */}
@@ -325,11 +332,14 @@ export default function BlogList() {
                               {isExpanded ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
                             </button>
                           )}
-                          <span
-                            className="font-medium text-gray-900 truncate"
-                            title={current?.title || ''}
-                          >
-                            {current?.title || `${getLanguageDisplayName(locale, 'zh')}（未设置）`}
+                          <span className="text-sm truncate min-w-0" title={current?.title || ''}>
+                            <span className="font-bold text-gray-900 flex-shrink-0">
+                              {getLocaleStationLabel(locale)}
+                            </span>
+                            {' '}
+                            <span className="text-gray-900">
+                              {current?.title || '（未设置）'}
+                            </span>
                           </span>
                         </div>
                       </td>
@@ -392,8 +402,8 @@ export default function BlogList() {
                             {/* 子行标题列 - 宽度控制及溢出隐藏 */}
                             <td className="px-6 py-3 pl-12 w-[60%] min-w-0 overflow-hidden">
                               <div className="flex items-center gap-2 min-w-0">
-                                <span className="text-sm font-medium text-gray-500 w-16 flex-shrink-0">
-                                  {getLanguageDisplayName(loc, 'zh')}
+                                <span className="text-sm font-bold text-gray-700 w-20 flex-shrink-0">
+                                  {getLocaleStationLabel(loc)}
                                 </span>
                                 <span
                                   className={`text-sm ${exists ? 'text-gray-900' : 'text-gray-400'} truncate`}
@@ -448,8 +458,14 @@ export default function BlogList() {
                 <tr key={post.id} className="hover:bg-gray-50">
                   {/* 普通模式标题列 - 添加宽度控制 */}
                   <td className="px-6 py-4 w-[60%] min-w-0 overflow-hidden">
-                    <span className="font-medium text-gray-900 truncate block" title={post.title}>
-                      {post.title}
+                    <span className="text-sm truncate block" title={post.title}>
+                      <span className="font-bold text-gray-900">
+                        {getLocaleStationLabel(locale)}
+                      </span>
+                      {' '}
+                      <span className="text-gray-900">
+                        {post.title}
+                      </span>
                     </span>
                   </td>
                   <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">

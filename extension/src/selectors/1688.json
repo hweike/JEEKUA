@@ -1,0 +1,99 @@
+{
+  "platform": "1688",
+  "version": "1.0.3",
+  "description": "1688 商品详情页采集配置（支持 Shadow DOM + 新属性结构）",
+  "fields": {
+    "title": {
+      "type": "text",
+      "selectors": [
+        "#productTitle .title-content h1",
+        ".title-content h1",
+        "[data-module='od_title'] h1"
+      ],
+      "fallback": "未知商品"
+    },
+    "price": {
+      "type": "text",
+      "selectors": [
+        ".price-component",
+        ".od-price-container .price-component",
+        ".price-info",
+        ".price-component .currency"
+      ],
+      "fallback": "0"
+    },
+    "gallery_images": {
+      "type": "styleAll",
+      "selectors": [
+        ".od-gallery-preview .preview-img",
+        ".od-gallery-list .preview-img",
+        ".od-picture-gallery-list .v-image-cover",
+        ".od-gallery-preview img",
+        ".ant-image .preview-img",
+        ".od-scroller-item span",
+        ".od-gallery-list img",
+        ".preview-img"
+      ]
+    },
+    "main_image": {
+      "type": "attr",
+      "selectors": [
+        ".od-gallery-preview .preview-img",
+        ".od-gallery-preview img",
+        ".od-gallery-list .preview-img"
+      ],
+      "attribute": "src",
+      "fallback": ""
+    },
+    "description": {
+      "type": "html",
+      "selectors": [
+        ".html-description",
+        "#description .collapse-body",
+        "v-detail-x.html-description",
+        "v-detail-e.html-description"
+      ],
+      "fallback": ""
+    },
+    "sku_list": {
+      "type": "extractSkuTable",
+      "selectors": [
+        "#skuSelection .expand-view-item",
+        ".gyp-pro-table .ant-table-tbody tr",
+        ".sku-attr-table .ant-table-tbody tr"
+      ]
+    },
+    "attributes": {
+      "type": "attributes",
+      "selectors": [
+        "[data-testid='module-attribute-row']",
+        "[data-testid='module-attribute-group-grid']",
+        ".id-grid-cols-\\[2fr_3fr\\]",
+        ".ant-descriptions .ant-descriptions-row",
+        ".attr-descriptions .ant-descriptions-row"
+      ]
+    },
+    "supplier": {
+      "type": "text",
+      "selectors": [
+        ".shop-company-name h1",
+        ".shop-container .shop-company-name h1",
+        ".shop-company-name"
+      ],
+      "fallback": ""
+    },
+    "location": {
+      "type": "text",
+      "selectors": [
+        ".location",
+        ".shipping-services .location",
+        "[class*='location']"
+      ],
+      "fallback": ""
+    }
+  },
+  "field_mapping": {
+    "gallery_images": "images",
+    "main_image": "main_image_url"
+  }
+}

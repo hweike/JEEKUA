@@ -32,6 +32,11 @@ import { getImageUrl } from '@/lib/files/url';
 import { DEFAULT_COLLAPSIBLE } from '@/lib/webbuilder/defaults/Collapsible';
 import { getAltSuffix } from '@/lib/webbuilder/alt-suffix-config';
 
+// ✅ 入场动画参数（硬编码）
+const ANIMATION_DURATION_MS = 600;
+const ANIMATION_DELAY_STEP_MS = 100;
+const CONTENT_EXPAND_DURATION_MS = 300;
+
 function getDisplayImageUrl(url: string, isEditMode: boolean): string {
   if (!url) return '';
   const fullUrl = getImageUrl(url);
@@ -91,16 +96,47 @@ export function Collapsible(props: any) {
   const locale = __runtime.locale || 'zh';
   const suffix = getAltSuffix('Collapsible', locale);
 
-  // 手风琴展开状态（编辑模式下默认展开第一个项目）
+  // 手风琴展开状态
   const [expandedIndex, setExpandedIndex] = useState<number | null>(() => {
     if (isEditMode && mergedItems.length > 0) return 0;
     return null;
   });
 
-  // 用于检测 items 变化的 ref（编辑联动）
   const prevItemsRef = useRef<any[]>(mergedItems);
 
-  // 编辑联动：检测 items 变化，自动展开被编辑的项目
+  // ✅ 滚动进入动画状态
+  const containerRef = useRef<HTMLDivElement>(null);
+  const [visible, setVisible] = useState(false);
+
+  useEffect(() => {
+    if (isEditMode) {
+      setVisible(true);
+      return;
+    }
+
+    const el = containerRef.current;
+    if (!el) {
+      setVisible(true);
+      return;
+    }
+
+    const observer = new IntersectionObserver(
+      (entries) => {
+        entries.forEach((entry) => {
+          if (entry.isIntersecting) {
+            setVisible(true);
+            observer.unobserve(entry.target);
+          }
+        });
+      },
+      { threshold: 0.15 }
+    );
+
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [isEditMode]);
+
+  // 编辑联动
   useEffect(() => {
     if (!isEditMode || mergedItems.length === 0) return;
 
@@ -112,7 +148,6 @@ export function Collapsible(props: any) {
         break;
       }
     }
-    // 如果长度变化，认为第一个被编辑
     if (changedIndex === -1 && prev.length !== mergedItems.length) {
       changedIndex = 0;
     }
@@ -124,7 +159,6 @@ export function Collapsible(props: any) {
     prevItemsRef.current = mergedItems;
   }, [isEditMode, mergedItems]);
 
-  // 当 items 变化时，如果当前展开的索引超出范围，重置为 0（仅在编辑模式）
   useEffect(() => {
     if (isEditMode && mergedItems.length > 0) {
       if (expandedIndex === null || expandedIndex >= mergedItems.length) {
@@ -137,7 +171,7 @@ export function Collapsible(props: any) {
     setExpandedIndex(prev => (prev === index ? null : index));
   };
 
-  // 通栏统一实现
+  // 通栏
   const isFullwidth = bannerGroup.bannerType === 'fullwidth';
   const outerStyle: React.CSSProperties = {
     backgroundColor: bannerGroup.backgroundColor,
@@ -168,7 +202,6 @@ export function Collapsible(props: any) {
     paddingRight: 'clamp(1rem, 2vw, 2rem)',
   };
 
-  // 响应式字体
   const globalTitleClamp = `clamp(${titleGroup.globalTitleFontSize * mobileScaleFactor}px, 3vw, ${titleGroup.globalTitleFontSize}px)`;
   const rowTitleClamp = `clamp(${contentGroup.rowTitleFontSize * mobileScaleFactor}px, 1.5vw, ${contentGroup.rowTitleFontSize}px)`;
   const rowContentClamp = `clamp(${contentGroup.rowContentFontSize * mobileScaleFactor}px, 1.2vw, ${contentGroup.rowContentFontSize}px)`;
@@ -204,13 +237,28 @@ export function Collapsible(props: any) {
     );
   }
 
+  // ✅ 通用入场样式
+  const enterStyle = (delayMs: number): React.CSSProperties => ({
+    opacity: isEditMode || visible ? 1 : 0,
+    transform: isEditMode || visible ? 'translateY(0)' : 'translateY(24px)',
+    transition: `opacity ${ANIMATION_DURATION_MS}ms ease-out ${delayMs}ms, transform ${ANIMATION_DURATION_MS}ms ease-out ${delayMs}ms`,
+    willChange: 'opacity, transform',
+  });
+
   return (
     <div ref={props.puck?.dragRef} className={outerClasses} style={outerStyle}>
-      <div className="relative w-full">
+      <div className="relative w-full" ref={containerRef}>
         <div style={contentStyle}>
           <div className="w-full">
+            {/* ✅ 全局标题入场 */}
             {titleGroup.globalTitle && (
-              <div style={{ textAlign: titleGroup.globalTitleAlign }} className="mb-8">
+              <div
+                style={{
+                  textAlign: titleGroup.globalTitleAlign,
+                  ...enterStyle(0),
+                }}
+                className="mb-8"
+              >
                 <h2
                   className="font-bold"
                   style={{
@@ -224,26 +272,49 @@ export function Collapsible(props: any) {
             )}
 
             <div className={`flex ${flexDirection} gap-8`}>
+              {/* ✅ 图片入场（延迟 100ms） */}
               {hasImage && (
-                <div className="flex-1">
+                <div className="flex-1" style={enterStyle(100)}>
                   <div className={`${getImageSizeClass()} mx-auto`}>
                     <img
                       src={getDisplayImageUrl(imageGroup.imageUrl, isEditMode)}
                       alt={seoTitle ? `${seoTitle} - ${suffix}` : suffix}
                       className="w-full h-auto rounded-lg object-cover"
                       loading="lazy"
+                      decoding="async"
                     />
                   </div>
                 </div>
               )}
 
-              <div className="flex-1" style={getContainerStyle()}>
+              {/* ✅ 内容区（无图片时从 0ms 开始；有图片时从 200ms 开始） */}
+              <div
+                className="flex-1"
+                style={{
+                  ...getContainerStyle(),
+                  ...enterStyle(hasImage ? 200 : 0),
+                }}
+              >
                 {mergedItems.map((item: any, idx: number) => {
                   const IconComponent = ICON_COMPONENTS[item.icon];
                   const isExpanded = expandedIndex === idx;
 
                   return (
-                    <div key={idx} className="mb-3 last:mb-0">
+                    <div
+                      key={idx}
+                      className="mb-3 last:mb-0"
+                      style={{
+                        // ✅ 每行依次淡入
+                        opacity: isEditMode || visible ? 1 : 0,
+                        transform: isEditMode || visible ? 'translateY(0)' : 'translateY(16px)',
+                        transition: `opacity ${ANIMATION_DURATION_MS}ms ease-out ${
+                          (hasImage ? 200 : 0) + idx * ANIMATION_DELAY_STEP_MS
+                        }ms, transform ${ANIMATION_DURATION_MS}ms ease-out ${
+                          (hasImage ? 200 : 0) + idx * ANIMATION_DELAY_STEP_MS
+                        }ms`,
+                        willChange: 'opacity, transform',
+                      }}
+                    >
                       <div
                         className="flex items-center justify-between cursor-pointer p-3 hover:bg-gray-50 transition rounded-lg"
                         style={{
@@ -265,18 +336,34 @@ export function Collapsible(props: any) {
                         </div>
                         {isExpanded ? <ChevronDown size={20} /> : <ChevronRight size={20} />}
                       </div>
-                      {isExpanded && (
-                        <div className="p-3 pt-1">
+
+                      {/* ✅ 展开内容：grid-template-rows 平滑过渡 */}
+                      <div
+                        style={{
+                          display: 'grid',
+                          gridTemplateRows: isExpanded ? '1fr' : '0fr',
+                          transition: `grid-template-rows ${CONTENT_EXPAND_DURATION_MS}ms ease-in-out`,
+                        }}
+                      >
+                        <div style={{ overflow: 'hidden' }}>
                           <div
+                            className="p-3 pt-1"
                             style={{
-                              fontSize: rowContentClamp,
-                              color: contentGroup.rowContentColor,
+                              opacity: isExpanded ? 1 : 0,
+                              transition: `opacity ${CONTENT_EXPAND_DURATION_MS}ms ease-in-out`,
                             }}
                           >
-                            {item.content}
+                            <div
+                              style={{
+                                fontSize: rowContentClamp,
+                                color: contentGroup.rowContentColor,
+                              }}
+                            >
+                              {item.content}
+                            </div>
                           </div>
                         </div>
-                      )}
+                      </div>
                     </div>
                   );
                 })}

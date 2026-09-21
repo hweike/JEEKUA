@@ -3,7 +3,7 @@ import type { ComponentConfig } from '@puckeditor/core';
 import type { Components } from '../types';
 
 export const config: ComponentConfig<Components['DocumentLibraryBlock']> = {
-  label: '文档库展示',
+  label: '文档库落地页',
   category: 'Document',
   defaultProps: {},
   fields: {},

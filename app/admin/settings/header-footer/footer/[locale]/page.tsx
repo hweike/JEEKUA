@@ -21,16 +21,19 @@ export default function FooterSettingsPage() {
   const loadConfig = async (lang: string) => {
     setLoading(true);
     try {
-      const res = await fetch(`/api/SiteHeadersFooters/config?type=footer&locale=${lang}`);
+      const res = await fetch(
+        `/api/SiteHeadersFooters/config?type=footer&locale=${lang}&_t=${Date.now()}`,
+        { cache: 'no-store' }
+      );
       if (!res.ok) throw new Error('加载失败');
       const data = await res.json();
       if (data && Object.keys(data).length > 0) {
-        setConfig(data);
+        setConfig({ ...data }); // 创建新对象，触发更新
       } else {
         setConfig(null);
       }
     } catch (error) {
-      console.error(error);
+      console.error('加载页脚配置失败:', error);
       setConfig(null);
     } finally {
       setLoading(false);
@@ -58,9 +61,8 @@ export default function FooterSettingsPage() {
     }
   };
 
-  // 保存回调：刷新数据并显示 Toast（保留原有逻辑）
   const handleFooterSave = async (success: boolean, message?: string) => {
-    console.log('[Parent] 保存回调:', success, message);
+    setSaving(false);
     if (success) {
       setToast({ message: message || '保存成功', type: 'success' });
       await loadConfig(locale);
@@ -69,16 +71,12 @@ export default function FooterSettingsPage() {
     }
   };
 
-  // 触发表单提交
   const handleSave = async () => {
     setSaving(true);
     try {
       const form = containerRef.current?.querySelector('form');
       if (form) {
         form.requestSubmit();
-        // 表单提交后，FooterForm 内部会调用 onSave 回调，由 handleFooterSave 处理结果
-        // 这里仅管理按钮状态，等待回调完成
-        setTimeout(() => setSaving(false), 1500);
       } else {
         throw new Error('未找到表单');
       }
@@ -88,9 +86,10 @@ export default function FooterSettingsPage() {
     }
   };
 
+  // 依赖 locale 和 router.asPath，确保路由变化时重新加载
   useEffect(() => {
     loadConfig(locale);
-  }, [locale]);
+  }, [locale, router.asPath]);
 
   const siteName = getLanguageDisplayName(locale, 'zh');
 
@@ -118,6 +117,9 @@ export default function FooterSettingsPage() {
     );
   }
 
+  // 使用 config 的 JSON 字符串作为 key，确保配置变化时组件完全重建
+  const formKey = JSON.stringify(config);
+
   return (
     <div className="min-h-screen bg-gray-100 py-8 pb-24">
       <div className="w-4/5 mx-auto">
@@ -127,20 +129,22 @@ export default function FooterSettingsPage() {
             onClick={handleInitCurrent}
             className="bg-gray-200 hover:bg-gray-300 px-4 py-2 rounded text-sm inline-flex items-center gap-2"
           >
-            <RefreshCw size={14} /> 初始化设置
+            <RefreshCw size={14} /> 初始化数据
           </button>
         </div>
 
         <div className="bg-white rounded-lg shadow p-[50px]" ref={containerRef}>
           <FooterForm
+            key={formKey}
             initialConfig={config}
             locale={locale}
             onSave={handleFooterSave}
+            styleReadonly={true}
+            showSubmitButton={false}
           />
         </div>
       </div>
 
-      {/* 悬浮按钮 */}
       <div className="fixed bottom-0 left-0 right-0 bg-white border-t shadow-lg p-4 flex justify-end gap-4 z-50">
         <button
           type="button"

@@ -1,106 +1,298 @@
+// app/[locale]/video/[categorySlug]/[videoSlug]/page.tsx
 import { notFound, redirect } from 'next/navigation';
-import { getVideoBySlug, getVideoCategories } from '@/lib/videosys';
-import { Metadata } from 'next';
+import { Suspense } from 'react';
+import { getTranslations } from 'next-intl/server';
+import { getCachedVideoBySlug, getCachedVideoCategories } from '@/lib/videosys';
+import { withDynamicLocale } from '@/lib/withPageLocale';
+import { getSeoInput } from '@/lib/seo/getSeoInput';
+import { getSiteSettings } from '@/lib/getSiteSettings';
+import { getImageUrl } from '@/lib/files/url';
 import VideoPlayer from '@/components/videosys-front/VideoPlayer';
 import RelatedProducts from '@/components/front/RelatedProducts';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import rehypeRaw from 'rehype-raw';
-import { withDynamicLocale } from '@/lib/withPageLocale';
-
-// 辅助函数：安全获取可能不存在的 description 字段
-function getVideoDescription(video: any): string | null {
-  return video.description ?? null;
-}
+import VideoDetailLoading from './loading';
 
 type Params = Promise<{ locale: string; categorySlug: string; videoSlug: string }>;
 
-export async function generateMetadata({ params }: { params: Params }): Promise<Metadata> {
+export async function generateMetadata({ params }: { params: Params }) {
   const { locale, videoSlug } = await params;
-  const video = await getVideoBySlug(videoSlug, locale);
-  if (!video) return {};
+  const settings = await getSiteSettings();
+  const siteName = settings.siteName || 'Site Name';
+  const baseUrl = (settings.websiteUrl || process.env.NEXT_PUBLIC_BASE_URL || '').replace(/\/+$/, '');
+
+  const video = await getCachedVideoBySlug(locale, videoSlug);
+  if (!video) {
+    return { title: 'Not Found' };
+  }
+
+  const title = video.seo_title || video.title || 'Video';
+  const canonical = `${baseUrl}/${locale}/video/${video.categorySlug || video.category_key}/${video.slug}`;
+
+  let description = video.seo_description || '';
+  if (!description && video.content) {
+    const plainText = video.content.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim();
+    description = plainText.slice(0, 200);
+  }
+  description = description || '';
+
+  const image = video.thumbnail ? getImageUrl(video.thumbnail) : '';
+
+  const openGraph: any = {
+    title: `${title} | ${siteName}`,
+    description,
+    url: canonical,
+    siteName,
+    locale,
+    type: 'website',
+  };
+  if (image && image.trim() !== '') {
+    openGraph.images = [{ url: image, width: 1280, height: 720 }];
+  }
+
+  const twitter: any = {
+    card: 'summary_large_image',
+    site: '@feismanpower',
+    title: `${title} | ${siteName}`,
+    description,
+  };
+  if (image && image.trim() !== '') {
+    twitter.images = [image];
+  }
+
   return {
-    title: video.seo_title || video.title,
-    description: video.seo_description || '',
+    title: `${title} | ${siteName}`,
+    description,
+    robots: 'index, follow',
+    alternates: { canonical },
+    openGraph,
+    twitter,
   };
 }
 
-async function VideoDetailPage({ params }: { params: Params }) {
-  const { locale, categorySlug, videoSlug } = await params;
-  const video = await getVideoBySlug(videoSlug, locale);
+interface VideoDetailContentProps {
+  locale: string;
+  categorySlug: string;
+  videoSlug: string;
+}
+
+async function VideoDetailContent({ locale, categorySlug, videoSlug }: VideoDetailContentProps) {
+  const settings = await getSiteSettings();
+  const baseUrl = (settings.websiteUrl || process.env.NEXT_PUBLIC_BASE_URL || '').replace(/\/+$/, '');
+  const siteName = settings.siteName || 'Site Name';
+  const t = await getTranslations({ locale, namespace: 'Video' });
+
+  const video = await getCachedVideoBySlug(locale, videoSlug);
   if (!video) notFound();
 
-  // 验证分类 slug 是否匹配
-  const categories = await getVideoCategories(locale);
-  const category = categories.find(c => c.slug === categorySlug);
+  const categories = await getCachedVideoCategories(locale);
+  const category = categories.find((c) => c.slug === categorySlug);
   const actualCategorySlug = category?.slug || video.category_key;
   if (categorySlug !== actualCategorySlug) {
     redirect(`/${locale}/video/${actualCategorySlug}/${videoSlug}`);
   }
 
-  // 视频标签（从视频数据中读取 tags 字段，若无则使用分类名称作为默认标签）
-  const tags = video.tags ? video.tags.split(',').map((t: string) => t.trim()) : [category?.name];
+  const tags = video.tags
+    ? video.tags.split(',').map((t: string) => t.trim()).filter(t => t && t !== '[]')
+    : [];
 
-  const videoDescription = getVideoDescription(video);
+  const videoDescription = video.seo_description || video.content?.slice(0, 200) || null;
+
+  const data = { video, category, siteName, baseUrl, t };
+  const seoInput = await getSeoInput('videoDetail', videoSlug, locale, data);
+  let jsonLdScripts: string[] = [];
+  if (seoInput?.structuredData) {
+    const structuredData = seoInput.structuredData as any;
+    if (structuredData && structuredData['@graph'] && Array.isArray(structuredData['@graph'])) {
+      jsonLdScripts = [JSON.stringify(structuredData)];
+    } else {
+      jsonLdScripts = [JSON.stringify(structuredData)];
+    }
+  }
+
+  // ============================================================
+  // ✅ 视频详情页专属 CSS 变量（带 fallback）
+  // ============================================================
+  const containerBg = 'var(--video-detail-bg, var(--background, #ffffff))';
+  const containerText = 'var(--video-detail-text, var(--foreground, #0f172a))';
+  const titleColor = 'var(--video-detail-title-color, var(--foreground, #0f172a))';
+  const metaColor = 'var(--video-detail-meta-color, var(--muted-foreground, #64748b))';
+  const dividerColor = 'var(--video-detail-divider, var(--border, #e2e8f0))';
+  const tagBg = 'var(--video-detail-tag-bg, var(--muted, #f1f5f9))';
+  const tagText = 'var(--video-detail-tag-text, var(--muted-foreground, #64748b))';
+  const headingColor = 'var(--video-detail-heading-color, var(--foreground, #0f172a))';
+  const contentColor = 'var(--video-detail-content-color, var(--foreground, #0f172a))';
+  const linkColor = 'var(--video-detail-link-color, var(--primary, #1e293b))';
+  const playerRadius = 'var(--video-detail-player-radius, var(--radius, 0.625rem))';
 
   return (
-    <div className="container mx-auto px-4 py-8">
-      <div className="flex flex-col lg:flex-row gap-8">
-        <div className="flex-1 min-w-0">
-          <h1 className="text-2xl md:text-3xl lg:text-4xl font-bold text-foreground mb-3">
-            {video.title}
-          </h1>
+    <>
+      {jsonLdScripts.map((script, idx) => (
+        <script
+          key={idx}
+          type="application/ld+json"
+          dangerouslySetInnerHTML={{ __html: script }}
+        />
+      ))}
+      <div
+        className="mx-auto"
+        style={{
+          maxWidth: '1280px',
+          marginLeft: 'auto',
+          marginRight: 'auto',
+          paddingLeft: 'var(--spacing-4, 1rem)',
+          paddingRight: 'var(--spacing-4, 1rem)',
+          paddingTop: 'var(--spacing-8, 2rem)',
+          paddingBottom: 'var(--spacing-8, 2rem)',
+          backgroundColor: containerBg,
+          color: containerText,
+        }}
+      >
+        <div
+          className="flex flex-col lg:flex-row"
+          style={{ gap: 'var(--spacing-8, 2rem)' }}
+        >
+          <div className="flex-1 min-w-0">
+            {/* 标题 */}
+            <h1
+              className="font-bold"
+              style={{
+                fontSize: 'var(--font-size-2xl, 1.5rem)',
+                fontWeight: 'var(--font-weight-bold, 700)',
+                color: titleColor,
+                marginBottom: 'var(--spacing-3, 0.75rem)',
+              }}
+            >
+              {video.title}
+            </h1>
 
-          <div className="flex items-center gap-4 text-sm text-muted-foreground mb-6 pb-4 border-b border-border">
-            <span>更新于 {new Date(video.updated_at).toLocaleDateString(locale)}</span>
-            {video.category_key && <span>分类：{category?.name}</span>}
+            {/* 元数据 */}
+            <div
+              className="flex items-center"
+              style={{
+                gap: 'var(--spacing-4, 1rem)',
+                fontSize: 'var(--font-size-sm, 0.875rem)',
+                color: metaColor,
+                marginBottom: 'var(--spacing-6, 1.5rem)',
+                paddingBottom: 'var(--spacing-4, 1rem)',
+                borderBottom: `1px solid ${dividerColor}`,
+              }}
+            >
+              <span>{t('updatedOn')} {new Date(video.updated_at).toLocaleDateString(locale)}</span>
+              {video.category_key && category && (
+                <span>{t('categoryLabel')}{category.name}</span>
+              )}
+            </div>
+
+            {/* 播放器容器 */}
+            <div
+              className="aspect-video w-full bg-black overflow-hidden"
+              style={{
+                marginBottom: 'var(--spacing-8, 2rem)',
+                borderRadius: playerRadius,
+              }}
+            >
+              <VideoPlayer source={video.source_type} videoId={video.video_id} title={video.title} />
+            </div>
+
+            {/* 标签 */}
+            {tags.length > 0 && (
+              <div style={{ marginBottom: 'var(--spacing-6, 1.5rem)' }}>
+                <div
+                  className="flex flex-wrap"
+                  style={{ gap: 'var(--spacing-2, 0.5rem)' }}
+                >
+                  {tags.map(tag => (
+                    <span
+                      key={tag}
+                      className="rounded-full"
+                      style={{
+                        paddingLeft: 'var(--spacing-3, 0.75rem)',
+                        paddingRight: 'var(--spacing-3, 0.75rem)',
+                        paddingTop: 'var(--spacing-1, 0.25rem)',
+                        paddingBottom: 'var(--spacing-1, 0.25rem)',
+                        fontSize: 'var(--font-size-sm, 0.875rem)',
+                        backgroundColor: tagBg,
+                        color: tagText,
+                      }}
+                    >
+                      {tag}
+                    </span>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* 简介 */}
+            {videoDescription && (
+              <div style={{ marginBottom: 'var(--spacing-8, 2rem)' }}>
+                <h2
+                  style={{
+                    fontSize: 'var(--font-size-lg, 1.125rem)',
+                    fontWeight: 'var(--font-weight-semibold, 600)',
+                    color: headingColor,
+                    marginBottom: 'var(--spacing-3, 0.75rem)',
+                  }}
+                >
+                  {t('introduction')}
+                </h2>
+                <div className="prose max-w-none" style={{ color: contentColor }}>
+                  <p>{videoDescription}</p>
+                </div>
+              </div>
+            )}
+
+            {/* Markdown 内容 */}
+            {video.content && (
+              <div>
+                <div
+                  className="prose max-w-none"
+                  style={{
+                    '--tw-prose-body': contentColor,
+                    '--tw-prose-headings': headingColor,
+                    '--tw-prose-links': linkColor,
+                    '--tw-prose-bold': headingColor,
+                  } as React.CSSProperties}
+                >
+                  <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeRaw]}>
+                    {video.content}
+                  </ReactMarkdown>
+                </div>
+              </div>
+            )}
           </div>
 
-          <div className="aspect-video w-full mb-8 bg-black rounded-lg overflow-hidden">
-            <VideoPlayer source={video.source_type} videoId={video.video_id} title={video.title} />
-          </div>
-
-          {tags.length > 0 && (
-            <div className="mb-6">
-              <div className="flex flex-wrap gap-2">
-                {tags.map(tag => (
-                  <span key={tag} className="px-3 py-1 bg-muted rounded-full text-sm text-muted-foreground">
-                    {tag}
-                  </span>
-                ))}
-              </div>
+          {/* 侧边栏 */}
+          <aside className="w-full lg:w-80 flex-shrink-0">
+            <div className="sticky top-24">
+              <RelatedProducts resourceType="video" resourceId={video.id} />
             </div>
-          )}
-
-          {videoDescription && (
-            <div className="mb-8">
-              <h2 className="text-lg font-semibold text-foreground mb-3">简介</h2>
-              <div className="prose max-w-none text-muted-foreground">
-                <p>{videoDescription}</p>
-              </div>
-            </div>
-          )}
-
-          {video.content && (
-            <div>
-              <h2 className="text-lg font-semibold text-foreground mb-3">详情</h2>
-              <div className="prose max-w-none prose-headings:text-foreground prose-p:text-muted-foreground prose-strong:text-foreground prose-a:text-primary">
-                <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeRaw]}>
-                  {video.content}
-                </ReactMarkdown>
-              </div>
-            </div>
-          )}
+          </aside>
         </div>
-
-        <aside className="w-full lg:w-80 flex-shrink-0">
-          <div className="sticky top-24">
-            <RelatedProducts resourceType="video" resourceId={video.id} />
-          </div>
-        </aside>
       </div>
-    </div>
+    </>
   );
 }
 
+async function VideoDetailPage({ params }: { params: Params }) {
+  const { locale, categorySlug, videoSlug } = await params;
+  const decodedVideoSlug = decodeURIComponent(videoSlug);
+
+  return (
+    <Suspense fallback={<VideoDetailLoading />}>
+      <VideoDetailContent
+        locale={locale}
+        categorySlug={categorySlug}
+        videoSlug={decodedVideoSlug}
+      />
+    </Suspense>
+  );
+}
+
+export async function generateStaticParams() {
+  return [];
+}
+
+export const revalidate = 3600;
 export default withDynamicLocale(VideoDetailPage);

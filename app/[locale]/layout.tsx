@@ -1,11 +1,9 @@
 // app/[locale]/layout.tsx
-
 import { NextIntlClientProvider } from 'next-intl';
 import { getMessages, setRequestLocale } from 'next-intl/server';
 import { notFound } from 'next/navigation';
 import { headers } from 'next/headers';
 import { locales } from '@/i18n/config';
-import Script from 'next/script'; // ✅ 导入 Script 组件
 import Navbar from '@/components/Navbar';
 import Footer from '@/components/Footer';
 import { getHeaderConfig, getMenuBySourceId, getFooterConfig, getMultipleMenus } from '@/lib/config-loader';
@@ -13,8 +11,9 @@ import { getSiteSettings } from '@/lib/getSiteSettings';
 import DetectLanguage from '@/components/DetectLanguage';
 import { getEnabledLanguages } from '@/lib/languages/settings';
 import ChatWidgetWrapper from '@/components/litechat/ChatWidgetWrapper';
+import RtlSupport from '@/components/RtlSupport';
+import PageThemeStyle from '@/components/front/PageThemeStyle';   // ✅ 新增
 
-// 只生成已开通的语言的静态页面，而不是所有 locales
 export async function generateStaticParams() {
   const enabled = await getEnabledLanguages();
   return enabled.map((locale) => ({ locale }));
@@ -23,26 +22,21 @@ export async function generateStaticParams() {
 export async function generateMetadata({ params }: { params: Promise<{ locale: string }> }) {
   const { locale } = await params;
 
-  // 获取站点配置的域名
   const settings = await getSiteSettings();
   const configuredDomain = settings.websiteUrl?.trim()?.replace(/\/+$/, '');
 
-  // 获取当前请求的路径
   const headersList = await headers();
   const pathname = headersList.get('x-pathname') || '/';
 
-  // 构建 baseUrl：优先使用配置的域名，本地开发时使用 host
   let baseUrl: string;
   if (configuredDomain) {
     baseUrl = configuredDomain;
   } else {
-    // 本地开发降级方案
     const host = headersList.get('host') || 'localhost:3000';
     const protocol = host.includes('localhost') ? 'http' : 'https';
     baseUrl = `${protocol}://${host}`;
   }
 
-  // 构建当前页面的完整 URL
   const canonicalUrl = `${baseUrl}/${locale}${pathname}`;
 
   return {
@@ -67,11 +61,16 @@ export default async function LocaleLayout({
 
   setRequestLocale(locale);
 
-  // 并行获取配置
-  let messages, headerConfig, siteSettings, footerConfig;
+  const messages = await getMessages({ locale });
+  const translationMissing = Object.keys(messages).length === 0;
+  if (translationMissing) {
+    console.warn(`[LocaleLayout] 翻译文件缺失或为空: messages/${locale}.json`);
+  }
+
+  let headerConfig, siteSettings, footerConfig;
+
   try {
-    [messages, headerConfig, siteSettings, footerConfig] = await Promise.all([
-      getMessages(),
+    [headerConfig, siteSettings, footerConfig] = await Promise.all([
       getHeaderConfig(locale),
       getSiteSettings(),
       getFooterConfig(locale),
@@ -81,7 +80,6 @@ export default async function LocaleLayout({
     notFound();
   }
 
-  // 处理菜单数据
   const headerMenuSourceId = headerConfig?.menu?.menuSourceId;
   let headerMenuData = null;
   let menuMissing = false;
@@ -103,10 +101,19 @@ export default async function LocaleLayout({
   const footerMenusMap = await getMultipleMenus(locale, footerMenuIds);
 
   return (
-    <NextIntlClientProvider messages={messages}>
+    <NextIntlClientProvider messages={messages} locale={locale}>
+      {/* ✅ 注入页面级主题覆盖 */}
+      <PageThemeStyle />
+      
+      <RtlSupport locale={locale} />
       <DetectLanguage />
       <div className="min-h-screen flex flex-col">
-        {/* 配置缺失提示条 */}
+        {translationMissing && (
+          <div className="bg-amber-50 border-b border-amber-200 text-amber-700 text-sm p-2 text-center">
+            ⚠️ 当前语言（<strong>{locale}</strong>）缺少多语言翻译文件，请创建 <code>messages/{locale}.json</code>。
+          </div>
+        )}
+
         {(headerMissing || menuMissing) && (
           <div className="bg-yellow-100 border-b border-yellow-300 text-yellow-800 text-sm p-2 text-center">
             {headerMissing && !menuMissing && <span>网站页头尚未设置，请检查页头配置文件。</span>}
@@ -114,7 +121,7 @@ export default async function LocaleLayout({
             {headerMissing && menuMissing && <span>网站页头和导航菜单均未设置，请检查配置。</span>}
           </div>
         )}
-        {/* 导航栏 */}
+
         <div className="sticky top-0 z-50">
           <Navbar
             headerConfig={headerConfig}
@@ -123,27 +130,19 @@ export default async function LocaleLayout({
             footerConfig={footerConfig}
           />
         </div>
-        {/* 主内容区域 */}
-        <main className="flex-grow w-full pb-8 relative z-0">
+
+        {/* ✅ 修改：给 main 加 padding-bottom，让内容与 Footer 之间有间距 */}
+        <main className="flex-grow w-full relative z-0 pb-8 md:pb-12 lg:pb-16">
           {children}
         </main>
-        {/* 页脚 */}
+
         <Footer
           footerConfig={footerConfig}
           menusMap={footerMenusMap}
           siteSettings={siteSettings}
         />
-        {/* 聊天挂件 - 仅在客户端渲染 */}
         <ChatWidgetWrapper />
       </div>
-
-      {/* ✅ Umami 追踪脚本 - 使用 next/script 优化加载 */}
-      <Script
-        defer
-        src="https://umami-jeekuadata.vercel.app/script.js"
-        data-website-id="76f2e442-8655-4492-8891-2fa7df2f59f4"
-        strategy="afterInteractive"
-      />
     </NextIntlClientProvider>
   );
 }

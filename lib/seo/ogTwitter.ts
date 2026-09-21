@@ -1,19 +1,20 @@
 // lib/seo/ogTwitter.ts
+
 import { PageType, SeoInput } from './types';
 
-// 根据页面类型映射 og:type
 const ogTypeMap: Record<PageType, string> = {
   home: 'website',
   productLine: 'website',
+  productCategory: 'website', // ✅ 新增
   productCollection: 'website',
-  product: 'product',
+  product: 'website',
   page: 'website',
   blogList: 'website',
   blogCollection: 'website',
   blogPost: 'article',
   docLibrary: 'website',
   doc: 'article',
-  videoCollection: 'website',
+  videoCollection: 'video.other',
   video: 'video.movie',
   inquiry: 'website',
   policy: 'website',
