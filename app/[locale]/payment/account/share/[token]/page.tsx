@@ -1,10 +1,9 @@
 // app/[locale]/payment/account/share/[token]/page.tsx
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, use } from 'react';
 import { useRouter } from 'next/navigation';
 import { Copy, Check } from 'lucide-react';
-import { accountService } from '@/lib/payment/services/account.service';
 import { 
   BANK_LOGOS, 
   PRESET_LOGOS, 
@@ -55,8 +54,6 @@ interface AccountData {
 // ============================================================
 // 翻译类型定义
 // ============================================================
-type TranslationKey = keyof typeof translations.zh;
-
 const translations = {
   zh: {
     title: '收款账户信息',
@@ -223,15 +220,17 @@ function generateCopyText(account: AccountData, text: Record<string, string>, la
   return result;
 }
 
+// ✅ 修改：params 是 Promise 类型
 interface ShareAccountPageProps {
-  params: {
+  params: Promise<{
     locale: string;
     token: string;
-  };
+  }>;
 }
 
 export default function ShareAccountPage({ params }: ShareAccountPageProps) {
-  const { locale, token } = params;
+  // ✅ 使用 use() 解包 params
+  const { locale, token } = use(params);
   const router = useRouter();
   const [loading, setLoading] = useState(true);
   const [account, setAccount] = useState<AccountData | null>(null);
@@ -244,8 +243,8 @@ export default function ShareAccountPage({ params }: ShareAccountPageProps) {
   // ✅ 安全获取翻译
   const text = translations[lang as keyof typeof translations] || translations.en;
 
-  // ✅ 站点名称：从 meta 标签获取，或使用默认值
-  const [siteName, setSiteName] = useState('Feisman Power');
+  // ✅ 站点名称：从 meta 标签获取
+  const [siteName, setSiteName] = useState('');
 
   // ============================================================
   // ✅ 主题 CSS 变量
@@ -272,8 +271,8 @@ export default function ShareAccountPage({ params }: ShareAccountPageProps) {
   const hoverBg = 'var(--account-share-single-hover-bg, #f9fafb)';
   const loadingColor = 'var(--account-share-single-loading-color, #2563eb)';
 
+  // ✅ 客户端获取站点名称
   useEffect(() => {
-    // 客户端获取站点名称
     if (typeof window !== 'undefined') {
       const meta = document.querySelector('meta[name="site-name"]') as HTMLMetaElement;
       if (meta?.content) {
@@ -282,11 +281,23 @@ export default function ShareAccountPage({ params }: ShareAccountPageProps) {
     }
   }, []);
 
-  // ✅ 使用服务层加载数据
+  // ✅ 修复：改用 fetch 调用 API 路由
   useEffect(() => {
     const loadAccount = async () => {
       try {
-        const data = await accountService.getByShareToken(token);
+        // ✅ 使用 API 路由替代 accountService
+        const res = await fetch(`/api/payment/account/share/${token}`);
+        
+        if (!res.ok) {
+          if (res.status === 404) {
+            router.replace('/404');
+            return;
+          }
+          throw new Error(`获取账户失败: ${res.status}`);
+        }
+        
+        const result = await res.json();
+        const data = result.data;
         
         if (!data) {
           console.error('获取账户失败: 账户不存在');
@@ -294,7 +305,7 @@ export default function ShareAccountPage({ params }: ShareAccountPageProps) {
           return;
         }
 
-        let currencyData = (data as any).currency;
+        let currencyData = data.currency;
         if (typeof currencyData === 'string') {
           try {
             currencyData = JSON.parse(currencyData);

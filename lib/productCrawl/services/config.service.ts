@@ -1,5 +1,5 @@
 // lib/productCrawl/services/config.service.ts
-import { supabase } from '@/lib/supabase/client';
+import sql from '@/lib/db/admin';
 import type { CrawlerConfig, CrawlerPlatformConfig } from '@/lib/productCrawl/types';
 
 const DEFAULT_SITE_ID = '000001';
@@ -69,23 +69,21 @@ function getDefaultConfig(): CrawlerConfig {
           },
           description: {
             selectors: [
-               // 🔥 新增：产品规格描述
-                '.module_product_specification .richtext-detail',
-                '.module_product_specification #J-rich-text-description',
-                '.module_product_specification',
-                '.rich-text-description',
-                // 原有选择器
-                '.module_structure_description .id-whitespace-pre-line',
-                '[data-testid="module-structure-description"] .id-whitespace-pre-line',
-                '.module_structure_descption_productDescription',
-                '.module-structure-description',
-                '.product-description-content',
-                '.product-description',
-                '.detail-content',
-                '[data-testid="product-detail-text-sort"]',
-                '.module_structure_description',
-                '#product-description',
-                '.offer-detail'
+              '.module_product_specification .richtext-detail',
+              '.module_product_specification #J-rich-text-description',
+              '.module_product_specification',
+              '.rich-text-description',
+              '.module_structure_description .id-whitespace-pre-line',
+              '[data-testid="module-structure-description"] .id-whitespace-pre-line',
+              '.module_structure_descption_productDescription',
+              '.module-structure-description',
+              '.product-description-content',
+              '.product-description',
+              '.detail-content',
+              '[data-testid="product-detail-text-sort"]',
+              '.module_structure_description',
+              '#product-description',
+              '.offer-detail'
             ],
             type: 'html',
             fallback: ''
@@ -197,59 +195,70 @@ function getDefaultConfig(): CrawlerConfig {
 
 export async function getCrawlerConfig(): Promise<CrawlerConfig> {
   // 1. 查询数据库
-  const { data, error } = await supabase
-    .from('crawler_configs')
-    .select('config, version, updated_at')
-    .eq('site_id', DEFAULT_SITE_ID)
-    .maybeSingle();
+  let data: { config: any; version: string | null; updated_at: string | null } | undefined;
+  try {
+    const rows = await sql<{ config: any; version: string | null; updated_at: string | null }[]>`
+      SELECT config, version, updated_at FROM public.crawler_configs
+      WHERE site_id = ${DEFAULT_SITE_ID}
+      LIMIT 1
+    `;
+    data = rows[0];
+  } catch (error: any) {
+    console.error('查询爬虫配置失败:', error);
+  }
 
   // 2. 如果有数据，返回
   if (data?.config) {
     return {
       ...data.config,
       version: data.version || getDefaultConfig().version,
-      updated_at: data.updated_at || new Date().toISOString()
+      updated_at: data.updated_at || new Date().toISOString(),
     };
   }
 
-  // 3. 数据库无配置，初始化默认配置
+  // 3. 初始化默认配置
   console.log('📝 数据库无配置，正在初始化默认配置...');
   await initCrawlerConfig();
-  
-  // 4. 重新查询数据库，返回最新写入的配置
-  console.log('📝 重新查询数据库配置...');
-  const { data: newData, error: newError } = await supabase
-    .from('crawler_configs')
-    .select('config, version, updated_at')
-    .eq('site_id', DEFAULT_SITE_ID)
-    .maybeSingle();
 
-  if (newError || !newData?.config) {
+  // 4. 重新查询
+  console.log('📝 重新查询数据库配置...');
+  try {
+    const rows = await sql<{ config: any; version: string | null; updated_at: string | null }[]>`
+      SELECT config, version, updated_at FROM public.crawler_configs
+      WHERE site_id = ${DEFAULT_SITE_ID}
+      LIMIT 1
+    `;
+    const newData = rows[0];
+    if (!newData?.config) {
+      console.error('❌ 初始化后查询配置失败');
+      return getDefaultConfig();
+    }
+    console.log('✅ 配置初始化成功，版本:', newData.version);
+    return {
+      ...newData.config,
+      version: newData.version || getDefaultConfig().version,
+      updated_at: newData.updated_at || new Date().toISOString(),
+    };
+  } catch (newError: any) {
     console.error('❌ 初始化后查询配置失败:', newError);
     return getDefaultConfig();
   }
-
-  console.log('✅ 配置初始化成功，版本:', newData.version);
-  return {
-    ...newData.config,
-    version: newData.version || getDefaultConfig().version,
-    updated_at: newData.updated_at || new Date().toISOString()
-  };
 }
 
 export async function initCrawlerConfig(): Promise<void> {
   const config = getDefaultConfig();
-  
-  const { error } = await supabase
-    .from('crawler_configs')
-    .upsert({
-      site_id: DEFAULT_SITE_ID,
-      config: config,
-      version: config.version,
-      updated_at: new Date().toISOString()
-    }, { onConflict: 'site_id' });
 
-  if (error) {
+  try {
+    await sql`
+      INSERT INTO public.crawler_configs (site_id, config, version, updated_at)
+      VALUES (${DEFAULT_SITE_ID}, ${sql.json(config)}, ${config.version}, ${new Date().toISOString()})
+      ON CONFLICT (site_id)
+      DO UPDATE SET
+        config = EXCLUDED.config,
+        version = EXCLUDED.version,
+        updated_at = EXCLUDED.updated_at
+    `;
+  } catch (error: any) {
     console.error('初始化爬虫配置失败:', error);
     throw new Error(`初始化配置失败: ${error.message}`);
   }
@@ -261,35 +270,36 @@ export async function updateCrawlerConfig(
 ): Promise<void> {
   const now = new Date().toISOString();
   const newVersion = `v${Date.now()}`;
+  const newConfig = { ...config, version: newVersion, updated_at: now };
 
-  const { error } = await supabase
-    .from('crawler_configs')
-    .upsert({
-      site_id: DEFAULT_SITE_ID,
-      config: { ...config, version: newVersion, updated_at: now },
-      version: newVersion,
-      updated_at: now,
-      updated_by: operator || 'system'
-    }, { onConflict: 'site_id' });
-
-  if (error) {
+  try {
+    await sql`
+      INSERT INTO public.crawler_configs (site_id, config, version, updated_at, updated_by)
+      VALUES (${DEFAULT_SITE_ID}, ${sql.json(newConfig)}, ${newVersion}, ${now}, ${operator || 'system'})
+      ON CONFLICT (site_id)
+      DO UPDATE SET
+        config = EXCLUDED.config,
+        version = EXCLUDED.version,
+        updated_at = EXCLUDED.updated_at,
+        updated_by = EXCLUDED.updated_by
+    `;
+  } catch (error: any) {
     console.error('更新爬虫配置失败:', error);
     throw new Error(`更新配置失败: ${error.message}`);
   }
 }
 
 export async function getConfigVersion(): Promise<string> {
-  const { data, error } = await supabase
-    .from('crawler_configs')
-    .select('version')
-    .eq('site_id', DEFAULT_SITE_ID)
-    .maybeSingle();
-
-  if (error || !data?.version) {
+  try {
+    const rows = await sql<{ version: string | null }[]>`
+      SELECT version FROM public.crawler_configs
+      WHERE site_id = ${DEFAULT_SITE_ID}
+      LIMIT 1
+    `;
+    return rows[0]?.version || `v${Date.now()}`;
+  } catch {
     return `v${Date.now()}`;
   }
-
-  return data.version;
 }
 
 export async function getPlatformConfig(platform: string): Promise<CrawlerPlatformConfig | null> {

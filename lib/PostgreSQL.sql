@@ -2438,36 +2438,111 @@ COMMENT ON COLUMN content_templates.content IS '模板内容（HTML）';
 COMMENT ON COLUMN content_templates.is_system IS '是否为系统模板（true 时不可删除、不可修改）';
 
 
--- ==========================================================
--- 初始化系统模板（每个语言一份）
--- ==========================================================
+-- ============================================================
+-- 缓存版本号表
+-- 作用：记录各类数据的当前版本号，实现跨进程缓存失效
+-- 粒度：key 自由字符串，粗粒度（'pages'）和细粒度（'blog:post:123'）都支持
+-- ============================================================
+CREATE TABLE IF NOT EXISTS cache_versions (
+  key TEXT PRIMARY KEY,
+  version BIGINT NOT NULL DEFAULT 1,
+  updated_at TIMESTAMPTZ DEFAULT NOW()
+);
 
-INSERT INTO content_templates (id, site_id, locale, name, content, is_system) VALUES
--- 中文系统模板
-('sys_intro_zh', '000001', 'zh', '公司简介', 
-'<h2>公司简介</h2><p>我们是一家专注于XXX领域的公司，成立于XXXX年，致力于为客户提供优质的产品和服务。</p><h3>我们的使命</h3><p>为客户创造价值，为员工提供发展平台，为社会贡献力量。</p><h3>我们的优势</h3><ul><li>专业的技术团队</li><li>完善的服务体系</li><li>丰富的行业经验</li></ul>', 
-true),
-('sys_product_intro_zh', '000001', 'zh', '产品介绍', 
-'<h2>产品介绍</h2><p>本产品采用先进的技术和优质的材料，具有以下特点：</p><h3>产品特点</h3><ul><li>高效节能</li><li>稳定可靠</li><li>易于维护</li></ul><h3>应用场景</h3><p>广泛应用于工业自动化、电力系统、通信设备等领域。</p>', 
-true),
-('sys_faq_zh', '000001', 'zh', '常见问题', 
-'<h2>常见问题</h2><h3>Q1: 产品保修期是多久？</h3><p>A: 我们的产品提供2年质保服务，终身技术支持。</p><h3>Q2: 如何联系售后服务？</h3><p>A: 您可以通过以下方式联系我们：<br>电话：400-XXX-XXXX<br>邮箱：support@example.com</p><h3>Q3: 支持定制服务吗？</h3><p>A: 是的，我们提供定制服务，请与销售团队联系。</p>', 
-true),
-('sys_policy_zh', '000001', 'zh', '隐私政策', 
-'<h2>隐私政策</h2><p>我们非常重视您的隐私保护。本政策说明我们如何收集、使用和保护您的个人信息。</p><h3>1. 信息收集</h3><p>我们可能收集您的姓名、邮箱、电话等信息，用于提供服务和沟通。</p><h3>2. 信息使用</h3><p>您的信息仅用于订单处理、客户服务和产品改进。</p><h3>3. 信息保护</h3><p>我们采取严格的安全措施保护您的个人信息，不会向第三方出售或泄露。</p>', 
-true),
+-- 初始记录（可选，不插入也能工作，bump 时会自动创建）
+INSERT INTO cache_versions (key, version) VALUES ('pages', 1)
+ON CONFLICT (key) DO NOTHING;
 
--- 英文系统模板
-('sys_intro_en', '000001', 'en', 'Company Introduction', 
-'<h2>Company Introduction</h2><p>We are a company specializing in XXX, founded in XXXX, committed to providing customers with quality products and services.</p><h3>Our Mission</h3><p>Create value for customers, provide development opportunities for employees, and contribute to society.</p><h3>Our Advantages</h3><ul><li>Professional technical team</li><li>Comprehensive service system</li><li>Rich industry experience</li></ul>', 
-true),
-('sys_product_intro_en', '000001', 'en', 'Product Introduction', 
-'<h2>Product Introduction</h2><p>This product uses advanced technology and quality materials with the following features:</p><h3>Features</h3><ul><li>Energy efficient</li><li>Stable and reliable</li><li>Easy to maintain</li></ul><h3>Applications</h3><p>Widely used in industrial automation, power systems, communication equipment and other fields.</p>', 
-true),
-('sys_faq_en', '000001', 'en', 'FAQ', 
-'<h2>FAQ</h2><h3>Q1: How long is the warranty?</h3><p>A: We provide 2-year warranty and lifetime technical support.</p><h3>Q2: How to contact after-sales service?</h3><p>A: You can contact us via:<br>Phone: 400-XXX-XXXX<br>Email: support@example.com</p><h3>Q3: Do you support customization?</h3><p>A: Yes, we provide customization services. Please contact our sales team.</p>', 
-true),
-('sys_policy_en', '000001', 'en', 'Privacy Policy', 
-'<h2>Privacy Policy</h2><p>We take your privacy very seriously. This policy explains how we collect, use and protect your personal information.</p><h3>1. Information Collection</h3><p>We may collect your name, email, phone and other information to provide services and communication.</p><h3>2. Information Use</h3><p>Your information is only used for order processing, customer service and product improvement.</p><h3>3. Information Protection</h3><p>We take strict security measures to protect your personal information and will not sell or disclose it to third parties.</p>', 
-true)
-ON CONFLICT (id) DO NOTHING;
+-- ============================================================
+-- 索引
+-- ============================================================
+
+-- 按更新时间查询（用于监控、清理旧记录）
+CREATE INDEX IF NOT EXISTS idx_cache_versions_updated_at
+ON cache_versions (updated_at DESC);
+
+-- 按 key 前缀查询（用于批量失效某类缓存，如 'blog:post:%'）
+-- 注意：需要 pg_trgm 扩展才能高效支持 LIKE 前缀查询
+CREATE EXTENSION IF NOT EXISTS pg_trgm;
+
+CREATE INDEX IF NOT EXISTS idx_cache_versions_key_prefix
+ON cache_versions (key text_pattern_ops);
+-- text_pattern_ops 支持 LIKE 'blog:post:%' 这样的前缀查询走索引
+
+-- ============================================================
+-- RPC: 单个 key 版本号 +1（不存在则插入）
+-- ============================================================
+CREATE OR REPLACE FUNCTION increment_cache_version(p_key TEXT)
+RETURNS BIGINT AS $$
+DECLARE
+  new_version BIGINT;
+BEGIN
+  UPDATE cache_versions
+  SET version = version + 1, updated_at = NOW()
+  WHERE key = p_key
+  RETURNING version INTO new_version;
+
+  IF new_version IS NULL THEN
+    INSERT INTO cache_versions (key, version, updated_at)
+    VALUES (p_key, 1, NOW())
+    RETURNING version INTO new_version;
+  END IF;
+
+  RETURN new_version;
+END;
+$$ LANGUAGE plpgsql;
+
+-- ============================================================
+-- RPC: 批量 key 版本号 +1（不存在则插入）
+-- 用于 products 全量同步等场景，一次 RPC 处理几千个 key
+-- ============================================================
+CREATE OR REPLACE FUNCTION increment_cache_versions_bulk(p_keys TEXT[])
+RETURNS VOID AS $$
+BEGIN
+  -- 已有的 key 版本号 +1
+  UPDATE cache_versions
+  SET version = version + 1, updated_at = NOW()
+  WHERE key = ANY(p_keys);
+
+  -- 不存在的 key 插入为 1
+  INSERT INTO cache_versions (key, version, updated_at)
+  SELECT k, 1, NOW()
+  FROM unnest(p_keys) AS k
+  WHERE NOT EXISTS (
+    SELECT 1 FROM cache_versions WHERE cache_versions.key = k
+  );
+END;
+$$ LANGUAGE plpgsql;
+
+-- ============================================================
+-- RPC: 按前缀批量 +1（用于 'blog:post:%' 全清）
+-- ============================================================
+CREATE OR REPLACE FUNCTION increment_cache_versions_by_prefix(p_prefix TEXT)
+RETURNS BIGINT AS $$
+DECLARE
+  affected BIGINT;
+BEGIN
+  UPDATE cache_versions
+  SET version = version + 1, updated_at = NOW()
+  WHERE key LIKE p_prefix || '%';
+
+  GET DIAGNOSTICS affected = ROW_COUNT;
+  RETURN affected;
+END;
+$$ LANGUAGE plpgsql;
+
+-- ============================================================
+-- 清理旧记录（可选，用于定期清理长期未用的 key）
+-- ============================================================
+CREATE OR REPLACE FUNCTION cleanup_cache_versions(p_days INT DEFAULT 30)
+RETURNS BIGINT AS $$
+DECLARE
+  deleted BIGINT;
+BEGIN
+  DELETE FROM cache_versions
+  WHERE updated_at < NOW() - (p_days || ' days')::INTERVAL;
+
+  GET DIAGNOSTICS deleted = ROW_COUNT;
+  RETURN deleted;
+END;
+$$ LANGUAGE plpgsql;

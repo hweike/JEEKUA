@@ -7,8 +7,6 @@ import AccountPDF from '@/lib/payment/pdf-templates/account-pdf';
 import { getSiteId } from '@/lib/utils/request';
 import { getSettings } from '@/lib/Basicsettings/settings';
 import { getBankLogo, DEFAULT_LOGO } from '@/lib/payment/types/logos';
-import fs from 'fs';
-import path from 'path';
 
 /**
  * ✅ 判断是否为网络 URL
@@ -59,16 +57,17 @@ function detectImageFormat(buffer: Buffer): string {
 
 /**
  * ✅ 从网络 URL 获取图片，检测格式并处理
+ * 保留原有的 JPEG SOI 修复、Sharp 转换功能
  */
 async function fetchImageAsBase64(url: string): Promise<string> {
   try {
-    console.log('[PDF] 正在获取网络图片:', url);
+    console.log('[PDF] 正在获取图片:', url);
     const response = await fetch(url, {
       signal: AbortSignal.timeout(15000),
     });
     
     if (!response.ok) {
-      console.warn('[PDF] 获取网络图片失败:', response.status, url);
+      console.warn('[PDF] 获取图片失败:', response.status, url);
       return '';
     }
     
@@ -121,73 +120,38 @@ async function fetchImageAsBase64(url: string): Promise<string> {
     console.log('[PDF] 图片处理成功, 格式:', mimeType, '大小:', buffer.length, 'bytes');
     return `data:${mimeType};base64,${base64}`;
   } catch (error) {
-    console.error('[PDF] 获取网络图片失败:', url, error);
-    return '';
-  }
-}
-
-/**
- * ✅ 将本地图片文件转换为 Base64 Data URL
- */
-function getLocalImageAsBase64(imagePath: string): string {
-  if (!imagePath) return '';
-  
-  try {
-    // 构建完整的文件路径
-    let fullPath: string;
-    if (imagePath.startsWith('/')) {
-      fullPath = path.join(process.cwd(), 'public', imagePath);
-    } else {
-      // 如果只是文件名，也尝试从 public 读取
-      fullPath = path.join(process.cwd(), 'public', imagePath);
-    }
-    
-    if (!fs.existsSync(fullPath)) {
-      console.warn('[PDF] 本地图片不存在:', fullPath);
-      // 尝试使用默认 Logo
-      const defaultPath = path.join(process.cwd(), 'public', DEFAULT_LOGO);
-      if (fs.existsSync(defaultPath)) {
-        const defaultBuffer = fs.readFileSync(defaultPath);
-        const defaultBase64 = defaultBuffer.toString('base64');
-        return `data:image/png;base64,${defaultBase64}`;
-      }
-      return '';
-    }
-    
-    const buffer = fs.readFileSync(fullPath);
-    const base64 = buffer.toString('base64');
-    
-    const ext = path.extname(fullPath).toLowerCase();
-    const mimeTypes: Record<string, string> = {
-      '.png': 'image/png',
-      '.jpg': 'image/jpeg',
-      '.jpeg': 'image/jpeg',
-      '.gif': 'image/gif',
-      '.svg': 'image/svg+xml',
-      '.webp': 'image/webp',
-    };
-    const mimeType = mimeTypes[ext] || 'image/png';
-    
-    return `data:${mimeType};base64,${base64}`;
-  } catch (error) {
-    console.error('[PDF] 读取本地图片失败:', error);
+    console.error('[PDF] 获取图片失败:', url, error);
     return '';
   }
 }
 
 /**
  * ✅ 将图片（本地或网络）转换为 Base64 Data URL
+ * 统一使用 HTTP 请求，避免 fs 动态路径追踪问题
+ * 
+ * @param imagePath 图片路径（网络 URL 或本地路径）
+ * @param baseUrl 当前请求的 origin（可选，用于本地图片转 HTTP）
  */
-async function getImageAsBase64(imagePath: string): Promise<string> {
+async function getImageAsBase64(imagePath: string, baseUrl?: string): Promise<string> {
   if (!imagePath) return '';
   
-  // ✅ 先判断是否为网络 URL
+  // ✅ 网络 URL 直接请求
   if (isNetworkUrl(imagePath)) {
     return await fetchImageAsBase64(imagePath);
   }
   
-  // ✅ 本地文件路径
-  return getLocalImageAsBase64(imagePath);
+  // ✅ 本地路径转成绝对 URL，通过 HTTP 请求获取
+  // 优先使用传入的 baseUrl（当前请求的 origin），其次环境变量，最后 fallback
+  const origin = baseUrl 
+    || process.env.NEXT_PUBLIC_SITE_URL 
+    || 'http://localhost:3000';
+  
+  const absoluteUrl = imagePath.startsWith('/') 
+    ? `${origin}${imagePath}`
+    : `${origin}/${imagePath}`;
+  
+  console.log('[PDF] 本地图片转为 HTTP 请求:', absoluteUrl);
+  return await fetchImageAsBase64(absoluteUrl);
 }
 
 /**
@@ -208,6 +172,11 @@ export async function GET(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
+    // ✅ 从当前请求中动态获取 origin（无需环境变量）
+    const requestUrl = new URL(request.url);
+    const origin = `${requestUrl.protocol}//${requestUrl.host}`;
+    console.log('[PDF] 当前请求 origin:', origin);
+
     const { id } = await params;
     const siteId = await getSiteId(request);
     
@@ -231,15 +200,15 @@ export async function GET(
       console.warn('[PDF] 获取站点设置失败:', settingsError);
     }
 
-    // ✅ 获取银行 Logo 的 Base64
+    // ✅ 获取银行 Logo 的 Base64（传入当前请求的 origin）
     const bankLogoPath = getBankLogo(account);
-    const bankLogoBase64 = await getImageAsBase64(bankLogoPath);
+    const bankLogoBase64 = await getImageAsBase64(bankLogoPath, origin);
 
-    // ✅ 获取企业 Logo 的 Base64
-    const companyLogoBase64 = await getImageAsBase64(companyLogo);
+    // ✅ 获取企业 Logo 的 Base64（传入当前请求的 origin）
+    const companyLogoBase64 = await getImageAsBase64(companyLogo, origin);
 
-    // console.log('[PDF] 银行Logo长度:', bankLogoBase64?.length || 0);
-    // console.log('[PDF] 企业Logo长度:', companyLogoBase64?.length || 0);
+    console.log('[PDF] 银行Logo长度:', bankLogoBase64?.length || 0);
+    console.log('[PDF] 企业Logo长度:', companyLogoBase64?.length || 0);
 
     // ✅ 生成 PDF
     const pdfBuffer = await renderToBuffer(

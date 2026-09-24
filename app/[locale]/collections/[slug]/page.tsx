@@ -45,7 +45,17 @@ export async function generateMetadata({
 }: {
   params: Promise<{ locale: string; slug: string }>;
 }) {
-  const { locale, slug } = await params;
+  // ✅ 防御性检查：构建时 Next.js 可能传入 undefined
+  const resolvedParams = await params;
+  if (!resolvedParams?.locale) {
+    return {
+      title: 'Collection',
+      robots: 'noindex, follow',
+    };
+  }
+
+  const { locale, slug } = resolvedParams;
+
   const settings = await getSiteSettings();
   const baseUrl = (settings.websiteUrl || process.env.NEXT_PUBLIC_BASE_URL || '').replace(
     /\/+$/,
@@ -100,19 +110,15 @@ interface CollectionContentProps {
 async function CollectionContent({ locale, slug, page }: CollectionContentProps) {
   const decodedSlug = decodeURIComponent(slug);
 
-  // 1. 获取运行时数据（缓存）
   const runtimeData = await getCachedCollectionRuntime(locale, decodedSlug, page, PAGE_SIZE);
   if (!runtimeData) notFound();
 
-  // 2. 获取 SEO 数据（✅ 用 Once）
   const seoData = await getCollectionSeoDataOnce(locale, decodedSlug);
   const seoTitle = seoData?.seoInput?.title || runtimeData.collection?.name || '';
   const jsonLdScripts = seoData?.jsonLdScripts || [];
 
-  // 3. 确定模板 ID
   const templateId = runtimeData.collection?.template || DEFAULT_COLLECTION_TEMPLATE_ID;
 
-  // ✅ 用 getLayoutPageByTemplate 替代本地 getCachedLayout
   let layoutPage = await getLayoutPageByTemplate('base', templateId);
 
   if (!layoutPage && templateId !== DEFAULT_COLLECTION_TEMPLATE_ID) {
@@ -120,7 +126,7 @@ async function CollectionContent({ locale, slug, page }: CollectionContentProps)
     layoutPage = await getLayoutPageByTemplate('base', DEFAULT_COLLECTION_TEMPLATE_ID);
   }
 
-  const templateData = layoutPage?.templateData; // ✅ 驼峰
+  const templateData = layoutPage?.templateData;
   const hasValidTemplate =
     templateData && Array.isArray(templateData.content) && templateData.content.length > 0;
 
@@ -134,10 +140,8 @@ async function CollectionContent({ locale, slug, page }: CollectionContentProps)
     );
   }
 
-  // ✅ 移除 texts 相关
   const finalRuntime = { ...runtimeData, locale, seoTitle };
 
-  // 注入运行时数据
   let finalData = injectRuntimeDataSafe(templateData, finalRuntime);
   if (!finalData.__runtime) {
     (finalData as any).__runtime = finalRuntime;
@@ -171,8 +175,15 @@ interface CollectionsPageProps {
 }
 
 async function CollectionsPage({ params, searchParams }: CollectionsPageProps) {
-  const { locale, slug } = await params;
-  const page = parseInt((await searchParams)?.page || '1', 10) || 1;
+  // ✅ 防御性检查：构建时 Next.js 可能传入 undefined
+  const resolvedParams = await params;
+  if (!resolvedParams?.locale) {
+    notFound();
+  }
+
+  const { locale, slug } = resolvedParams;
+  const resolvedSearchParams = await searchParams;
+  const page = parseInt(resolvedSearchParams?.page || '1', 10) || 1;
 
   return (
     <Suspense fallback={<CollectionLoading />}>

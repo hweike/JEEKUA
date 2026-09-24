@@ -1,319 +1,263 @@
 // lib/payment/services/account.service.ts
-import { supabase } from '@/lib/supabase/client';
+import sql from '@/lib/db/admin';
 import { generateShareToken } from '../utils/share-token';
-import type { 
-  PaymentAccount, 
-  CreateAccountInput, 
+import type {
+  PaymentAccount,
+  CreateAccountInput,
   UpdateAccountInput,
   AccountType,
-  AccountFilters 
+  AccountFilters,
 } from '../types/account';
 
 export const accountService = {
-  /**
-   * 获取账号列表
-   * ✅ 修复：正确处理 account_type 为 NULL 的情况
-   */
   async list(siteId: string, filters?: AccountFilters): Promise<PaymentAccount[]> {
-    let query = supabase
-      .from('payment_accounts')
-      .select('*')
-      .eq('site_id', siteId)
-      .eq('is_active', true)
-      .order('sort_order');
+    const conditions: any[] = [
+      sql`site_id = ${siteId}`,
+      sql`is_active = true`,
+    ];
 
     if (filters?.type) {
-      query = query.eq('payment_type', filters.type);
+      conditions.push(sql`payment_type = ${filters.type}`);
     }
     if (filters?.method) {
-      // 支持逗号分隔的多个值: 'wechat,alipay'
       if (filters.method.includes(',')) {
         const methods = filters.method.split(',').map(m => m.trim());
-        query = query.in('payment_method', methods);
+        conditions.push(sql`payment_method IN ${sql(methods)}`);
       } else {
-        query = query.eq('payment_method', filters.method);
+        conditions.push(sql`payment_method = ${filters.method}`);
       }
     }
-    // ✅ 修复：正确处理 account_type 为 NULL 的情况
     if (filters?.account_type) {
-      // 如果查询 'null' 字符串，表示查询预设账号（account_type IS NULL）
       if (filters.account_type === 'null' || filters.account_type === 'NULL') {
-        query = query.is('account_type', null);
+        conditions.push(sql`account_type IS NULL`);
       } else {
-        query = query.eq('account_type', filters.account_type);
+        conditions.push(sql`account_type = ${filters.account_type}`);
       }
     }
 
-    const { data, error } = await query;
-    if (error) {
+    const whereClause = conditions.reduce(
+      (acc, c, i) => (i === 0 ? c : sql`${acc} AND ${c}`),
+      sql``
+    );
+
+    try {
+      return await sql<PaymentAccount[]>`
+        SELECT * FROM public.payment_accounts
+        WHERE ${whereClause}
+        ORDER BY sort_order ASC
+      `;
+    } catch (error: any) {
       console.error('获取账号列表失败:', error);
       throw new Error(`获取账号列表失败: ${error.message}`);
     }
-    return data || [];
   },
 
-  /**
-   * 获取账号详情
-   */
   async getById(siteId: string, id: string): Promise<PaymentAccount> {
-    const { data, error } = await supabase
-      .from('payment_accounts')
-      .select('*')
-      .eq('site_id', siteId)
-      .eq('id', id)
-      .single();
-
-    if (error) {
+    try {
+      const rows = await sql<PaymentAccount[]>`
+        SELECT * FROM public.payment_accounts
+        WHERE site_id = ${siteId}
+          AND id = ${id}
+        LIMIT 1
+      `;
+      if (!rows[0]) throw new Error('Account not found');
+      return rows[0];
+    } catch (error: any) {
       console.error('获取账号详情失败:', error);
       throw new Error(`获取账号详情失败: ${error.message}`);
     }
-    return data;
   },
 
-  /**
-   * 获取默认账号
-   */
   async getDefault(siteId: string): Promise<PaymentAccount | null> {
-    const { data, error } = await supabase
-      .from('payment_accounts')
-      .select('*')
-      .eq('site_id', siteId)
-      .eq('is_default', true)
-      .eq('is_active', true)
-      .maybeSingle();
-
-    if (error && error.code !== 'PGRST116') {
+    try {
+      const rows = await sql<PaymentAccount[]>`
+        SELECT * FROM public.payment_accounts
+        WHERE site_id = ${siteId}
+          AND is_default = true
+          AND is_active = true
+        LIMIT 1
+      `;
+      return rows[0] || null;
+    } catch (error: any) {
       console.error('获取默认账号失败:', error);
       throw new Error(`获取默认账号失败: ${error.message}`);
     }
-    return data || null;
   },
 
-  /**
-   * 创建账号
-   */
   async create(siteId: string, input: CreateAccountInput, operator: string): Promise<PaymentAccount> {
-    // 如果设为默认，先取消其他默认
+    // 1. 如果设为默认，先取消其他默认
     if (input.is_default) {
-      const { error: updateError } = await supabase
-        .from('payment_accounts')
-        .update({ is_default: false })
-        .eq('site_id', siteId)
-        .eq('is_default', true);
-
-      if (updateError) {
+      try {
+        await sql`
+          UPDATE public.payment_accounts
+          SET is_default = false
+          WHERE site_id = ${siteId}
+            AND is_default = true
+        `;
+      } catch (updateError: any) {
         console.error('取消默认账号失败:', updateError);
         throw new Error(`取消默认账号失败: ${updateError.message}`);
       }
     }
 
-    // 构建插入数据
-    const insertData: any = {
-      site_id: siteId,
-      // ✅ account_type 只在 TT 银行账号时需要，预设账号可以为 null
-      account_type: input.account_type || null,
-      payment_type: input.payment_type,
-      payment_method: input.payment_method,
-      display_name_zh: input.display_name_zh || '',
-      display_name_en: input.display_name_en || '',
-      currency: input.currency || ['USD'],
-      is_default: input.is_default || false,
-      is_active: true,
-      sort_order: 0,
-      // ✅ 添加 is_verified 字段，默认为 false
-      is_verified: input.is_verified || false,
-      // TT 银行字段
-      beneficiary_name: input.beneficiary_name || '',
-      beneficiary_account: input.beneficiary_account || '',
-      country_region: input.country_region || '',
-      swift_code: input.swift_code || '',
-      beneficiary_address: input.beneficiary_address || '',
-      beneficiary_bank: input.beneficiary_bank || '',
-      beneficiary_bank_address: input.beneficiary_bank_address || '',
-      bank_code: input.bank_code || '',
-      branch_code: input.branch_code || '',
-      iban: input.iban || '',
-      attention: input.attention || '',
-      intermediary_bank: input.intermediary_bank || '',
-      // 微信/支付宝 字段
-      account_holder: input.account_holder || '',
-      account_identifier: input.account_identifier || '',
-      qr_code_image: input.qr_code_image || '',
-      remark: input.remark || '',
-      // PayPal 字段
-      paypal_email: input.paypal_email || '',
-      paypal_client_id: input.paypal_client_id || '',
-      paypal_client_secret: input.paypal_client_secret || '',
-      paypal_webhook_id: input.paypal_webhook_id || '',
-    };
-
-    const { data, error } = await supabase
-      .from('payment_accounts')
-      .insert(insertData)
-      .select()
-      .single();
-
-    if (error) {
+    // 2. 插入
+    try {
+      const rows = await sql<PaymentAccount[]>`
+        INSERT INTO public.payment_accounts (
+          site_id, account_type, payment_type, payment_method,
+          display_name_zh, display_name_en, currency, is_default, is_active, sort_order,
+          is_verified,
+          beneficiary_name, beneficiary_account, country_region, swift_code,
+          beneficiary_address, beneficiary_bank, beneficiary_bank_address,
+          bank_code, branch_code, iban, attention, intermediary_bank,
+          account_holder, account_identifier, qr_code_image, remark,
+          paypal_email, paypal_client_id, paypal_client_secret, paypal_webhook_id
+        ) VALUES (
+          ${siteId}, ${input.account_type || null}, ${input.payment_type}, ${input.payment_method},
+          ${input.display_name_zh || ''}, ${input.display_name_en || ''},
+          ${input.currency || ['USD']}, ${input.is_default || false}, true, 0,
+          ${input.is_verified || false},
+          ${input.beneficiary_name || ''}, ${input.beneficiary_account || ''},
+          ${input.country_region || ''}, ${input.swift_code || ''},
+          ${input.beneficiary_address || ''}, ${input.beneficiary_bank || ''},
+          ${input.beneficiary_bank_address || ''},
+          ${input.bank_code || ''}, ${input.branch_code || ''},
+          ${input.iban || ''}, ${input.attention || ''}, ${input.intermediary_bank || ''},
+          ${input.account_holder || ''}, ${input.account_identifier || ''},
+          ${input.qr_code_image || ''}, ${input.remark || ''},
+          ${input.paypal_email || ''}, ${input.paypal_client_id || ''},
+          ${input.paypal_client_secret || ''}, ${input.paypal_webhook_id || ''}
+        )
+        RETURNING *
+      `;
+      if (!rows[0]) throw new Error('Insert returned no data');
+      return rows[0];
+    } catch (error: any) {
       console.error('创建账号失败:', error);
       throw new Error(`创建账号失败: ${error.message}`);
     }
-    return data;
   },
 
-  /**
-   * 更新账号
-   */
   async update(siteId: string, id: string, input: UpdateAccountInput, operator: string): Promise<PaymentAccount> {
-    // 如果设为默认，先取消其他默认（排除自己）
+    // 1. 如果设为默认，先取消其他默认（排除自己）
     if (input.is_default) {
-      const { error: updateError } = await supabase
-        .from('payment_accounts')
-        .update({ is_default: false })
-        .eq('site_id', siteId)
-        .eq('is_default', true)
-        .not('id', 'eq', id);
-
-      if (updateError) {
+      try {
+        await sql`
+          UPDATE public.payment_accounts
+          SET is_default = false
+          WHERE site_id = ${siteId}
+            AND is_default = true
+            AND id != ${id}
+        `;
+      } catch (updateError: any) {
         console.error('取消默认账号失败:', updateError);
         throw new Error(`取消默认账号失败: ${updateError.message}`);
       }
     }
 
-    // 构建更新数据
-    const updateData: any = {
-      updated_at: new Date().toISOString(),
-    };
+    // 2. 动态 SET
+    const setClauses: any[] = [sql`updated_at = ${new Date().toISOString()}`];
+    const fields = [
+      'account_type', 'payment_type', 'payment_method',
+      'display_name_zh', 'display_name_en', 'currency', 'is_default', 'is_active', 'is_verified',
+      'beneficiary_name', 'beneficiary_account', 'country_region', 'swift_code',
+      'beneficiary_address', 'beneficiary_bank', 'beneficiary_bank_address',
+      'bank_code', 'branch_code', 'iban', 'attention', 'intermediary_bank',
+      'account_holder', 'account_identifier', 'qr_code_image', 'remark',
+      'paypal_email', 'paypal_client_id', 'paypal_client_secret', 'paypal_webhook_id',
+    ];
+    for (const field of fields) {
+      if ((input as any)[field] !== undefined) {
+        setClauses.push(sql`${sql(field)} = ${(input as any)[field]}`);
+      }
+    }
 
-    // 只更新传入的字段
-    if (input.account_type !== undefined) updateData.account_type = input.account_type;
-    if (input.payment_type !== undefined) updateData.payment_type = input.payment_type;
-    if (input.payment_method !== undefined) updateData.payment_method = input.payment_method;
-    if (input.display_name_zh !== undefined) updateData.display_name_zh = input.display_name_zh;
-    if (input.display_name_en !== undefined) updateData.display_name_en = input.display_name_en;
-    if (input.currency !== undefined) updateData.currency = input.currency;
-    if (input.is_default !== undefined) updateData.is_default = input.is_default;
-    if (input.is_active !== undefined) updateData.is_active = input.is_active;
-    // ✅ 添加 is_verified 字段更新
-    if (input.is_verified !== undefined) updateData.is_verified = input.is_verified;
+    const setClause = setClauses.reduce(
+      (acc, c, i) => (i === 0 ? c : sql`${acc}, ${c}`),
+      sql``
+    );
 
-    // TT 银行字段
-    if (input.beneficiary_name !== undefined) updateData.beneficiary_name = input.beneficiary_name;
-    if (input.beneficiary_account !== undefined) updateData.beneficiary_account = input.beneficiary_account;
-    if (input.country_region !== undefined) updateData.country_region = input.country_region;
-    if (input.swift_code !== undefined) updateData.swift_code = input.swift_code;
-    if (input.beneficiary_address !== undefined) updateData.beneficiary_address = input.beneficiary_address;
-    if (input.beneficiary_bank !== undefined) updateData.beneficiary_bank = input.beneficiary_bank;
-    if (input.beneficiary_bank_address !== undefined) updateData.beneficiary_bank_address = input.beneficiary_bank_address;
-    if (input.bank_code !== undefined) updateData.bank_code = input.bank_code;
-    if (input.branch_code !== undefined) updateData.branch_code = input.branch_code;
-    if (input.iban !== undefined) updateData.iban = input.iban;
-    if (input.attention !== undefined) updateData.attention = input.attention;
-    if (input.intermediary_bank !== undefined) updateData.intermediary_bank = input.intermediary_bank;
-
-    // 微信/支付宝 字段
-    if (input.account_holder !== undefined) updateData.account_holder = input.account_holder;
-    if (input.account_identifier !== undefined) updateData.account_identifier = input.account_identifier;
-    if (input.qr_code_image !== undefined) updateData.qr_code_image = input.qr_code_image;
-    if (input.remark !== undefined) updateData.remark = input.remark;
-
-    // PayPal 字段
-    if (input.paypal_email !== undefined) updateData.paypal_email = input.paypal_email;
-    if (input.paypal_client_id !== undefined) updateData.paypal_client_id = input.paypal_client_id;
-    if (input.paypal_client_secret !== undefined) updateData.paypal_client_secret = input.paypal_client_secret;
-    if (input.paypal_webhook_id !== undefined) updateData.paypal_webhook_id = input.paypal_webhook_id;
-
-    const { data, error } = await supabase
-      .from('payment_accounts')
-      .update(updateData)
-      .eq('site_id', siteId)
-      .eq('id', id)
-      .select()
-      .single();
-
-    if (error) {
+    // 3. 更新
+    try {
+      const rows = await sql<PaymentAccount[]>`
+        UPDATE public.payment_accounts
+        SET ${setClause}
+        WHERE site_id = ${siteId}
+          AND id = ${id}
+        RETURNING *
+      `;
+      if (!rows[0]) throw new Error('Account not found');
+      return rows[0];
+    } catch (error: any) {
       console.error('更新账号失败:', error);
       throw new Error(`更新账号失败: ${error.message}`);
     }
-    return data;
   },
 
-  /**
-   * ✅ 新增：更新验证状态
-   */
   async updateVerificationStatus(siteId: string, id: string, isVerified: boolean): Promise<void> {
-    const { error } = await supabase
-      .from('payment_accounts')
-      .update({ 
-        is_verified: isVerified,
-        updated_at: new Date().toISOString(),
-      })
-      .eq('site_id', siteId)
-      .eq('id', id);
-
-    if (error) {
+    try {
+      await sql`
+        UPDATE public.payment_accounts
+        SET is_verified = ${isVerified},
+            updated_at = ${new Date().toISOString()}
+        WHERE site_id = ${siteId}
+          AND id = ${id}
+      `;
+    } catch (error: any) {
       console.error('更新验证状态失败:', error);
       throw new Error(`更新验证状态失败: ${error.message}`);
     }
   },
 
-  /**
-   * 删除账号（软删除）
-   */
   async delete(siteId: string, id: string): Promise<void> {
-    const { error } = await supabase
-      .from('payment_accounts')
-      .update({
-        is_active: false,
-        updated_at: new Date().toISOString(),
-      })
-      .eq('site_id', siteId)
-      .eq('id', id);
-
-    if (error) {
+    try {
+      await sql`
+        UPDATE public.payment_accounts
+        SET is_active = false,
+            updated_at = ${new Date().toISOString()}
+        WHERE site_id = ${siteId}
+          AND id = ${id}
+      `;
+    } catch (error: any) {
       console.error('删除账号失败:', error);
       throw new Error(`删除账号失败: ${error.message}`);
     }
   },
 
-  /**
-   * 设为默认
-   */
   async setDefault(siteId: string, id: string): Promise<void> {
-    // 先取消当前默认
-    const { error: clearError } = await supabase
-      .from('payment_accounts')
-      .update({ is_default: false })
-      .eq('site_id', siteId)
-      .eq('is_default', true);
-
-    if (clearError) {
+    // 1. 取消所有默认
+    try {
+      await sql`
+        UPDATE public.payment_accounts
+        SET is_default = false
+        WHERE site_id = ${siteId}
+          AND is_default = true
+      `;
+    } catch (clearError: any) {
       console.error('取消默认账号失败:', clearError);
       throw new Error(`取消默认账号失败: ${clearError.message}`);
     }
 
-    // 设置新的默认
-    const { error } = await supabase
-      .from('payment_accounts')
-      .update({ is_default: true })
-      .eq('site_id', siteId)
-      .eq('id', id);
-
-    if (error) {
+    // 2. 设置新默认
+    try {
+      await sql`
+        UPDATE public.payment_accounts
+        SET is_default = true
+        WHERE site_id = ${siteId}
+          AND id = ${id}
+      `;
+    } catch (error: any) {
       console.error('设置默认账号失败:', error);
       throw new Error(`设置默认账号失败: ${error.message}`);
     }
   },
 
-  /**
-   * 获取复制文本（格式化）
-   */
   async getCopyText(siteId: string, id: string): Promise<string> {
     const account = await this.getById(siteId, id);
-    
-    // ✅ 使用 display_name_zh 或 display_name_en，如果都为空则显示 'Account'
+
     const displayName = account.display_name_zh || account.display_name_en || 'Account';
     let text = `=== ${displayName} ===\n\n`;
-    
+
     if (account.payment_method === 'tt') {
       text += `Beneficiary Name: ${account.beneficiary_name || '-'}\n`;
       text += `Beneficiary Account Number: ${account.beneficiary_account || '-'}\n`;
@@ -334,204 +278,165 @@ export const accountService = {
       if (account.remark) text += `备注: ${account.remark}\n`;
     } else if (account.payment_method === 'paypal') {
       text += `PayPal Email: ${account.paypal_email || '-'}\n`;
-      // ✅ 添加验证状态显示
       text += `验证状态: ${account.is_verified ? '✅ 已验证' : '❌ 未验证'}\n`;
     }
-    
+
     if (account.currency && Array.isArray(account.currency) && account.currency.length > 0) {
       text += `\nSupported Currencies: ${account.currency.join(', ')}\n`;
     }
-    
+
     return text;
   },
 
-  /**
-   * 生成分享链接
-   */
   async generateShareLink(siteId: string, id: string): Promise<{ token: string; url: string }> {
-  const token = generateShareToken();
-  const baseUrl = process.env.NEXT_PUBLIC_SITE_URL || 'http://localhost:3000';
-  
-  const { error } = await supabase
-    .from('payment_accounts')
-    .update({ 
-      share_token: token,
-      updated_at: new Date().toISOString(),
-    })
-    .eq('site_id', siteId)
-    .eq('id', id);
+    const token = generateShareToken();
+    const baseUrl = process.env.NEXT_PUBLIC_SITE_URL || 'http://localhost:3000';
 
-  if (error) {
-    console.error('生成分享链接失败:', error);
-    throw new Error(`生成分享链接失败: ${error.message}`);
-  }
+    try {
+      await sql`
+        UPDATE public.payment_accounts
+        SET share_token = ${token},
+            updated_at = ${new Date().toISOString()}
+        WHERE site_id = ${siteId}
+          AND id = ${id}
+      `;
+    } catch (error: any) {
+      console.error('生成分享链接失败:', error);
+      throw new Error(`生成分享链接失败: ${error.message}`);
+    }
 
-  // ✅ 默认使用英文 locale
-  return {
-    token,
-    url: `${baseUrl}/en/payment/account/share/${token}`,
-  };
+    return {
+      token,
+      url: `${baseUrl}/en/payment/account/share/${token}`,
+    };
   },
 
-  /**
-   * 通过分享 Token 获取账号（公开访问）
-   */
   async getByShareToken(token: string): Promise<PaymentAccount | null> {
-    const { data, error } = await supabase
-      .from('payment_accounts')
-      .select('*')
-      .eq('share_token', token)
-      .eq('is_active', true)
-      .maybeSingle();
-
-    if (error) {
+    try {
+      const rows = await sql<PaymentAccount[]>`
+        SELECT * FROM public.payment_accounts
+        WHERE share_token = ${token}
+          AND is_active = true
+        LIMIT 1
+      `;
+      return rows[0] || null;
+    } catch (error: any) {
       console.error('获取分享账号失败:', error);
       throw new Error(`获取分享账号失败: ${error.message}`);
     }
-    return data || null;
   },
 
-  /**
-   * 根据账号类型获取账号列表
-   */
   async listByType(siteId: string, accountType: AccountType): Promise<PaymentAccount[]> {
-    const { data, error } = await supabase
-      .from('payment_accounts')
-      .select('*')
-      .eq('site_id', siteId)
-      .eq('account_type', accountType)
-      .eq('is_active', true)
-      .order('sort_order');
-
-    if (error) {
+    try {
+      return await sql<PaymentAccount[]>`
+        SELECT * FROM public.payment_accounts
+        WHERE site_id = ${siteId}
+          AND account_type = ${accountType}
+          AND is_active = true
+        ORDER BY sort_order ASC
+      `;
+    } catch (error: any) {
       console.error('获取账号列表失败:', error);
       throw new Error(`获取账号列表失败: ${error.message}`);
     }
-    return data || [];
   },
 
-  /**
-   * 根据货币获取匹配的账号
-   */
   async listByCurrency(siteId: string, currency: string): Promise<PaymentAccount[]> {
-    const { data, error } = await supabase
-      .from('payment_accounts')
-      .select('*')
-      .eq('site_id', siteId)
-      .eq('is_active', true)
-      .contains('currency', [currency])
-      .order('sort_order');
-
-    if (error) {
+    try {
+      return await sql<PaymentAccount[]>`
+        SELECT * FROM public.payment_accounts
+        WHERE site_id = ${siteId}
+          AND is_active = true
+          AND currency @> ${sql.json([currency])}
+        ORDER BY sort_order ASC
+      `;
+    } catch (error: any) {
       console.error('获取账号列表失败:', error);
       throw new Error(`获取账号列表失败: ${error.message}`);
     }
-    return data || [];
   },
 
-  /**
-   * 获取默认账号（按货币匹配）
-   */
   async getDefaultByCurrency(siteId: string, currency: string): Promise<PaymentAccount | null> {
-    // 先找默认账号中支持该货币的
-    const { data, error } = await supabase
-      .from('payment_accounts')
-      .select('*')
-      .eq('site_id', siteId)
-      .eq('is_default', true)
-      .eq('is_active', true)
-      .contains('currency', [currency])
-      .maybeSingle();
+    // 1. 先找默认且支持该货币的
+    try {
+      const rows = await sql<PaymentAccount[]>`
+        SELECT * FROM public.payment_accounts
+        WHERE site_id = ${siteId}
+          AND is_default = true
+          AND is_active = true
+          AND currency @> ${sql.json([currency])}
+        LIMIT 1
+      `;
+      if (rows[0]) return rows[0];
+    } catch {}
 
-    if (error && error.code !== 'PGRST116') {
-      console.error('获取默认账号失败:', error);
-      throw new Error(`获取默认账号失败: ${error.message}`);
-    }
-    if (data) return data;
-
-    // 如果没有找到，返回第一个支持该货币的账号
-    const { data: fallbackData, error: fallbackError } = await supabase
-      .from('payment_accounts')
-      .select('*')
-      .eq('site_id', siteId)
-      .eq('is_active', true)
-      .contains('currency', [currency])
-      .order('sort_order')
-      .limit(1)
-      .maybeSingle();
-
-    if (fallbackError && fallbackError.code !== 'PGRST116') {
+    // 2. Fallback：找第一个支持该货币的
+    try {
+      const rows = await sql<PaymentAccount[]>`
+        SELECT * FROM public.payment_accounts
+        WHERE site_id = ${siteId}
+          AND is_active = true
+          AND currency @> ${sql.json([currency])}
+        ORDER BY sort_order ASC
+        LIMIT 1
+      `;
+      return rows[0] || null;
+    } catch (fallbackError: any) {
       console.error('获取账号失败:', fallbackError);
       throw new Error(`获取账号失败: ${fallbackError.message}`);
     }
-    return fallbackData || null;
   },
 
-  /**
-   * 批量更新账号排序
-   */
   async updateSortOrder(siteId: string, ids: string[]): Promise<void> {
     for (let i = 0; i < ids.length; i++) {
-      const { error } = await supabase
-        .from('payment_accounts')
-        .update({ 
-          sort_order: i, 
-          updated_at: new Date().toISOString() 
-        })
-        .eq('site_id', siteId)
-        .eq('id', ids[i]);
-      
-      if (error) {
+      try {
+        await sql`
+          UPDATE public.payment_accounts
+          SET sort_order = ${i},
+              updated_at = ${new Date().toISOString()}
+          WHERE site_id = ${siteId}
+            AND id = ${ids[i]}
+        `;
+      } catch (error: any) {
         console.error(`更新排序失败 (id: ${ids[i]}):`, error);
         throw new Error(`更新排序失败: ${error.message}`);
       }
     }
   },
 
-  /**
-   * 获取站点所有活跃账号
-   */
   async getAllActive(siteId: string): Promise<PaymentAccount[]> {
-    const { data, error } = await supabase
-      .from('payment_accounts')
-      .select('*')
-      .eq('site_id', siteId)
-      .eq('is_active', true)
-      .order('sort_order');
-
-    if (error) {
+    try {
+      return await sql<PaymentAccount[]>`
+        SELECT * FROM public.payment_accounts
+        WHERE site_id = ${siteId}
+          AND is_active = true
+        ORDER BY sort_order ASC
+      `;
+    } catch (error: any) {
       console.error('获取账号列表失败:', error);
       throw new Error(`获取账号列表失败: ${error.message}`);
     }
-    return data || [];
   },
 
-  /**
-   * 批量创建预设账号（微信/支付宝/PayPal）
-   * account_type 设为 null，因为预设账号不需要此字段
-   */
   async createPresetAccounts(siteId: string, operator: string): Promise<PaymentAccount[]> {
     const presetMethods = ['wechat', 'alipay', 'paypal'] as const;
     const results: PaymentAccount[] = [];
 
     for (const method of presetMethods) {
-      // 检查是否已存在
       const existing = await this.list(siteId, { method });
       if (existing.length > 0) {
         results.push(existing[0]);
         continue;
       }
 
-      // 创建预设账号 - account_type 设为 undefined
       const input: CreateAccountInput = {
-        account_type: undefined,  // ✅ 预设账号不需要 account_type
+        account_type: undefined,
         payment_type: method === 'paypal' ? 'online_payment' : 'qr_code',
         payment_method: method,
         display_name_zh: method === 'wechat' ? '微信支付' : method === 'alipay' ? '支付宝' : 'PayPal',
         display_name_en: method === 'wechat' ? 'WeChat Pay' : method === 'alipay' ? 'Alipay' : 'PayPal',
         currency: ['USD', 'EUR', 'GBP', 'CNY'],
         is_default: false,
-        // ✅ 预设账号默认未验证
         is_verified: false,
       };
 
@@ -542,62 +447,55 @@ export const accountService = {
     return results;
   },
 
-  /**
-   * ✅ 新增：获取已验证的 PayPal 账号
-   */
   async getVerifiedPayPalAccount(siteId: string): Promise<PaymentAccount | null> {
-    const { data, error } = await supabase
-      .from('payment_accounts')
-      .select('*')
-      .eq('site_id', siteId)
-      .eq('payment_method', 'paypal')
-      .eq('is_active', true)
-      .eq('is_verified', true)
-      .maybeSingle();
-
-    if (error && error.code !== 'PGRST116') {
+    try {
+      const rows = await sql<PaymentAccount[]>`
+        SELECT * FROM public.payment_accounts
+        WHERE site_id = ${siteId}
+          AND payment_method = 'paypal'
+          AND is_active = true
+          AND is_verified = true
+        LIMIT 1
+      `;
+      return rows[0] || null;
+    } catch (error: any) {
       console.error('获取已验证 PayPal 账号失败:', error);
       throw new Error(`获取已验证 PayPal 账号失败: ${error.message}`);
     }
-    return data || null;
   },
 
-  /**
-   * ✅ 新增：获取预设账号（微信/支付宝/PayPal）
-   */
-  async getPresetAccount(siteId: string, method: 'wechat' | 'alipay' | 'paypal'): Promise<PaymentAccount | null> {
-    const { data, error } = await supabase
-      .from('payment_accounts')
-      .select('*')
-      .eq('site_id', siteId)
-      .eq('payment_method', method)
-      .eq('is_active', true)
-      .maybeSingle();
-
-    if (error && error.code !== 'PGRST116') {
+  async getPresetAccount(
+    siteId: string,
+    method: 'wechat' | 'alipay' | 'paypal'
+  ): Promise<PaymentAccount | null> {
+    try {
+      const rows = await sql<PaymentAccount[]>`
+        SELECT * FROM public.payment_accounts
+        WHERE site_id = ${siteId}
+          AND payment_method = ${method}
+          AND is_active = true
+        LIMIT 1
+      `;
+      return rows[0] || null;
+    } catch (error: any) {
       console.error(`获取 ${method} 账号失败:`, error);
       throw new Error(`获取 ${method} 账号失败: ${error.message}`);
     }
-    return data || null;
   },
 
-  /**
-   * ✅ 新增：获取所有预设账号（微信/支付宝/PayPal）
-   */
   async getAllPresetAccounts(siteId: string): Promise<PaymentAccount[]> {
-    const { data, error } = await supabase
-      .from('payment_accounts')
-      .select('*')
-      .eq('site_id', siteId)
-      .eq('is_active', true)
-      .in('payment_method', ['wechat', 'alipay', 'paypal'])
-      .order('sort_order');
-
-    if (error) {
+    try {
+      return await sql<PaymentAccount[]>`
+        SELECT * FROM public.payment_accounts
+        WHERE site_id = ${siteId}
+          AND is_active = true
+          AND payment_method IN ('wechat', 'alipay', 'paypal')
+        ORDER BY sort_order ASC
+      `;
+    } catch (error: any) {
       console.error('获取预设账号失败:', error);
       throw new Error(`获取预设账号失败: ${error.message}`);
     }
-    return data || [];
   },
 };
 

@@ -1,3 +1,4 @@
+// app/admin/videosys/videos/components/VideoForm.tsx
 'use client';
 
 import { useState, useEffect } from 'react';
@@ -10,9 +11,8 @@ import VideoUrlModal from './VideoUrlModal';
 import VideoPreviewModal from './VideoPreviewModal';
 import ResourceAssociation from '@/components/admin/products/ResourceAssociation';
 import { VideoIcon } from 'lucide-react';
-import { getImageUrl } from '@/lib/files/url'; // 导入统一图片处理
+import { getImageUrl } from '@/lib/files/url';
 
-// 动态导入富文本编辑器，禁用 SSR
 const RichTextEditor = dynamic(() => import('@/components/RichTextEditor'), { ssr: false });
 
 interface Category {
@@ -35,7 +35,6 @@ export default function VideoForm({ mode, locale, initialData, videoId }: VideoF
   const [isPreviewModalOpen, setIsPreviewModalOpen] = useState(false);
   const [tagInput, setTagInput] = useState('');
 
-  // 表单状态
   const [title, setTitle] = useState('');
   const [videoUrl, setVideoUrl] = useState('');
   const [sourceType, setSourceType] = useState<'youtube' | 'vimeo' | 'bilibili'>('youtube');
@@ -51,7 +50,6 @@ export default function VideoForm({ mode, locale, initialData, videoId }: VideoF
   const [flagged, setFlagged] = useState<boolean>(false);
   const [tags, setTags] = useState<string[]>([]);
 
-  // SEO 状态
   const [slug, setSlug] = useState('');
   const [seoKeywords, setSeoKeywords] = useState('');
   const [seoTitle, setSeoTitle] = useState('');
@@ -59,10 +57,8 @@ export default function VideoForm({ mode, locale, initialData, videoId }: VideoF
 
   const [errors, setErrors] = useState<{ [key: string]: string }>({});
 
-  // 当前视频 ID（用于关联商品）
   const currentVideoId = mode === 'edit' ? videoId : null;
 
-  // 加载分类
   useEffect(() => {
     const fetchCategories = async () => {
       const res = await fetch(`/api/admin/videosys-categories?locale=${locale}`);
@@ -76,7 +72,6 @@ export default function VideoForm({ mode, locale, initialData, videoId }: VideoF
     fetchCategories();
   }, [locale]);
 
-  // 编辑模式回填
   useEffect(() => {
     if (mode === 'edit' && initialData) {
       setTitle(initialData.title ?? '');
@@ -133,7 +128,6 @@ export default function VideoForm({ mode, locale, initialData, videoId }: VideoF
     setTagInput('');
   };
 
-  // 通过后端 API 获取视频信息
   const fetchVideoInfo = async (url: string) => {
     const res = await fetch('/api/video-info', {
       method: 'POST',
@@ -183,7 +177,6 @@ export default function VideoForm({ mode, locale, initialData, videoId }: VideoF
     if (seoData.seoDescription !== undefined) setSeoDescription(seoData.seoDescription);
   };
 
-  // 处理标签输入
   const handleTagKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
     if (e.key === 'Enter' && tagInput.trim()) {
       e.preventDefault();
@@ -252,8 +245,6 @@ export default function VideoForm({ mode, locale, initialData, videoId }: VideoF
 
   const titleText = mode === 'new' ? `发布视频 (站点: ${locale})` : `编辑视频 (站点: ${locale})`;
   const hasValidVideo = !!videoIdState;
-
-  // 获取显示的缩略图（统一使用 getImageUrl）
   const displayThumbnail = thumbnail ? getImageUrl(thumbnail) : '';
 
   return (
@@ -266,7 +257,6 @@ export default function VideoForm({ mode, locale, initialData, videoId }: VideoF
         <div className="flex gap-6">
           {/* 左侧 65% */}
           <div className="w-2/3 space-y-6">
-            {/* 基本信息卡片 */}
             <div className="bg-white rounded-lg shadow p-6">
               <h2 className="text-lg font-semibold mb-4">基本信息</h2>
               <div className="space-y-4">
@@ -282,7 +272,6 @@ export default function VideoForm({ mode, locale, initialData, videoId }: VideoF
                   {errors.title && <p className="text-red-500 text-xs mt-1">{errors.title}</p>}
                 </div>
 
-                {/* 视频源卡片 */}
                 <div className="border rounded-lg p-4 bg-gray-50">
                   <label className="block text-sm font-medium mb-2">视频源 *</label>
                   <div className="flex gap-4 items-start">
@@ -346,7 +335,6 @@ export default function VideoForm({ mode, locale, initialData, videoId }: VideoF
                   {errors.videoId && <p className="text-red-500 text-xs mt-2">{errors.videoId}</p>}
                 </div>
 
-                {/* 时长 */}
                 <div>
                   <label className="block text-sm font-medium">时长</label>
                   <div className="flex gap-2">
@@ -395,7 +383,6 @@ export default function VideoForm({ mode, locale, initialData, videoId }: VideoF
                   {errors.duration && <p className="text-red-500 text-xs mt-1">{errors.duration}</p>}
                 </div>
 
-                {/* 视频介绍：富文本编辑器 */}
                 <div>
                   <label className="block text-sm font-medium">视频介绍 *</label>
                   <RichTextEditor
@@ -407,7 +394,6 @@ export default function VideoForm({ mode, locale, initialData, videoId }: VideoF
               </div>
             </div>
 
-            {/* 相关商品卡片 */}
             <div className="bg-white rounded-lg shadow p-6">
               <h2 className="text-lg font-semibold mb-4">相关商品</h2>
               {currentVideoId ? (
@@ -423,7 +409,6 @@ export default function VideoForm({ mode, locale, initialData, videoId }: VideoF
               )}
             </div>
 
-            {/* SEO 卡片 */}
             <div className="bg-white rounded-lg shadow p-6">
               <h2 className="text-lg font-semibold mb-4">搜索引擎优化</h2>
               <SeoFields
@@ -437,6 +422,13 @@ export default function VideoForm({ mode, locale, initialData, videoId }: VideoF
                 showKeywords
                 showTitle
                 showDescription
+                locale={locale}
+                slugCheck={{
+                  enabled: true,
+                  endpoint: '/api/admin/videosys-videos/slugs',
+                  excludeId: videoId || undefined,
+                  autoResolveConflict: true,  // ✅ 新增
+                }}
               />
               {errors.slug && <p className="text-red-500 text-xs mt-1">{errors.slug}</p>}
             </div>
@@ -444,7 +436,6 @@ export default function VideoForm({ mode, locale, initialData, videoId }: VideoF
 
           {/* 右侧 30% */}
           <div className="w-1/3 space-y-6">
-            {/* 可见性 */}
             <div className="bg-white rounded-lg shadow p-6">
               <h2 className="text-lg font-semibold mb-4">可见性</h2>
               <div className="space-y-2">
@@ -457,7 +448,6 @@ export default function VideoForm({ mode, locale, initialData, videoId }: VideoF
               </div>
             </div>
 
-            {/* 视频封面 */}
             <div className="bg-white rounded-lg shadow p-6">
               <h2 className="text-lg font-semibold mb-4">视频封面</h2>
               <ImageUpload
@@ -469,7 +459,6 @@ export default function VideoForm({ mode, locale, initialData, videoId }: VideoF
               />
             </div>
 
-            {/* 分类、标记卡片 */}
             <div className="bg-white rounded-lg shadow p-6">
               <h2 className="text-lg font-semibold mb-4">视频分类 & 标记</h2>
               <div className="space-y-4">
@@ -491,7 +480,6 @@ export default function VideoForm({ mode, locale, initialData, videoId }: VideoF
                   {errors.category && <p className="text-red-500 text-xs mt-1">{errors.category}</p>}
                 </div>
 
-                {/* 标记（tags） */}
                 <div>
                   <label className="block text-sm font-medium mb-1">标记</label>
                   <div className="flex flex-wrap gap-2 mb-2">
@@ -532,7 +520,6 @@ export default function VideoForm({ mode, locale, initialData, videoId }: VideoF
         </div>
       </form>
 
-      {/* 悬浮按钮条 */}
       <div className="fixed bottom-0 left-0 right-0 bg-white border-t shadow-lg p-4 flex justify-end gap-4 z-50">
         <button
           type="button"
@@ -551,7 +538,6 @@ export default function VideoForm({ mode, locale, initialData, videoId }: VideoF
         </button>
       </div>
 
-      {/* 模态框 */}
       <VideoUrlModal isOpen={isUrlModalOpen} onClose={() => setIsUrlModalOpen(false)} onConfirm={handleVideoUrlConfirm} />
       <VideoPreviewModal
         isOpen={isPreviewModalOpen}

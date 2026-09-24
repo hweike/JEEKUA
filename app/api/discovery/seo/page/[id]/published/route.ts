@@ -1,7 +1,6 @@
 // app/api/discovery/seo/page/[id]/published/route.ts
-
 import { NextRequest, NextResponse } from 'next/server';
-import { supabase } from '@/lib/supabase/client';
+import sql from '@/lib/db/admin';
 import { calculateSeoScore } from '@/lib/seo/utils/score';
 import { strategiesService } from '@/lib/seo/services';
 import type { SeoScoreResult } from '@/lib/seo/types';
@@ -17,47 +16,56 @@ export async function GET(
     const searchParams = request.nextUrl.searchParams;
     const locale = searchParams.get('locale') || 'en';
 
-    // 1. 查询 pages 表获取正式数据
-    const { data: page, error: pageError } = await supabase
-      .from('pages')
-      .select('id, type, title, seo_title, seo_description, seo_keywords')
-      .eq('site_id', DEFAULT_SITE_ID)
-      .eq('id', id)
-      .eq('locale', locale)
-      .single();
+    // 1. 查询 pages 表
+    let page: { id: string; type: string; title: string; seo_title: string | null; seo_description: string | null; seo_keywords: string | null } | undefined;
+    try {
+      const rows = await sql<{ id: string; type: string; title: string; seo_title: string | null; seo_description: string | null; seo_keywords: string | null }[]>`
+        SELECT id, type, title, seo_title, seo_description, seo_keywords FROM public.pages
+        WHERE site_id = ${DEFAULT_SITE_ID}
+          AND id = ${id}
+          AND locale = ${locale}
+        LIMIT 1
+      `;
+      page = rows[0];
+    } catch (pageError: any) {
+      throw pageError;
+    }
 
-    if (pageError) throw pageError;
+    if (!page) {
+      return NextResponse.json({ error: 'Page not found' }, { status: 404 });
+    }
 
-    // 2. 获取 analyzed_keywords（从 page_seo_data）
-    const { data: seoData, error: seoError } = await supabase
-      .from('page_seo_data')
-      .select('analyzed_keywords')
-      .eq('site_id', DEFAULT_SITE_ID)
-      .eq('page_id', id)
-      .eq('locale', locale)
-      .maybeSingle();
-
-    if (seoError) throw seoError;
+    // 2. 获取 analyzed_keywords
+    let analyzed: string[] = [];
+    try {
+      const rows = await sql<{ analyzed_keywords: string[] | null }[]>`
+        SELECT analyzed_keywords FROM public.page_seo_data
+        WHERE site_id = ${DEFAULT_SITE_ID}
+          AND page_id = ${id}
+          AND locale = ${locale}
+        LIMIT 1
+      `;
+      analyzed = rows[0]?.analyzed_keywords || [];
+    } catch {}
 
     // 3. 获取策略配置
     const strategies = await strategiesService.getStrategies(DEFAULT_SITE_ID);
-    const strategy = strategies.find((s) => s.page_type === page.type);
+    const strategy = strategies.find((s) => s.page_type === page!.type);
     const fields = strategy?.fields || {};
 
-    // 4. 计算正式数据的评分
+    // 4. 计算评分
     const config = {
-      titleMinLength: fields?.seo_title?.minLength || 30,
-      titleMaxLength: fields?.seo_title?.maxLength || 60,
-      descMinLength: fields?.seo_description?.minLength || 80,
-      descMaxLength: fields?.seo_description?.maxLength || 160,
-      keywordMinCount: fields?.seo_keywords?.minCount || 2,
-      keywordMaxCount: fields?.seo_keywords?.maxCount || 5,
+      titleMinLength: (fields as any)?.seo_title?.minLength || 30,
+      titleMaxLength: (fields as any)?.seo_title?.maxLength || 60,
+      descMinLength: (fields as any)?.seo_description?.minLength || 80,
+      descMaxLength: (fields as any)?.seo_description?.maxLength || 160,
+      keywordMinCount: (fields as any)?.seo_keywords?.minCount || 2,
+      keywordMaxCount: (fields as any)?.seo_keywords?.maxCount || 5,
     };
 
     const keywords = page.seo_keywords
       ? page.seo_keywords.split(',').map((k: string) => k.trim()).filter(Boolean)
       : [];
-    const analyzed = seoData?.analyzed_keywords || [];
 
     const score = calculateSeoScore(
       page.seo_title,
@@ -67,7 +75,7 @@ export async function GET(
       config
     );
 
-    // 5. 返回正式数据
+    // 5. 返回
     return NextResponse.json({
       data: {
         seo_title: page.seo_title,

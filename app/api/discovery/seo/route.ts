@@ -1,5 +1,6 @@
+// app/api/discovery/seo/route.ts
 import { NextRequest, NextResponse } from 'next/server';
-import { supabase } from '@/lib/supabase/client';
+import sql from '@/lib/db/admin';
 import crypto from 'crypto';
 
 const SITE_ID = process.env.NEXT_PUBLIC_SITE_ID || '000001';
@@ -18,55 +19,57 @@ export async function PUT(req: NextRequest) {
   }
 
   try {
-    // 1. 获取原页面信息（用于重新计算 content_hash）
-    const { data: page, error: pageError } = await supabase
-      .from('pages')
-      .select('title, content_hash, content_summary')
-      .eq('id', id)
-      .eq('site_id', SITE_ID)
-      .eq('locale', locale)
-      .maybeSingle();
-
-    if (pageError) {
+    // 1. 获取原页面信息
+    let page: { title: string | null; content_hash: string | null; content_summary: string | null } | undefined;
+    try {
+      const rows = await sql<{ title: string | null; content_hash: string | null; content_summary: string | null }[]>`
+        SELECT title, content_hash, content_summary FROM public.pages
+        WHERE id = ${id}
+          AND site_id = ${SITE_ID}
+          AND locale = ${locale}
+        LIMIT 1
+      `;
+      page = rows[0];
+    } catch (pageError: any) {
       console.error('查询页面失败:', pageError);
       return NextResponse.json({ error: 'Database query failed' }, { status: 500 });
     }
+
     if (!page) {
       return NextResponse.json({ error: 'Page not found' }, { status: 404 });
     }
 
-    // 2. 更新 pages 表的 SEO 字段
-    const { error: updateError } = await supabase
-      .from('pages')
-      .update({
-        seo_title: seo.metaTitle || null,
-        seo_description: seo.metaDescription || null,
-        seo_keywords: seo.metaKeywords || null,
-        updatedAt: new Date().toISOString(),
-      })
-      .eq('id', id)
-      .eq('site_id', SITE_ID)
-      .eq('locale', locale);
-
-    if (updateError) {
+    // 2. 更新 pages 的 SEO 字段
+    try {
+      await sql`
+        UPDATE public.pages
+        SET seo_title = ${seo.metaTitle || null},
+            seo_description = ${seo.metaDescription || null},
+            seo_keywords = ${seo.metaKeywords || null},
+            "updatedAt" = ${new Date().toISOString()}
+        WHERE id = ${id}
+          AND site_id = ${SITE_ID}
+          AND locale = ${locale}
+      `;
+    } catch (updateError: any) {
       console.error('更新 SEO 字段失败:', updateError);
       return NextResponse.json({ error: 'Failed to update SEO' }, { status: 500 });
     }
 
     // 3. 获取 page_contents 中的 full_content
-    const { data: contentRow, error: contentError } = await supabase
-      .from('page_contents')
-      .select('full_content')
-      .eq('page_id', id)
-      .eq('site_id', SITE_ID)
-      .eq('locale', locale)
-      .maybeSingle();
-
-    if (contentError && contentError.code !== 'PGRST116') { // 忽略无记录错误
+    let fullContent = '';
+    try {
+      const rows = await sql<{ full_content: string | null }[]>`
+        SELECT full_content FROM public.page_contents
+        WHERE page_id = ${id}
+          AND site_id = ${SITE_ID}
+          AND locale = ${locale}
+        LIMIT 1
+      `;
+      if (rows[0]?.full_content) fullContent = rows[0].full_content;
+    } catch (contentError: any) {
       console.error('查询 page_contents 失败:', contentError);
     }
-
-    const fullContent = contentRow?.full_content || '';
 
     // 4. 重新计算 content_hash
     const newHash = computeHash({
@@ -77,20 +80,18 @@ export async function PUT(req: NextRequest) {
       seo_keywords: seo.metaKeywords,
     });
 
-    const { error: hashError } = await supabase
-      .from('pages')
-      .update({ content_hash: newHash })
-      .eq('id', id)
-      .eq('site_id', SITE_ID)
-      .eq('locale', locale);
-
-    if (hashError) {
+    try {
+      await sql`
+        UPDATE public.pages
+        SET content_hash = ${newHash}
+        WHERE id = ${id}
+          AND site_id = ${SITE_ID}
+          AND locale = ${locale}
+      `;
+    } catch (hashError: any) {
       console.error('更新 content_hash 失败:', hashError);
       return NextResponse.json({ error: 'Failed to update content hash' }, { status: 500 });
     }
-
-    // 5. 文件同步原逻辑保留（未实现）
-    // 实际生产环境应调用对应模块的保存函数，此处保持原样
 
     return NextResponse.json({ success: true });
   } catch (error) {

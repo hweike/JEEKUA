@@ -9,8 +9,6 @@ import { PriceTiersInput } from '../components/PriceTiersInput';
 import ProductImageManager from '@/components/ProductImageManager';
 import InfoTooltip from '@/components/InfoTooltip';
 import SeoFields from '@/components/common/SeoFields';
-import { generateClientSlug } from '@/lib/utils/clientSlug';
-import { toPinyin } from '@/lib/utils/pinyin';
 import { TemplateSelector } from '@/components/webbuilder/TemplateSelector';
 import ProductRelatedVideos from '@/components/admin/products/ProductRelatedVideos';
 import { getLanguageDisplayName } from '@/lib/languages/config';
@@ -78,12 +76,6 @@ function SpecificationsInput({ value, onChange }: { value: string; onChange: (va
       <p className="text-xs text-gray-500 mt-1">按回车添加规格，鼠标悬停在规格上可删除</p>
     </div>
   );
-}
-
-function generateSlugForProduct(text: string): string {
-  if (!text) return '';
-  const pinyinText = toPinyin(text);
-  return generateClientSlug(pinyinText);
 }
 
 // ---------- 骨架屏组件 ----------
@@ -365,18 +357,14 @@ export default function ProductEditPage() {
         setCategoryPath(`${productLine?.name || '无'} >> ${cat.name}${seriesName ? ` >> ${seriesName}` : ''}`);
 
         // ===== 属性模板加载逻辑（区分编辑/新建） =====
-        // 编辑模式下使用 productData.attributes 判断是否已有属性数据
         const hasAttributes = isEditMode
           ? (productData?.attributes && Object.keys(productData.attributes).length > 0)
           : false;
 
         if (isEditMode) {
-          // 编辑模式
           if (hasAttributes) {
-            // 产品已有属性数据，不加载模板（使用已有数据）
             setAttributeTemplate(null);
           } else if (cat.attributeTemplateId && settingsData.attributeTemplates) {
-            // 没有属性数据，但有模板，加载模板作为默认
             const tpl = settingsData.attributeTemplates.find((t: any) => t.id === cat.attributeTemplateId);
             if (tpl) {
               setAttributeTemplate(tpl);
@@ -387,7 +375,6 @@ export default function ProductEditPage() {
             setAttributeTemplate(null);
           }
         } else {
-          // 新建模式：直接加载属性模板（如果有）
           if (cat.attributeTemplateId && settingsData.attributeTemplates) {
             const tpl = settingsData.attributeTemplates.find((t: any) => t.id === cat.attributeTemplateId);
             if (tpl) {
@@ -438,11 +425,8 @@ export default function ProductEditPage() {
       return;
     }
 
-    let finalSlug = form.slug;
-    if (!finalSlug || finalSlug.trim() === '') {
-      finalSlug = generateSlugForProduct(form.product_name);
-      setForm((prev: any) => ({ ...prev, slug: finalSlug }));
-    }
+    // ✅ slug 由 SeoFields 内部自动生成，这里只做兜底
+    const finalSlug = form.slug || '';
 
     const finalCategoryId = form.categoryId || urlCategoryId;
     const finalSeriesId = form.seriesId || urlSeriesId;
@@ -782,6 +766,13 @@ export default function ProductEditPage() {
                 showTitle
                 showDescription
                 disabled={false}
+                locale={locale}
+                slugCheck={{
+                  enabled: true,
+                  endpoint: '/api/admin/products/slugs',
+                  excludeId: productId || undefined,
+                  autoResolveConflict: true,  // ✅ 新增
+                }}
               />
             </div>
 

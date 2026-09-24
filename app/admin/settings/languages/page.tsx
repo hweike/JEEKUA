@@ -3,6 +3,8 @@
 import { useEffect, useState } from 'react';
 import { LANGUAGES } from '@/lib/languages/config';
 import Toast from '@/components/Toast';
+import { clearLanguagesCache } from '@/components/common/LanguageSelector';
+import { clearEnabledLanguagesCache } from '@/lib/languages/client';
 
 export default function LanguageSettingsPage() {
   const [enabled, setEnabled] = useState<Record<string, boolean>>({});
@@ -47,6 +49,10 @@ export default function LanguageSettingsPage() {
       });
       if (res.ok) {
         setToast({ message: '保存成功', type: 'success' });
+
+        // ✅ 清两份前端缓存
+        clearLanguagesCache();         // 后台 LanguageSelector 的缓存
+        clearEnabledLanguagesCache();  // lib/languages/client 的缓存（前台 LanguageSwitcher 用）
       } else {
         const err = await res.json();
         setToast({ message: err.error || '保存失败', type: 'error' });
@@ -142,7 +148,6 @@ export default function LanguageSettingsPage() {
                   <th className="border px-3 py-2 text-left">中文名称</th>
                   <th className="border px-3 py-2 text-left">原生名称</th>
                   <th className="border px-3 py-2 text-left">官方语言代码</th>
-                  {/* 新增列 */}
                   <th className="border px-3 py-2 text-left">是否拉丁语</th>
                 </tr>
               </thead>
@@ -153,7 +158,6 @@ export default function LanguageSettingsPage() {
                     <td className="border px-3 py-1">{item.countryZhName}</td>
                     <td className="border px-3 py-1">{item.countryNativeName}</td>
                     <td className="border px-3 py-1">{item.officialLanguageCode || '-'}</td>
-                    {/* 新增数据列，直接使用API返回的isLatin字段 */}
                     <td className="border px-3 py-1 text-center">
                       {item.officialLanguageCode ? (item.isLatin ? '是' : '否') : '-'}
                     </td>

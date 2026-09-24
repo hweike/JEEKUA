@@ -1,5 +1,5 @@
 // lib/sitemap/generate.ts
-import { supabase } from '@/lib/supabase/client';
+import sql from '@/lib/db/admin';
 import { getSiteSettings } from '@/lib/getSiteSettings';
 import { getPublicStorage } from '@/lib/storage/factory';
 
@@ -252,15 +252,32 @@ export async function generateSitemaps(): Promise<string[]> {
 
   // 1. 查询所有需要索引的页面（noindex = 0）
   console.log('[generateSitemaps] Fetching pages from database...');
-  const { data: rows, error } = await supabase
-    .from('pages')
-    .select('id, locale, url, updatedAt, priority, changefreq')
-    .eq('site_id', SITE_ID)
-    .eq('noindex', 0)
-    .order('id', { ascending: true })
-    .order('locale', { ascending: true });
 
-  if (error) {
+  let rows: Array<{
+    id: string;
+    locale: string;
+    url: string;
+    updatedAt: string;
+    priority: number;
+    changefreq: string;
+  }>;
+
+  try {
+    rows = await sql<Array<{
+      id: string;
+      locale: string;
+      url: string;
+      updatedAt: string;
+      priority: number;
+      changefreq: string;
+    }>[number][]>`
+      SELECT id, locale, url, "updatedAt", priority, changefreq
+      FROM public.pages
+      WHERE site_id = ${SITE_ID}
+        AND noindex = 0
+      ORDER BY id ASC, locale ASC
+    `;
+  } catch (error: any) {
     console.error('[generateSitemaps] Database error:', error);
     throw new Error('Database query failed');
   }

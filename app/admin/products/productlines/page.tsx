@@ -12,7 +12,6 @@ import { LANGUAGES } from '@/lib/languages/config';
 import { useCategories, ProductLine } from '../categories/hooks/useCategories';
 import { getTemplateDisplayName, preloadTemplateNames } from '@/lib/webbuilder/template-utils';
 import { HINT_PATHS, InfoTooltip } from '@/config/fieldHints';
-// 新增导入 AI 翻译模态框
 import AiHelperProductLineModal from './components/AiHelperProductLineModal';
 
 const validLocaleCodes = LANGUAGES.map(lang => lang.code);
@@ -35,7 +34,6 @@ export default function ProductLinesPage() {
 
   const [templateNames, setTemplateNames] = useState<Record<string, string>>({});
 
-  // AI 翻译模态框状态
   const [showAiHelper, setShowAiHelper] = useState(false);
 
   const {
@@ -181,11 +179,8 @@ export default function ProductLinesPage() {
     setNewData(prev => ({ ...prev, [field]: value }));
   };
 
-  // AI 翻译导入成功后的回调
   const handleAiImportSuccess = () => {
-    // 刷新产品线列表
     refresh();
-    // 关闭模态框
     setShowAiHelper(false);
   };
 
@@ -210,7 +205,6 @@ export default function ProductLinesPage() {
 
       <div className="flex justify-end items-center gap-4 mb-6">
         {saving && <span className="text-sm text-gray-500 mr-4">保存中...</span>}
-        {/* 新增 AI 翻译按钮（仅 en/zh 可见） */}
         {(locale === 'en' || locale === 'zh') && (
           <button
             onClick={() => setShowAiHelper(true)}
@@ -228,7 +222,6 @@ export default function ProductLinesPage() {
       </div>
 
       <div className="space-y-4">
-        {/* 新增表单 */}
         {addingNew && (
           <div className="border rounded-lg p-4 bg-blue-50 shadow-sm space-y-4">
             <div className="border rounded-lg p-4 bg-white shadow-sm">
@@ -281,6 +274,8 @@ export default function ProductLinesPage() {
                 showKeywords
                 showTitle
                 showDescription
+                // ✅ 顶层 locale（暂不启用 slugCheck，因为产品线 slug 不在数据库）
+                locale={locale}
               />
             </div>
 
@@ -291,7 +286,6 @@ export default function ProductLinesPage() {
           </div>
         )}
 
-        {/* 已有产品线列表 */}
         {productLines.map(line => {
           const isEditing = editingId === line.id;
           return (
@@ -347,6 +341,8 @@ export default function ProductLinesPage() {
                       showKeywords
                       showTitle
                       showDescription
+                      // ✅ 顶层 locale
+                      locale={locale}
                     />
                   </div>
 
@@ -386,7 +382,6 @@ export default function ProductLinesPage() {
         })}
       </div>
 
-      {/* AI 翻译模态框 */}
       {showAiHelper && (
         <AiHelperProductLineModal
           sourceLocale={locale}

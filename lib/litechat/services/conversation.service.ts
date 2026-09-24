@@ -1,6 +1,5 @@
 // lib/litechat/services/conversation.service.ts
-import { supabase } from '@/lib/supabase/client';
-import { getSupabaseAdminClient } from '@/lib/supabase/admin-client';
+import sql from '@/lib/db/admin';
 import { getOrCreateChatCustomer } from './customer.service';
 import { getAdminInfoById, getAdminOnlineStatus } from './admin.service';
 import { Conversation, ConversationWithLastMessage } from '../types';
@@ -12,61 +11,44 @@ const CHAT_SCHEMA = 'chat';
 // 内部辅助函数
 // ============================================================
 
-/**
- * 获取超级管理员（role = 'super'）
- * 如果存在多个，返回第一个
- */
 async function getSuperAdmin(siteId: string = DEFAULT_SITE_ID) {
-  const { data, error } = await supabase
-    .from('admin_users')
-    .select('id')
-    .eq('site_id', siteId)
-    .eq('role', 'super')
-    .maybeSingle();
-
-  if (error) {
+  try {
+    const rows = await sql<{ id: string }[]>`
+      SELECT id FROM public.admin_users
+      WHERE site_id = ${siteId}
+        AND role = 'super'
+      LIMIT 1
+    `;
+    return rows[0] ?? null;
+  } catch (error) {
     console.error('查询超级管理员失败:', error);
     return null;
   }
-  return data;
 }
 
-/**
- * 插入系统消息（发送者类型为 'system'）
- */
 async function insertSystemMessage(conversationId: string, content: string) {
-  const { error } = await supabase
-    .schema(CHAT_SCHEMA)
-    .from('messages')
-    .insert({
-      conversation_id: conversationId,
-      sender_type: 'system',
-      content,
-      content_type: 'text',
-      is_read: false,
-      created_at: new Date().toISOString(),
-    });
-
-  if (error) {
+  try {
+    await sql`
+      INSERT INTO chat.messages (
+        conversation_id, sender_type, content, content_type, is_read, created_at
+      ) VALUES (
+        ${conversationId}, 'system', ${content}, 'text', false, ${new Date().toISOString()}
+      )
+    `;
+  } catch (error) {
     console.error('插入系统消息失败:', error);
   }
 }
 
-/**
- * 自动发送欢迎语或离线回复
- * - 如果有超级管理员且在线 → 发送管理员欢迎语
- * - 如果有超级管理员但离线 → 发送管理员离线回复
- * - 如果没有超级管理员 → 发送默认消息
- */
 async function sendAutoWelcomeMessage(conversationId: string, siteId: string) {
   try {
-    // 1. 获取会话的管理员（如果有分配）
-    const { data: conversation } = await supabase
-      .schema(CHAT_SCHEMA)
-      .from('conversations')
-      .select('agent_id')
-      .eq('id', conversationId)
-      .single();
+    // 1. 获取会话的管理员
+    const convRows = await sql<{ agent_id: string | null }[]>`
+      SELECT agent_id FROM chat.conversations
+      WHERE id = ${conversationId}
+      LIMIT 1
+    `;
+    const conversation = convRows[0];
 
     // 2. 如果没有分配管理员，使用默认消息
     if (!conversation?.agent_id) {
@@ -77,7 +59,7 @@ async function sendAutoWelcomeMessage(conversationId: string, siteId: string) {
       return;
     }
 
-    // 3. 获取管理员信息（含欢迎语、离线回复）
+    // 3. 获取管理员信息
     const admin = await getAdminInfoById(conversation.agent_id);
     if (!admin) {
       await insertSystemMessage(
@@ -101,7 +83,6 @@ async function sendAutoWelcomeMessage(conversationId: string, siteId: string) {
     await insertSystemMessage(conversationId, message);
   } catch (error) {
     console.error('发送自动欢迎消息失败:', error);
-    // 不抛出错误，不影响会话创建
   }
 }
 
@@ -109,45 +90,31 @@ async function sendAutoWelcomeMessage(conversationId: string, siteId: string) {
 // 对外服务函数
 // ============================================================
 
-/**
- * 获取或创建会话（访客端）
- * - 如果客户已有未关闭的会话，返回现有的
- * - 否则创建新会话，并自动分配超级管理员
- * - 创建后自动发送欢迎语或离线回复
- */
 export async function getOrCreateConversation(
   email: string,
   name?: string,
   siteId: string = DEFAULT_SITE_ID
 ) {
-  // 1. 确保客户存在（自动创建）
+  // 1. 确保客户存在
   const customer = await getOrCreateChatCustomer(email, name, siteId);
 
   // 2. 查找该客户未关闭的会话
-  const { data: existing, error: findError } = await supabase
-    .schema(CHAT_SCHEMA)
-    .from('conversations')
-    .select('*')
-    .eq('site_id', siteId)
-    .eq('customer_id', customer.id)
-    .neq('status', 'closed')
-    .order('last_message_at', { ascending: false })
-    .limit(1)
-    .maybeSingle();
+  const existingRows = await sql<any[]>`
+    SELECT * FROM chat.conversations
+    WHERE site_id = ${siteId}
+      AND customer_id = ${customer.id}
+      AND status != 'closed'
+    ORDER BY last_message_at DESC
+    LIMIT 1
+  `;
 
-  if (findError) {
-    console.error('查询会话失败:', findError);
-    throw new Error('查询会话失败');
-  }
-
-  if (existing) {
-    return existing;
+  if (existingRows[0]) {
+    return existingRows[0];
   }
 
   // 3. 创建新会话
   const now = new Date().toISOString();
 
-  // ===== 自动分配超级管理员 =====
   const superAdmin = await getSuperAdmin(siteId);
   const agentId = superAdmin?.id || null;
 
@@ -162,22 +129,20 @@ export async function getOrCreateConversation(
     updated_at: now,
   };
 
-  // 如果有超级管理员，自动分配
   if (agentId) {
     insertData.agent_id = agentId;
   }
 
-  const { data: newConversation, error: insertError } = await supabase
-    .schema(CHAT_SCHEMA)
-    .from('conversations')
-    .insert(insertData)
-    .select()
-    .single();
+  const newRows = await sql<any[]>`
+    INSERT INTO chat.conversations ${sql(insertData)}
+    RETURNING *
+  `;
 
-  if (insertError) {
-    console.error('创建会话失败:', insertError);
+  if (!newRows[0]) {
     throw new Error('创建会话失败');
   }
+
+  const newConversation = newRows[0];
 
   // 4. 自动发送欢迎语或离线回复
   await sendAutoWelcomeMessage(newConversation.id, siteId);
@@ -185,146 +150,137 @@ export async function getOrCreateConversation(
   return newConversation;
 }
 
-/**
- * 获取单个会话（用于验证权限）
- */
 export async function getConversationById(
   conversationId: string,
   siteId: string = DEFAULT_SITE_ID
 ) {
-  const { data, error } = await supabase
-    .schema(CHAT_SCHEMA)
-    .from('conversations')
-    .select('*')
-    .eq('id', conversationId)
-    .eq('site_id', siteId)
-    .maybeSingle();
-
-  if (error) {
+  try {
+    const rows = await sql<any[]>`
+      SELECT * FROM chat.conversations
+      WHERE id = ${conversationId}
+        AND site_id = ${siteId}
+      LIMIT 1
+    `;
+    return rows[0] ?? null;
+  } catch (error) {
     console.error('获取会话失败:', error);
     return null;
   }
-  return data;
 }
 
-/**
- * 获取客户的所有会话（用于前台显示历史）
- */
 export async function getCustomerConversations(
   customerId: string,
   siteId: string = DEFAULT_SITE_ID
 ) {
-  const { data, error } = await supabase
-    .schema(CHAT_SCHEMA)
-    .from('conversations')
-    .select('*')
-    .eq('site_id', siteId)
-    .eq('customer_id', customerId)
-    .order('last_message_at', { ascending: false });
-
-  if (error) {
+  try {
+    return await sql<any[]>`
+      SELECT * FROM chat.conversations
+      WHERE site_id = ${siteId}
+        AND customer_id = ${customerId}
+      ORDER BY last_message_at DESC
+    `;
+  } catch (error) {
     console.error('获取客户会话列表失败:', error);
     return [];
   }
-  return data;
 }
 
-/**
- * 获取所有会话（管理员后台）
- * 使用 supabaseAdmin 绕过权限限制
- */
 export async function getAllConversationsForAdmin(
   siteId: string = DEFAULT_SITE_ID,
   agentId?: string
 ): Promise<ConversationWithLastMessage[]> {
-  const supabaseAdmin = getSupabaseAdminClient();
-
-  let query = supabaseAdmin
-    .schema(CHAT_SCHEMA)
-    .from('conversations')
-    .select('*')
-    .eq('site_id', siteId);
-
+  // 1. 查询会话
+  let convs: any[];
   if (agentId) {
-    query = query.or(`agent_id.is.null,agent_id.eq.${agentId}`);
-  }
-
-  const { data: convs, error: convError } = await query
-    .order('last_message_at', { ascending: false });
-
-  if (convError) {
-    console.error('获取会话列表失败:', convError);
-    throw convError;
+    convs = await sql<any[]>`
+      SELECT * FROM chat.conversations
+      WHERE site_id = ${siteId}
+        AND (agent_id IS NULL OR agent_id = ${agentId})
+      ORDER BY last_message_at DESC
+    `;
+  } else {
+    convs = await sql<any[]>`
+      SELECT * FROM chat.conversations
+      WHERE site_id = ${siteId}
+      ORDER BY last_message_at DESC
+    `;
   }
 
   if (!convs || convs.length === 0) {
     return [];
   }
 
-  // 获取客户信息（first_name, last_name, name, source）
+  // 2. 批量获取客户信息
   const customerIds = convs.map(c => c.customer_id).filter(Boolean);
   let customerInfoMap: Record<string, { first_name?: string; last_name?: string; name?: string; source?: string }> = {};
+
   if (customerIds.length > 0) {
-    const { data: customers, error: custError } = await supabaseAdmin
-      .from('customers')
-      .select('id, first_name, last_name, name, source')
-      .eq('site_id', siteId)
-      .in('id', customerIds);
-    if (!custError && customers) {
+    try {
+      const customers = await sql<any[]>`
+        SELECT id, first_name, last_name, name, source
+        FROM public.customers
+        WHERE site_id = ${siteId}
+          AND id IN ${sql(customerIds)}
+      `;
       customerInfoMap = customers.reduce((map, c) => {
-        map[c.id] = { first_name: c.first_name, last_name: c.last_name, name: c.name, source: c.source };
+        map[c.id] = {
+          first_name: c.first_name,
+          last_name: c.last_name,
+          name: c.name,
+          source: c.source,
+        };
         return map;
       }, {} as Record<string, any>);
+    } catch (err) {
+      console.warn('获取客户信息失败:', err);
     }
   }
 
-  // 批量获取每个会话的消息（用于计算未读和预览）
+  // 3. 批量获取消息（优化：一次查询所有会话的消息）
+  const conversationIds = convs.map(c => c.id);
+  let messagesByConv: Record<string, any[]> = {};
+
+  if (conversationIds.length > 0) {
+    try {
+      const allMessages = await sql<any[]>`
+        SELECT conversation_id, content, content_type, is_read, sender_type, created_at
+        FROM chat.messages
+        WHERE conversation_id IN ${sql(conversationIds)}
+        ORDER BY created_at ASC
+      `;
+      messagesByConv = allMessages.reduce((map, m) => {
+        if (!map[m.conversation_id]) map[m.conversation_id] = [];
+        map[m.conversation_id].push(m);
+        return map;
+      }, {} as Record<string, any[]>);
+    } catch (err) {
+      console.warn('批量获取消息失败:', err);
+    }
+  }
+
+  // 4. 组装结果
   const result: ConversationWithLastMessage[] = [];
   for (const conv of convs) {
-    const { data: msgs, error: msgError } = await supabaseAdmin
-      .schema(CHAT_SCHEMA)
-      .from('messages')
-      .select('content, content_type, is_read, sender_type, created_at')
-      .eq('conversation_id', conv.id)
-      .order('created_at', { ascending: true });
+    const msgs = messagesByConv[conv.id] || [];
+    const lastMsg = msgs.length > 0 ? msgs[msgs.length - 1] : null;
+    const unreadCount = msgs.filter(
+      (m: any) => m.sender_type === 'visitor' && !m.is_read
+    ).length;
 
-    if (msgError) {
-      console.warn(`获取会话 ${conv.id} 消息失败:`, msgError);
-      result.push({
-        ...conv,
-        source: customerInfoMap[conv.customer_id]?.source || 'unknown',
-        display_name: '匿名',
-        last_message_content: '',
-        last_message_type: '',
-        unread_count: 0,
-      });
-      continue;
-    }
-
-    const lastMsg = msgs && msgs.length > 0 ? msgs[msgs.length - 1] : null;
-    const unreadCount = msgs
-      ? msgs.filter((m: any) => m.sender_type === 'visitor' && !m.is_read).length
-      : 0;
-
-    // 计算 display_name
     const customerInfo = customerInfoMap[conv.customer_id] || {};
     let displayName = '匿名';
 
-    // 第1层：优先使用 name（用户填写的姓名）
     if (customerInfo.name && customerInfo.name.trim()) {
       displayName = customerInfo.name.trim();
     } else {
-      // 第2层：使用 first_name + last_name（用下划线连接）
       const firstName = customerInfo.first_name || '';
       const lastName = customerInfo.last_name || '';
       const combined = [firstName, lastName].filter(Boolean).join('_');
       if (combined && combined.trim()) {
         displayName = combined;
       }
-      // 否则保持 '匿名'
     }
 
-    // 第3层：如果 source === 'chat'，追加 '（访客）' 标签
     if (customerInfo.source === 'chat') {
       displayName += '（访客）';
     }
@@ -342,84 +298,65 @@ export async function getAllConversationsForAdmin(
   return result;
 }
 
-/**
- * 更新会话状态（管理员操作）
- * 使用 supabaseAdmin
- */
 export async function updateConversationStatus(
   conversationId: string,
   status: 'pending' | 'active' | 'closed',
   siteId: string = DEFAULT_SITE_ID
 ) {
-  const supabaseAdmin = getSupabaseAdminClient();
-  const { error } = await supabaseAdmin
-    .schema(CHAT_SCHEMA)
-    .from('conversations')
-    .update({
-      status,
-      updated_at: new Date().toISOString(),
-    })
-    .eq('id', conversationId)
-    .eq('site_id', siteId);
-
-  if (error) {
+  try {
+    await sql`
+      UPDATE chat.conversations
+      SET status = ${status},
+          updated_at = ${new Date().toISOString()}
+      WHERE id = ${conversationId}
+        AND site_id = ${siteId}
+    `;
+  } catch (error) {
     console.error('更新会话状态失败:', error);
     throw new Error('更新会话状态失败');
   }
 }
 
-/**
- * 分配会话给指定管理员
- */
 export async function assignConversation(
   conversationId: string,
   agentId: string,
   siteId: string = DEFAULT_SITE_ID
 ): Promise<Conversation> {
-  const supabaseAdmin = getSupabaseAdminClient();
-  
-  // 验证会话是否存在
-  const { data: conv, error: findError } = await supabaseAdmin
-    .schema(CHAT_SCHEMA)
-    .from('conversations')
-    .select('*')
-    .eq('id', conversationId)
-    .eq('site_id', siteId)
-    .single();
-
-  if (findError || !conv) {
+  // 1. 验证会话存在
+  const convRows = await sql<any[]>`
+    SELECT * FROM chat.conversations
+    WHERE id = ${conversationId}
+      AND site_id = ${siteId}
+    LIMIT 1
+  `;
+  if (!convRows[0]) {
     throw new Error('会话不存在');
   }
 
-  // 验证管理员是否存在
-  const { data: admin, error: adminError } = await supabase
-    .from('admin_users')
-    .select('id')
-    .eq('id', agentId)
-    .single();
-
-  if (adminError || !admin) {
+  // 2. 验证管理员存在
+  const adminRows = await sql<{ id: string }[]>`
+    SELECT id FROM public.admin_users
+    WHERE id = ${agentId}
+    LIMIT 1
+  `;
+  if (!adminRows[0]) {
     throw new Error('管理员不存在');
   }
 
-  // 更新会话
-  const { data, error } = await supabaseAdmin
-    .schema(CHAT_SCHEMA)
-    .from('conversations')
-    .update({
-      agent_id: agentId,
-      status: 'active',
-      updated_at: new Date().toISOString(),
-    })
-    .eq('id', conversationId)
-    .eq('site_id', siteId)
-    .select()
-    .single();
+  // 3. 更新会话
+  const updatedRows = await sql<any[]>`
+    UPDATE chat.conversations
+    SET agent_id = ${agentId},
+        status = 'active',
+        updated_at = ${new Date().toISOString()}
+    WHERE id = ${conversationId}
+      AND site_id = ${siteId}
+    RETURNING *
+  `;
 
-  if (error) {
-    console.error('分配会话失败:', error);
-    throw error;
+  if (!updatedRows[0]) {
+    throw new Error('分配会话失败');
   }
 
-  return data;
+  return updatedRows[0];
 }

@@ -1,5 +1,6 @@
 // app/api/admin/pages/create/route.ts
 import { NextRequest, NextResponse } from 'next/server';
+import { revalidatePath } from 'next/cache';
 import { createPage } from '@/lib/pages/pageService';
 import type { PageType, Visibility } from '@/types/page';
 
@@ -94,6 +95,16 @@ export async function POST(request: NextRequest) {
       });
     }
 
+    // ✅ 清 ISR：新页面路径
+    try {
+      revalidatePath(`/${locale}/${page.slug}`);
+      if (isDev) {
+        console.log(`[api/pages/create] ✅ revalidatePath: /${locale}/${page.slug}`);
+      }
+    } catch (e) {
+      console.warn('[api/pages/create] revalidatePath 失败:', e);
+    }
+
     // 5. 返回统一结构（只返回必要字段）
     return NextResponse.json({
       success: true,
@@ -107,7 +118,7 @@ export async function POST(request: NextRequest) {
 
   } catch (error: any) {
     const message = error?.message || '创建失败';
-    console.error('[api/pages/create] ❌ 捕获错误:', message);
+    console.error('[api/admin/pages/create] ❌ 捕获错误:', message);
 
     // 尝试解析 JSON 错误（如 SEO 校验错误）
     try {

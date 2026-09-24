@@ -1,5 +1,6 @@
 // app/api/admin/files/route.ts
 import { NextRequest, NextResponse } from 'next/server';
+import sql from '@/lib/db/admin';
 import { getPublicStorage } from '@/lib/storage/factory';
 import { computeFileHash, getImageDimensions, generateStorageKey } from '@/lib/files/utils';
 import {
@@ -55,15 +56,16 @@ export async function POST(req: NextRequest) {
       height,
       source_url: null,
     });
-    
+
     // ✅ 如果有 categoryId，更新文件
     if (categoryId) {
-      await supabase
-        .from('media_files')
-        .update({ category_id: categoryId })
-        .eq('id', newFile.id);
+      await sql`
+        UPDATE public.media_files
+        SET category_id = ${categoryId}
+        WHERE id = ${newFile.id}
+      `;
     }
-    
+
     mediaFileId = newFile.id;
   }
 
@@ -98,11 +100,11 @@ export async function GET(req: NextRequest) {
     const categoryId = searchParams.get('categoryId') || null;
     const referenced = searchParams.get('referenced') || null;
 
-    console.log('📂 查询参数:', { page, pageSize, search, categoryId, referenced });
+    // console.log('📂 查询参数:', { page, pageSize, search, categoryId, referenced });
 
     // ✅ listMediaFiles 已经包含 site_id 过滤
     const { files, total } = await listMediaFiles(page, pageSize, search, categoryId, referenced);
-    
+
     const storage = getPublicStorage();
     const filesWithUrl = files.map((file: any) => ({
       ...file,
@@ -110,16 +112,16 @@ export async function GET(req: NextRequest) {
       referenceCount: file.referenceCount || 0,
     }));
 
-    return NextResponse.json({ 
-      files: filesWithUrl, 
-      total, 
-      page, 
-      size: pageSize 
+    return NextResponse.json({
+      files: filesWithUrl,
+      total,
+      page,
+      size: pageSize,
     });
   } catch (error: any) {
     console.error('GET /api/admin/files error:', error);
     return NextResponse.json(
-      { error: error.message || '获取文件列表失败' }, 
+      { error: error.message || '获取文件列表失败' },
       { status: 500 }
     );
   }

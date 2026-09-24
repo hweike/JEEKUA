@@ -1,7 +1,7 @@
 // app/api/admin/menus/route.ts
 import { NextRequest, NextResponse } from 'next/server';
 import { readMenuFile } from '@/lib/menus/storage';
-import { supabase } from '@/lib/supabase/client';
+import sql from '@/lib/db/admin';
 
 const DEFAULT_SITE_ID = '000001';
 
@@ -18,33 +18,28 @@ export async function GET(req: NextRequest) {
     }
 
     try {
-      const { data, error } = await supabase
-        .from('site_configs')
-        .select('locale, id, config')
-        .eq('site_id', DEFAULT_SITE_ID)
-        .in('locale', locales)
-        .in('id', ['navigation', 'footer-menu', 'custom_menus']);
-
-      if (error) {
-        console.error('Supabase query error:', error);
-        throw error;
-      }
+      const data = await sql<{ locale: string; id: string; config: any }[]>`
+        SELECT locale, id, config FROM public.site_configs
+        WHERE site_id = ${DEFAULT_SITE_ID}
+          AND locale IN ${sql(locales)}
+          AND id IN ('navigation', 'footer-menu', 'custom_menus')
+      `;
 
       const result: Record<string, { navigation: any; footer: any; customMenus: any[] }> = {};
       locales.forEach(loc => {
         result[loc] = { navigation: null, footer: null, customMenus: [] };
       });
 
-      data?.forEach(row => {
-        const locale = row.locale;
+      data.forEach(row => {
+        const localeKey = row.locale;
         const id = row.id;
         const config = row.config;
-        if (!result[locale]) return;
+        if (!result[localeKey]) return;
         if (id === 'navigation' || id === 'footer-menu') {
           const targetKey = id === 'navigation' ? 'navigation' : 'footer';
-          result[locale][targetKey] = config || null;
+          result[localeKey][targetKey] = config || null;
         } else if (id === 'custom_menus') {
-          result[locale].customMenus = Array.isArray(config) ? config : [];
+          result[localeKey].customMenus = Array.isArray(config) ? config : [];
         }
       });
 

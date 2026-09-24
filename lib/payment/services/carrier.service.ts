@@ -1,33 +1,38 @@
 // lib/payment/services/carrier.service.ts
-import { supabase } from '@/lib/supabase/client';
+import sql from '@/lib/db/admin';
 import type { Carrier, CreateCarrierInput, UpdateCarrierInput } from '../types/carrier';
 
 export const carrierService = {
   /**
-   * 获取所有承运商（公共数据 + 租户自定义数据）
+   * 获取所有承运商（公共数据 + 租户自定义）
    */
   async getAll(siteId?: string): Promise<Carrier[]> {
-    let query = supabase
-      .from('carriers')
-      .select('*')
-      .eq('is_active', true)
-      .order('sort_order');
+    const conditions: any[] = [sql`is_active = true`];
 
     if (siteId) {
-      query = query.or(`site_id.is.null,site_id.eq.${siteId}`);
+      conditions.push(sql`(site_id IS NULL OR site_id = ${siteId})`);
     } else {
-      query = query.is('site_id', null);
+      conditions.push(sql`site_id IS NULL`);
     }
 
-    const { data, error } = await query;
+    const whereClause = conditions.reduce(
+      (acc, c, i) => (i === 0 ? c : sql`${acc} AND ${c}`),
+      sql``
+    );
 
-    if (error) throw new Error(`获取承运商列表失败: ${error.message}`);
-    return data || [];
+    try {
+      return await sql<Carrier[]>`
+        SELECT * FROM public.carriers
+        WHERE ${whereClause}
+        ORDER BY sort_order ASC
+      `;
+    } catch (error: any) {
+      throw new Error(`获取承运商列表失败: ${error.message}`);
+    }
   },
 
   /**
-   * ✅ 根据运输方式获取承运商（分页 + 搜索）- 简化版
-   * 先获取全部数据，再在内存中过滤和分页
+   * ✅ 根据运输方式获取承运商（分页 + 搜索）
    */
   async getByShippingMethodPaginated(
     shippingMethod: string,
@@ -37,60 +42,46 @@ export const carrierService = {
     searchTerm?: string
   ): Promise<{ items: Carrier[]; hasMore: boolean; total: number }> {
     try {
-      // ✅ 简化：先获取所有匹配的承运商（使用更简单的查询）
-      let query = supabase
-        .from('carriers')
-        .select('*')
-        .eq('is_active', true);
+      const conditions: any[] = [sql`is_active = true`];
 
-      // 站点筛选
       if (siteId) {
-        query = query.or(`site_id.is.null,site_id.eq.${siteId}`);
+        conditions.push(sql`(site_id IS NULL OR site_id = ${siteId})`);
       } else {
-        query = query.is('site_id', null);
+        conditions.push(sql`site_id IS NULL`);
       }
 
-      // ✅ 搜索关键词（使用 ilike）
       if (searchTerm && searchTerm.trim()) {
-        const term = searchTerm.trim();
-        // 使用单个 or 条件，避免复杂语法
-        query = query.or(`name_cn.ilike.%${term}%,name_en.ilike.%${term}%`);
+        const term = `%${searchTerm.trim()}%`;
+        conditions.push(sql`(name_cn ILIKE ${term} OR name_en ILIKE ${term})`);
       }
 
-      // 排序
-      query = query.order('sort_order', { ascending: true });
+      const whereClause = conditions.reduce(
+        (acc, c, i) => (i === 0 ? c : sql`${acc} AND ${c}`),
+        sql``
+      );
 
-      // ✅ 先不限制数量，获取所有匹配的数据
-      const { data, error } = await query;
+      let allItems = await sql<Carrier[]>`
+        SELECT * FROM public.carriers
+        WHERE ${whereClause}
+        ORDER BY sort_order ASC
+      `;
 
-      if (error) {
-        console.error('[carrierService] 查询失败:', error);
-        return { items: [], hasMore: false, total: 0 };
-      }
-
-      let allItems = data || [];
-
-      // ✅ 在内存中过滤运输方式
+      // 内存中过滤运输方式
       if (shippingMethod) {
         allItems = allItems.filter(c => {
-          const methods = c.shipping_methods || [];
+          const methods = (c as any).shipping_methods || [];
           if (!Array.isArray(methods) || methods.length === 0) return true;
           return methods.includes(shippingMethod);
         });
       }
 
-      // ✅ 在内存中分页
       const total = allItems.length;
       const start = page * pageSize;
       const end = start + pageSize;
       const items = allItems.slice(start, end);
       const hasMore = end < total;
 
-      return { 
-        items, 
-        hasMore, 
-        total 
-      };
+      return { items, hasMore, total };
     } catch (error) {
       console.error('[carrierService] 获取承运商失败:', error);
       return { items: [], hasMore: false, total: 0 };
@@ -98,13 +89,13 @@ export const carrierService = {
   },
 
   /**
-   * ✅ 根据运输方式获取承运商（全部，不分页）
+   * 根据运输方式获取承运商（全部）
    */
   async getByShippingMethod(shippingMethod: string, siteId?: string): Promise<Carrier[]> {
     try {
       const all = await this.getAll(siteId);
       return all.filter(c => {
-        const methods = c.shipping_methods || [];
+        const methods = (c as any).shipping_methods || [];
         if (!Array.isArray(methods) || methods.length === 0) return true;
         return methods.includes(shippingMethod);
       });
@@ -115,110 +106,145 @@ export const carrierService = {
   },
 
   /**
-   * 根据 key 获取承运商（优先返回租户自定义的，否则返回公共数据）
+   * 根据 key 获取承运商（优先租户自定义，否则公共）
    */
   async getByKey(key: string, siteId?: string): Promise<Carrier | null> {
-    let query = supabase
-      .from('carriers')
-      .select('*')
-      .eq('key', key)
-      .eq('is_active', true);
-
+    // 1. 先查租户自定义
     if (siteId) {
-      query = query.eq('site_id', siteId);
-      const { data, error } = await query.maybeSingle();
-      if (error) throw new Error(`获取承运商失败: ${error.message}`);
-      if (data) return data;
+      try {
+        const rows = await sql<Carrier[]>`
+          SELECT * FROM public.carriers
+          WHERE key = ${key}
+            AND is_active = true
+            AND site_id = ${siteId}
+          LIMIT 1
+        `;
+        if (rows[0]) return rows[0];
+      } catch (error: any) {
+        throw new Error(`获取承运商失败: ${error.message}`);
+      }
     }
 
-    const { data, error } = await supabase
-      .from('carriers')
-      .select('*')
-      .eq('key', key)
-      .eq('is_active', true)
-      .is('site_id', null)
-      .maybeSingle();
-
-    if (error) throw new Error(`获取承运商失败: ${error.message}`);
-    return data || null;
+    // 2. Fallback 到公共
+    try {
+      const rows = await sql<Carrier[]>`
+        SELECT * FROM public.carriers
+        WHERE key = ${key}
+          AND is_active = true
+          AND site_id IS NULL
+        LIMIT 1
+      `;
+      return rows[0] || null;
+    } catch (error: any) {
+      throw new Error(`获取承运商失败: ${error.message}`);
+    }
   },
 
   /**
-   * 根据中文名称或英文名称搜索承运商
+   * 根据中文/英文/香港名称搜索
    */
   async searchByName(searchTerm: string, siteId?: string): Promise<Carrier[]> {
-    let query = supabase
-      .from('carriers')
-      .select('*')
-      .eq('is_active', true)
-      .or(`name_cn.ilike.%${searchTerm}%,name_en.ilike.%${searchTerm}%,name_hk.ilike.%${searchTerm}%`)
-      .order('sort_order');
+    const term = `%${searchTerm}%`;
+    const conditions: any[] = [
+      sql`is_active = true`,
+      sql`(name_cn ILIKE ${term} OR name_en ILIKE ${term} OR name_hk ILIKE ${term})`,
+    ];
 
     if (siteId) {
-      query = query.or(`site_id.is.null,site_id.eq.${siteId}`);
+      conditions.push(sql`(site_id IS NULL OR site_id = ${siteId})`);
     } else {
-      query = query.is('site_id', null);
+      conditions.push(sql`site_id IS NULL`);
     }
 
-    const { data, error } = await query;
+    const whereClause = conditions.reduce(
+      (acc, c, i) => (i === 0 ? c : sql`${acc} AND ${c}`),
+      sql``
+    );
 
-    if (error) throw new Error(`搜索承运商失败: ${error.message}`);
-    return data || [];
+    try {
+      return await sql<Carrier[]>`
+        SELECT * FROM public.carriers
+        WHERE ${whereClause}
+        ORDER BY sort_order ASC
+      `;
+    } catch (error: any) {
+      throw new Error(`搜索承运商失败: ${error.message}`);
+    }
   },
 
   /**
    * 创建承运商（租户自定义）
    */
   async create(siteId: string, input: CreateCarrierInput): Promise<Carrier> {
-    const { data, error } = await supabase
-      .from('carriers')
-      .insert({
-        site_id: siteId,
-        key: input.key,
-        name_en: input.name_en,
-        name_cn: input.name_cn,
-        name_hk: input.name_hk || '',
-        url: input.url || '',
-        shipping_methods: input.shipping_methods || [],
-        logo: input.logo || '',
-        sort_order: input.sort_order || 0,
-        is_active: input.is_active !== undefined ? input.is_active : true,
-      })
-      .select()
-      .single();
-
-    if (error) throw new Error(`创建承运商失败: ${error.message}`);
-    return data;
+    try {
+      const rows = await sql<Carrier[]>`
+        INSERT INTO public.carriers (
+          site_id, key, name_en, name_cn, name_hk, url,
+          shipping_methods, logo, sort_order, is_active
+        ) VALUES (
+          ${siteId}, ${input.key}, ${input.name_en}, ${input.name_cn},
+          ${input.name_hk || ''}, ${input.url || ''},
+          ${sql.json(input.shipping_methods || [])}, ${input.logo || ''},
+          ${input.sort_order || 0}, ${input.is_active !== undefined ? input.is_active : true}
+        )
+        RETURNING *
+      `;
+      if (!rows[0]) throw new Error('Insert returned no data');
+      return rows[0];
+    } catch (error: any) {
+      throw new Error(`创建承运商失败: ${error.message}`);
+    }
   },
 
   /**
    * 更新承运商
    */
   async update(id: string, input: UpdateCarrierInput): Promise<Carrier> {
-    const { data, error } = await supabase
-      .from('carriers')
-      .update({
-        ...input,
-        updated_at: new Date().toISOString(),
-      })
-      .eq('id', id)
-      .select()
-      .single();
+    // 动态 SET
+    const setClauses: any[] = [sql`updated_at = ${new Date().toISOString()}`];
+    const jsonbFields = new Set(['shipping_methods']);
 
-    if (error) throw new Error(`更新承运商失败: ${error.message}`);
-    return data;
+    for (const [key, value] of Object.entries(input)) {
+      if (value === undefined) continue;
+      if (jsonbFields.has(key)) {
+        setClauses.push(sql`${sql(key)} = ${sql.json(value)}`);
+      } else {
+        setClauses.push(sql`${sql(key)} = ${value}`);
+      }
+    }
+
+    const setClause = setClauses.reduce(
+      (acc, c, i) => (i === 0 ? c : sql`${acc}, ${c}`),
+      sql``
+    );
+
+    try {
+      const rows = await sql<Carrier[]>`
+        UPDATE public.carriers
+        SET ${setClause}
+        WHERE id = ${id}
+        RETURNING *
+      `;
+      if (!rows[0]) throw new Error('Carrier not found');
+      return rows[0];
+    } catch (error: any) {
+      throw new Error(`更新承运商失败: ${error.message}`);
+    }
   },
 
   /**
    * 删除承运商（软删除）
    */
   async delete(id: string): Promise<void> {
-    const { error } = await supabase
-      .from('carriers')
-      .update({ is_active: false })
-      .eq('id', id);
-
-    if (error) throw new Error(`删除承运商失败: ${error.message}`);
+    try {
+      await sql`
+        UPDATE public.carriers
+        SET is_active = false
+        WHERE id = ${id}
+      `;
+    } catch (error: any) {
+      throw new Error(`删除承运商失败: ${error.message}`);
+    }
   },
 };
 

@@ -16,9 +16,43 @@ interface PageProps {
 // ===== ISR 配置 =====
 export const revalidate = 3600;
 
+// ===== 判断内容是否为空（去除 HTML 标签、实体、空白） =====
+function isContentEmpty(html: string | null | undefined): boolean {
+  if (!html) return true;
+
+  // 如果有图片/视频/iframe/svg，直接算有内容（按需保留或删除）
+  if (/<(img|video|iframe|svg)/i.test(html)) return false;
+
+  // 1. 去掉 HTML 标签
+  const text = html.replace(/<[^>]*>/g, '');
+
+  // 2. 解码常见 HTML 实体
+  const decoded = text
+    .replace(/&nbsp;/g, ' ')
+    .replace(/&amp;/g, '&')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'");
+
+  // 3. 去掉所有空白（空格、换行、制表符）
+  const cleaned = decoded.replace(/\s+/g, '');
+
+  return cleaned === '';
+}
+
 // ===== generateMetadata =====
 export async function generateMetadata({ params }: PageProps) {
-  const { locale, slug } = await params;
+  // ✅ 防御性检查：构建时 Next.js 可能传入 undefined
+  const resolvedParams = await params;
+  if (!resolvedParams?.locale) {
+    return {
+      title: 'Page',
+      robots: 'noindex, follow',
+    };
+  }
+
+  const { locale, slug } = resolvedParams;
 
   const settings = await getSiteSettings();
   const baseUrl = (settings.websiteUrl || process.env.NEXT_PUBLIC_BASE_URL || '').replace(/\/+$/, '');
@@ -89,7 +123,13 @@ export async function generateMetadata({ params }: PageProps) {
 
 // ===== 页面组件 =====
 async function Page({ params }: PageProps) {
-  const { locale, slug } = await params;
+  // ✅ 防御性检查：构建时 Next.js 可能传入 undefined
+  const resolvedParams = await params;
+  if (!resolvedParams?.locale) {
+    notFound();
+  }
+
+  const { locale, slug } = resolvedParams;
 
   const page = await getCachedPageBySlug(locale, slug);
   if (!page || page.visible !== 'visible') notFound();
@@ -123,10 +163,10 @@ async function Page({ params }: PageProps) {
     locale,
   };
 
-  // ✅ 只使用数据库中的 templateData，不再从云存储读取
   const templateData = page.templateData;
 
-  const hasContent = !!page.content?.trim();
+  // ✅ 用 isContentEmpty 判断，空 HTML 标签 / 纯空格 / 纯换行都算"空"
+  const hasContent = !isContentEmpty(page.content);
   const hasTemplate = !!templateData;
 
   if (!hasContent && !hasTemplate) {
@@ -141,9 +181,6 @@ async function Page({ params }: PageProps) {
     ? 'max-w-5xl'
     : 'max-w-7xl';
 
-  // ============================================================
-  // ✅ 普通页面专属 CSS 变量（带最终 fallback）
-  // ============================================================
   const containerBg = 'var(--page-bg, var(--background, #ffffff))';
   const containerText = 'var(--page-text, var(--foreground, #0f172a))';
   const headingColor = 'var(--page-heading-color, var(--foreground, #0f172a))';
@@ -186,7 +223,7 @@ async function Page({ params }: PageProps) {
                   '--tw-prose-links': linkColor,
                   '--tw-prose-bold': headingColor,
                 }}
-                dangerouslySetInnerHTML={{ __html: page.content }}
+                dangerouslySetInnerHTML={{ __html: page.content || '' }}
               />
             </div>
           )}

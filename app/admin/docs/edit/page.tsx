@@ -1,36 +1,16 @@
+// app/admin/docs/edit/page.tsx
 'use client';
 
 import { useEffect, useState } from 'react';
 import { useSearchParams, useRouter } from 'next/navigation';
 import dynamic from 'next/dynamic';
 import { ArrowLeft } from 'lucide-react';
-import pinyin from 'pinyin';
 import SeoFields from '@/components/common/SeoFields';
-import { generateSeoTitle, generateSeoDescription } from '@/lib/products/seoGenerator';
 import { useToast } from '@/contexts/ToastContext';
 import ResourceAssociation from '@/components/admin/products/ResourceAssociation';
 import { getLanguageDisplayName } from '@/lib/languages/config';
 
 const RichTextEditor = dynamic(() => import('@/components/RichTextEditor'), { ssr: false });
-
-function generateSlug(text: string): string {
-  if (!text) return '';
-  const pinyinArray = pinyin(text, { style: pinyin.STYLE_NORMAL, heteronym: false });
-  const pinyinStr = pinyinArray.map(item => item[0]).join(' ');
-  let slug = pinyinStr.toLowerCase()
-    .replace(/[^a-z0-9\s-]/g, '')
-    .replace(/\s+/g, '-')
-    .replace(/-+/g, '-')
-    .replace(/^-|-$/g, '');
-  if (!slug) {
-    slug = text.toLowerCase()
-      .replace(/[^a-z0-9\s-]/g, '')
-      .replace(/\s+/g, '-')
-      .replace(/-+/g, '-')
-      .replace(/^-|-$/g, '');
-  }
-  return slug;
-}
 
 export default function DocsEditPage() {
   const router = useRouter();
@@ -64,7 +44,6 @@ export default function DocsEditPage() {
     seo_title: '',
     seo_description: '',
   });
-  const [isSlugAuto, setIsSlugAuto] = useState(true);
   const [docsLibName, setDocsLibName] = useState<string>('');
   const [parentDocTitle, setParentDocTitle] = useState<string>('');
 
@@ -120,7 +99,6 @@ export default function DocsEditPage() {
               seo_title: '',
               seo_description: '',
             }));
-            setIsSlugAuto(true);
             setLoading(false);
             return null;
           }
@@ -140,7 +118,6 @@ export default function DocsEditPage() {
               seo_title: data.seo_title || '',
               seo_description: data.seo_description || '',
             });
-            setIsSlugAuto(!data.slug);
           }
         })
         .catch(err => {
@@ -172,40 +149,11 @@ export default function DocsEditPage() {
       seo_title: seoData.seoTitle ?? prev.seo_title,
       seo_description: seoData.seoDescription ?? prev.seo_description,
     }));
-    if (seoData.slug !== undefined) setIsSlugAuto(false);
   };
 
+  // 只更新 title，slug 由 SeoFields 内部处理
   const handleTitleChange = (title: string) => {
-    if (!docData) return;
-    let newSlug = docData.slug;
-    if (isSlugAuto) {
-      newSlug = generateSlug(title);
-    }
-    setDocData({ ...docData, title, slug: newSlug });
-  };
-
-  const handleAutoGenerate = () => {
-    if (!docData) return;
-    const title = docData.title || '';
-    let newSlug = docData.slug;
-    if (!newSlug) {
-      newSlug = generateSlug(title);
-      handleSeoChange({ slug: newSlug });
-    }
-    let seoTitle = docData.seo_title;
-    if (!seoTitle) {
-      seoTitle = generateSeoTitle(title, '', 1, '', '');
-      handleSeoChange({ seoTitle });
-    }
-    let seoDescription = docData.seo_description;
-    if (!seoDescription) {
-      const generatedDesc = generateSeoDescription(docData.content, [], undefined, '', '');
-      if (generatedDesc) {
-        seoDescription = generatedDesc;
-        handleSeoChange({ seoDescription });
-      }
-    }
-    showToast('已自动生成 SEO 信息', 'info');
+    setDocData((prev: any) => ({ ...prev, title }));
   };
 
   const getFinalReturnUrl = () => {
@@ -342,9 +290,6 @@ export default function DocsEditPage() {
         <div className="border rounded-lg p-4 shadow-sm bg-white">
           <div className="flex justify-between items-center mb-3">
             <h2 className="text-lg font-semibold">搜索引擎优化</h2>
-            <button type="button" onClick={handleAutoGenerate} className="text-blue-600 text-sm">
-              自动生成 SEO
-            </button>
           </div>
           <SeoFields
             slug={docData.slug}
@@ -358,6 +303,13 @@ export default function DocsEditPage() {
             showTitle
             showDescription
             disabled={false}
+            locale={locale}
+            slugCheck={{
+              enabled: true,
+              endpoint: '/api/admin/docs/slugs',
+              excludeId: id || undefined,
+              autoResolveConflict: true,  // ✅ 新增
+            }}
           />
         </div>
       </form>

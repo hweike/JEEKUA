@@ -6,7 +6,13 @@
 // =====================================================
 
 import OpenAI from 'openai';
-import type { GenerateSeoInput, GeneratedSeo, AIConfig, AIGenerateOptions, AIParseResult } from '../types';
+import type {
+  GenerateSeoInput,
+  GeneratedSeo,
+  AIConfig,
+  AIGenerateOptions,
+  AIParseResult,
+} from '../types/index';
 
 export class AIService {
   private client: OpenAI;

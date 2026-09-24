@@ -1,7 +1,6 @@
 // app/api/discovery/sitemap/status/route.ts
-
 import { NextRequest, NextResponse } from 'next/server';
-import { supabase } from '@/lib/supabase/client';
+import sql from '@/lib/db/admin';
 import { getPublicStorage } from '@/lib/storage/factory';
 
 const DEFAULT_SITE_ID = '000001';
@@ -27,15 +26,18 @@ export async function GET(request: NextRequest) {
     }
 
     // 1. 获取所有语言
-    const { data: locales, error: localesError } = await supabase
-      .from('pages')
-      .select('locale')
-      .eq('site_id', DEFAULT_SITE_ID)
-      .order('locale');
+    let allLocales: string[];
+    try {
+      const rows = await sql<{ locale: string }[]>`
+        SELECT DISTINCT locale FROM public.pages
+        WHERE site_id = ${DEFAULT_SITE_ID}
+        ORDER BY locale ASC
+      `;
+      allLocales = rows.map(r => r.locale);
+    } catch (localesError: any) {
+      throw new Error(`查询语言失败: ${localesError.message}`);
+    }
 
-    if (localesError) throw new Error(`查询语言失败: ${localesError.message}`);
-
-    const allLocales = Array.from(new Set(locales.map((row) => row.locale)));
     const queryLocales = targetLocales.length > 0
       ? targetLocales.filter((l) => allLocales.includes(l))
       : allLocales;
@@ -43,14 +45,14 @@ export async function GET(request: NextRequest) {
     // 2. 获取每个语言的页面数量
     const localeCounts: Record<string, number> = {};
     for (const locale of queryLocales) {
-      const { count, error } = await supabase
-        .from('pages')
-        .select('*', { count: 'exact', head: true })
-        .eq('site_id', DEFAULT_SITE_ID)
-        .eq('locale', locale);
-      if (!error) {
-        localeCounts[locale] = count || 0;
-      }
+      try {
+        const countRows = await sql<{ count: string }[]>`
+          SELECT COUNT(*)::text AS count FROM public.pages
+          WHERE site_id = ${DEFAULT_SITE_ID}
+            AND locale = ${locale}
+        `;
+        localeCounts[locale] = parseInt(countRows[0]?.count || '0', 10);
+      } catch {}
     }
 
     // 3. 检测 sitemap 索引文件是否存在
@@ -61,7 +63,6 @@ export async function GET(request: NextRequest) {
       const content = await storage.read('sitemap/sitemap-index.xml', 'utf8');
       if (content) {
         hasSitemap = true;
-        // 尝试获取文件修改时间
         try {
           const stat = await storage.stat('sitemap/sitemap-index.xml');
           if (stat?.mtime) {
@@ -75,7 +76,6 @@ export async function GET(request: NextRequest) {
       hasSitemap = false;
     }
 
-    // 如果索引文件不存在，尝试检查是否有任何子文件
     if (!hasSitemap) {
       try {
         const files = await storage.list('sitemap/');

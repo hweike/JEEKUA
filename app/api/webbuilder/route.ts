@@ -1,5 +1,6 @@
 // app/api/webbuilder/route.ts
 import { NextRequest, NextResponse } from 'next/server';
+import { revalidatePath } from 'next/cache';
 import {
   getAllTemplates,
   getTemplateById,
@@ -69,6 +70,21 @@ export async function POST(request: NextRequest) {
 
     if (action === 'publish') {
       const result = await publishTemplate(baseId, name, category, data, existingTemplate);
+
+      // ✅ 清 ISR：对每个受影响的页面路径
+      if (result.affectedPages && result.affectedPages.length > 0) {
+        try {
+          for (const p of result.affectedPages) {
+            // locale='base' 是布局记录，不是真实前台路径，跳过
+            if (p.locale === 'base') continue;
+            revalidatePath(`/${p.locale}/${p.slug}`);
+            console.log(`[publish] revalidatePath: /${p.locale}/${p.slug}`);
+          }
+        } catch (e) {
+          console.warn('[publish] revalidatePath 失败:', e);
+        }
+      }
+
       return NextResponse.json({ success: true, ...result });
     } else if (action === 'save') {
       const result = await saveDraft(baseId, name, category, data, existingTemplate);

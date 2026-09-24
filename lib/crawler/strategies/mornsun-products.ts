@@ -23,7 +23,6 @@ export async function crawlMornsunProducts(
     try {
       const content = await storage.read(src.filePath, 'utf8');
       const parsed = JSON.parse(content as string);
-      // 兼容两种格式：直接是分类数组，或是包含 categories 字段的对象
       if (Array.isArray(parsed)) {
         categories = parsed;
       } else if (parsed && typeof parsed === 'object' && Array.isArray(parsed.categories)) {
@@ -101,7 +100,7 @@ async function crawlProductListHierarchy(
     let headers: string[] = [];
     if (dynamicHeaders) {
       headers = await page.$$eval(headerSelector, els =>
-        els.map(el => el.innerText.trim().replace(/\n/g, ''))
+        els.map(el => (el as HTMLElement).innerText.trim().replace(/\n/g, ''))
       );
       console.log(`动态表头: ${headers.join(', ')}`);
       await appendTaskLog(taskId, `动态表头: ${headers.join(', ')}`);
@@ -113,7 +112,6 @@ async function crawlProductListHierarchy(
       throw new Error('无法提取表头，请检查 headerSelector 是否正确或启用 dynamicHeaders');
     }
 
-    // 获取主表格容器元素句柄
     const container = await page.$(containerSelector);
     if (!container) {
       throw new Error(`无法找到表格容器: ${containerSelector}`);
@@ -124,14 +122,13 @@ async function crawlProductListHierarchy(
       return rows.map(row => {
         const seriesId = row.getAttribute('data-id') || '';
         const modelLink = row.querySelector('td.td_1 a') as HTMLAnchorElement;
-        const seriesName = modelLink ? modelLink.innerText.trim() : '';
+        const seriesName = modelLink ? (modelLink as HTMLElement).innerText.trim() : '';
         let imageUrl = row.getAttribute('data-src') || '';
         if (imageUrl) imageUrl = imageUrl.replace('/120/', '/');
 
         const cells = row.querySelectorAll('td');
         const attributes: Record<string, string> = {};
 
-        // 先为所有表头（跳过“系列标题”）初始化空值（"-"）
         for (let i = 1; i < headers.length; i++) {
           const header = headers[i];
           if (header && header !== '系列标题') {
@@ -139,21 +136,18 @@ async function crawlProductListHierarchy(
           }
         }
 
-        // 遍历实际单元格，覆盖对应列的值（跳过“系列标题”列）
         for (let i = 1; i < cells.length && i < headers.length; i++) {
           const header = headers[i];
           if (header && header !== '系列标题') {
-            let value = cells[i].innerText.trim();
+            let value = (cells[i] as HTMLElement).innerText.trim();
             if (value === '展开') value = '-';
             if (value === '-') value = '';
             attributes[header] = value || '-';
           }
         }
 
-        // 将“系列标题”列改为“型号”，并放在最前面
         const finalAttributes: Record<string, string> = {};
         finalAttributes['型号'] = seriesName || '-';
-        // 按原顺序添加其他属性（保持顺序）
         for (let i = 1; i < headers.length; i++) {
           const header = headers[i];
           if (header && header !== '系列标题') {
@@ -172,14 +166,13 @@ async function crawlProductListHierarchy(
       return rows.map(row => {
         const parentId = row.getAttribute('data-p') || '';
         const modelLink = row.querySelector('td.td_1 a') as HTMLAnchorElement;
-        const model = modelLink ? modelLink.innerText.trim() : '';
+        const model = modelLink ? (modelLink as HTMLElement).innerText.trim() : '';
         let imageUrl = row.getAttribute('data-src') || '';
         if (imageUrl) imageUrl = imageUrl.replace('/120/', '/');
 
         const cells = row.querySelectorAll('td');
         const attributes: Record<string, string> = {};
 
-        // 初始化所有非“系列标题”列
         for (let i = 1; i < headers.length; i++) {
           const header = headers[i];
           if (header && header !== '系列标题') {
@@ -190,15 +183,14 @@ async function crawlProductListHierarchy(
         for (let i = 1; i < cells.length && i < headers.length; i++) {
           const header = headers[i];
           if (header && header !== '系列标题') {
-            let value = cells[i].innerText.trim();
+            let value = (cells[i] as HTMLElement).innerText.trim();
             if (value === '展开') value = '-';
             if (value === '-') value = '';
-            // 特殊列处理
             if (header.includes('资料下载') || header.includes('下载')) {
               const links = row.querySelectorAll(`td:nth-child(${i+1}) a`);
               const items: string[] = [];
               for (const link of links) {
-                const title = link.getAttribute('title') || link.innerText.trim() || '下载';
+                const title = link.getAttribute('title') || (link as HTMLElement).innerText.trim() || '下载';
                 const href = (link as HTMLAnchorElement).href;
                 items.push(`${title}: ${href}`);
               }
@@ -230,7 +222,6 @@ async function crawlProductListHierarchy(
           }
         }
 
-        // 构建最终 attributes，最前面插入“型号”
         const finalAttributes: Record<string, string> = {};
         finalAttributes['型号'] = model || '-';
         for (let i = 1; i < headers.length; i++) {
@@ -252,7 +243,6 @@ async function crawlProductListHierarchy(
     }, { headers, parents });
     await appendTaskLog(taskId, `提取到 ${children.length} 个子产品`);
 
-    // 构建父系列对象
     const parentMap = new Map();
     for (const parent of parents) {
       parentMap.set(parent.seriesId, {

@@ -1,6 +1,6 @@
 // lib/getSiteSettings.ts
 import { getConfigWithCache, invalidateConfig } from '@/lib/config-cache';
-import { supabaseAdmin } from '@/lib/supabase/admin-client';
+import sql from '@/lib/db/admin';
 
 export interface SiteSettings {
   siteName: string;
@@ -36,26 +36,40 @@ const DEFAULT_SITE_SETTINGS: SiteSettings = {
   postalCode: '',
   brand: [],
   socialShareImage: '',
-  address: '217, Building B, South International Plaza, NO.3013 Yitian Road, Shenzhen, Guangdong, China',
-  phone: '+86 18123913227',
-  email: 'vic@feisman.cn',
+  address: 'XXXXX, ABC, China',
+  phone: '+86 138123456789',
+  email: 'ABC@YOURDOMAIN.COM',
 };
+
+// ========== 数据库行类型 ==========
+interface SiteSettingsRow {
+  site_id: string;
+  site_name: string | null;
+  website_url: string | null;
+  contact_email: string | null;
+  contact_phone: string | null;
+  company_name: string | null;
+  country: string | null;
+  registered_address: string | null;
+  city: string | null;
+  province: string | null;
+  postal_code: string | null;
+  brand: string | string[] | null;
+  social_share_image: string | null;
+}
 
 /**
  * 实际查询数据库的逻辑
  */
 async function fetchSiteSettings(): Promise<SiteSettings> {
   try {
-    const { data, error } = await supabaseAdmin
-      .from('sites_settings')
-      .select('*')
-      .eq('site_id', DEFAULT_SITE_ID)
-      .maybeSingle();
+    const rows = await sql<SiteSettingsRow[]>`
+      SELECT * FROM sites_settings
+      WHERE site_id = ${DEFAULT_SITE_ID}
+      LIMIT 1
+    `;
 
-    if (error) {
-      console.warn('[getSiteSettings] 获取站点设置失败，使用默认配置:', error.message);
-      return DEFAULT_SITE_SETTINGS;
-    }
+    const data = rows[0];
 
     if (!data) {
       console.warn('[getSiteSettings] 未找到站点设置记录，使用默认配置');
@@ -105,7 +119,7 @@ async function fetchSiteSettings(): Promise<SiteSettings> {
 
 /**
  * 对外 API：带内存缓存
- * - 首次查询慢（Supabase 冷启动），之后 10 分钟内全部命中内存
+ * - 首次查询慢（数据库冷启动），之后 10 分钟内全部命中内存
  * - 配合 instrumentation.ts 预热，可以把首次查询提前到服务启动时
  */
 export async function getSiteSettings(): Promise<SiteSettings> {

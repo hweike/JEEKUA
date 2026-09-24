@@ -1,24 +1,7 @@
-// app/api/admin/inquiries/[id]/replies/route.ts
-
+// app/api/admin/inquiries/[id]/replies/route.ts（简化版）
 import { NextRequest, NextResponse } from 'next/server';
 import { addReply, getInquiryWithDetails, updateInquiryStatus } from '@/lib/CRM/repository';
-import { getCurrentUser } from '@/lib/auth/jwt';
-import { supabase } from '@/lib/supabase/client';
-
-// 从 admin_users 表查询管理员信息
-async function getAdminInfo(userId: string) {
-  const { data, error } = await supabase
-    .from('admin_users')
-    .select('email, name')
-    .eq('id', userId)
-    .maybeSingle();
-
-  if (error) {
-    console.error('查询管理员信息失败:', error);
-    return null;
-  }
-  return data;
-}
+import { verifyAdminAuth, isAdminAuthSuccess } from '@/lib/auth/admin-check';
 
 export async function POST(
   request: NextRequest,
@@ -38,19 +21,14 @@ export async function POST(
     return NextResponse.json({ error: '内容不能为空' }, { status: 400 });
   }
 
-  const user = await getCurrentUser();
-  if (!user) {
-    return NextResponse.json({ error: '未登录' }, { status: 401 });
+  const auth = await verifyAdminAuth();
+  if (!isAdminAuthSuccess(auth)) {
+    return NextResponse.json({ error: auth.error }, { status: auth.status });
   }
 
-  const adminId = user.id;
-  const adminInfo = await getAdminInfo(adminId);
-  let adminEmail = adminInfo?.email || user.email || 'admin@admin.com';
-  let adminName = adminInfo?.name || user.name || '管理员';
-
-  if (!adminInfo && (!user.email || !user.name)) {
-    console.warn(`管理员 ${adminId} 信息不完整，使用默认值 (email: ${adminEmail}, name: ${adminName})`);
-  }
+  const adminId = auth.admin.id;
+  const adminEmail = auth.admin.email || 'admin@admin.com';
+  const adminName = auth.admin.name || '管理员';
 
   const { inquiry } = await getInquiryWithDetails(inquiryId);
   if (!inquiry) {
@@ -58,7 +36,6 @@ export async function POST(
   }
 
   try {
-    // 1. 添加回复（核心操作）
     await addReply({
       inquiry_id: inquiryId,
       sender_type: 'admin',
@@ -70,14 +47,11 @@ export async function POST(
       is_internal: is_internal || false,
     });
 
-    // 2. 如果是非内部回复，尝试自动更新状态为“已回复”
-    //    即使失败也不影响回复成功，只记录日志
     if (!is_internal) {
       try {
         await updateInquiryStatus(inquiryId, '已回复', inquiry.site_id);
       } catch (statusError) {
         console.warn(`自动更新状态失败 (inquiry ${inquiryId}):`, statusError);
-        // 不抛出，继续返回成功
       }
     }
 

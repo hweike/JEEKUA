@@ -1,5 +1,5 @@
 // lib/blog/services/post.service.ts
-import { supabase } from '@/lib/supabase/client';
+import sql from '@/lib/db/admin';
 import { getPrivateStorage } from '@/lib/storage/factory';
 import { generatePostId } from '@/lib/generateId';
 import { getCategories } from './category.service';
@@ -26,7 +26,7 @@ async function loadCategories(locale: string) {
 }
 
 // ============================================================
-// Markdown 文件操作（内部）
+// Markdown 文件操作（内部，不变）
 // ============================================================
 function getMarkdownKey(locale: string, postId: string): string {
   return `data/blog/${locale}/posts/${postId}.md`;
@@ -62,7 +62,7 @@ async function deleteMarkdownContent(locale: string, postId: string): Promise<vo
 }
 
 // ============================================================
-// 数据库操作封装（内部）
+// 数据库操作封装（内部）— 已迁移到 sql
 // ============================================================
 async function upsertPostToDb(
   locale: string,
@@ -92,74 +92,71 @@ async function upsertPostToDb(
   const now = new Date().toISOString();
   const tagsString = typeof tags === 'string' ? tags : JSON.stringify(tags);
 
-  const basePost = {
-    slug,
-    title,
-    excerpt,
-    visibility,
-    featured_image,
-    author,
-    category_id,
-    tags: tagsString,
-    template,
-    seo_keywords,
-    seo_title,
-    seo_description,
-    updated_at: now,
-  };
-
   let finalId: string;
   let created = false;
 
   if (id) {
     // 检查是否存在
-    const { data: existing, error: findError } = await supabase
-      .from('blog_posts')
-      .select('id')
-      .eq('site_id', DEFAULT_SITE_ID)
-      .eq('id', id)
-      .eq('locale', locale)
-      .maybeSingle();
-    if (findError) throw findError;
+    const existing = await sql<{ id: string }[]>`
+      SELECT id FROM public.blog_posts
+      WHERE site_id = ${DEFAULT_SITE_ID}
+        AND id = ${id}
+        AND locale = ${locale}
+      LIMIT 1
+    `;
 
-    if (existing) {
+    if (existing[0]) {
       // 更新
-      const { error: updateError } = await supabase
-        .from('blog_posts')
-        .update(basePost)
-        .eq('site_id', DEFAULT_SITE_ID)
-        .eq('id', id)
-        .eq('locale', locale);
-      if (updateError) throw updateError;
+      await sql`
+        UPDATE public.blog_posts
+        SET slug = ${slug},
+            title = ${title},
+            excerpt = ${excerpt},
+            visibility = ${visibility},
+            featured_image = ${featured_image},
+            author = ${author},
+            category_id = ${category_id},
+            tags = ${tagsString},
+            template = ${template},
+            seo_keywords = ${seo_keywords},
+            seo_title = ${seo_title},
+            seo_description = ${seo_description},
+            updated_at = ${now}
+        WHERE site_id = ${DEFAULT_SITE_ID}
+          AND id = ${id}
+          AND locale = ${locale}
+      `;
       finalId = id;
     } else {
       // 插入（指定 id）
-      const { error: insertError } = await supabase
-        .from('blog_posts')
-        .insert({
-          site_id: DEFAULT_SITE_ID,
-          id: id,
-          locale,
-          ...basePost,
-          created_at: now,
-        });
-      if (insertError) throw insertError;
+      await sql`
+        INSERT INTO public.blog_posts (
+          site_id, id, locale, slug, title, excerpt, visibility,
+          featured_image, author, category_id, tags, template,
+          seo_keywords, seo_title, seo_description, updated_at, created_at
+        ) VALUES (
+          ${DEFAULT_SITE_ID}, ${id}, ${locale}, ${slug}, ${title}, ${excerpt}, ${visibility},
+          ${featured_image}, ${author}, ${category_id}, ${tagsString}, ${template},
+          ${seo_keywords}, ${seo_title}, ${seo_description}, ${now}, ${now}
+        )
+      `;
       finalId = id;
       created = true;
     }
   } else {
     // 完全新建
     const newId = generatePostId();
-    const { error: insertError } = await supabase
-      .from('blog_posts')
-      .insert({
-        site_id: DEFAULT_SITE_ID,
-        id: newId,
-        locale,
-        ...basePost,
-        created_at: now,
-      });
-    if (insertError) throw insertError;
+    await sql`
+      INSERT INTO public.blog_posts (
+        site_id, id, locale, slug, title, excerpt, visibility,
+        featured_image, author, category_id, tags, template,
+        seo_keywords, seo_title, seo_description, updated_at, created_at
+      ) VALUES (
+        ${DEFAULT_SITE_ID}, ${newId}, ${locale}, ${slug}, ${title}, ${excerpt}, ${visibility},
+        ${featured_image}, ${author}, ${category_id}, ${tagsString}, ${template},
+        ${seo_keywords}, ${seo_title}, ${seo_description}, ${now}, ${now}
+      )
+    `;
     finalId = newId;
     created = true;
   }
@@ -172,7 +169,7 @@ async function upsertPostToDb(
 }
 
 // ============================================================
-// Pages 注册封装（内部）
+// Pages 注册封装（内部，不变）
 // ============================================================
 async function registerPostToPages(
   locale: string,
@@ -203,15 +200,18 @@ async function registerPostToPages(
 }
 
 // ============================================================
-// 资源关联删除（内部）
+// 资源关联删除（内部）— 已迁移到 sql
 // ============================================================
 async function deleteResourceAssociations(resourceType: string, resourceId: string) {
-  const { error } = await supabase
-    .from('resource_product')
-    .delete()
-    .eq('resource_type', resourceType)
-    .eq('resource_id', resourceId);
-  if (error) console.error('删除资源关联失败:', error);
+  try {
+    await sql`
+      DELETE FROM public.resource_product
+      WHERE resource_type = ${resourceType}
+        AND resource_id = ${resourceId}
+    `;
+  } catch (error) {
+    console.error('删除资源关联失败:', error);
+  }
 }
 
 // ============================================================
@@ -226,60 +226,71 @@ export interface GetPostsOptions {
 }
 
 /**
- * 获取分页文章列表（含分类名称）
+ * 获取分页文章列表（含分类名称）— 已迁移到 sql
  */
 export async function getPosts(locale: string, options: GetPostsOptions = {}) {
   const { search, category, page = 1, limit = 10 } = options;
-  let query = supabase
-    .from('blog_posts')
-    .select('*', { count: 'exact' })
-    .eq('site_id', DEFAULT_SITE_ID)
-    .eq('locale', locale);
+  const offset = (page - 1) * limit;
 
-  if (search) query = query.ilike('title', `%${search}%`);
-  if (category) query = query.eq('category_id', category);
+  // 动态 WHERE 条件
+  const conditions: any[] = [
+    sql`site_id = ${DEFAULT_SITE_ID}`,
+    sql`locale = ${locale}`,
+  ];
+  if (search) conditions.push(sql`title ILIKE ${'%' + search + '%'}`);
+  if (category) conditions.push(sql`category_id = ${category}`);
 
-  const from = (page - 1) * limit;
-  const to = from + limit - 1;
-  const { data: posts, error, count } = await query
-    .order('updated_at', { ascending: false })
-    .range(from, to);
+  const whereClause = conditions.reduce(
+    (acc, c, i) => (i === 0 ? c : sql`${acc} AND ${c}`),
+    sql``
+  );
 
-  if (error) throw error;
+  const countRows = await sql<{ count: string }[]>`
+    SELECT COUNT(*)::text AS count FROM public.blog_posts
+    WHERE ${whereClause}
+  `;
+  const total = parseInt(countRows[0]?.count || '0', 10);
+
+  const posts = await sql<any[]>`
+    SELECT * FROM public.blog_posts
+    WHERE ${whereClause}
+    ORDER BY updated_at DESC
+    LIMIT ${limit} OFFSET ${offset}
+  `;
 
   const categories = await loadCategories(locale);
-  const postsWithCategoryName = (posts || []).map(post => {
+  const postsWithCategoryName = posts.map(post => {
     const cat = categories.find((c: any) => c.id === post.category_id);
     return { ...post, category_name: cat ? cat.title : '' };
   });
 
   return {
     data: postsWithCategoryName,
-    total: count || 0,
+    total,
     page,
     limit,
   };
 }
 
 /**
- * 获取单篇文章（含 Markdown 内容）
+ * 获取单篇文章（含 Markdown 内容）— 已迁移到 sql
  */
 export async function getPost(locale: string, id: string) {
-  const { data: post, error } = await supabase
-    .from('blog_posts')
-    .select('*')
-    .eq('site_id', DEFAULT_SITE_ID)
-    .eq('id', id)
-    .eq('locale', locale)
-    .maybeSingle();
-  if (error) throw error;
+  const rows = await sql<any[]>`
+    SELECT * FROM public.blog_posts
+    WHERE site_id = ${DEFAULT_SITE_ID}
+      AND id = ${id}
+      AND locale = ${locale}
+    LIMIT 1
+  `;
+  const post = rows[0];
   if (!post) return null;
   const content = await readMarkdownContent(locale, post.id);
   return { ...post, content };
 }
 
 /**
- * 批量获取多语言文章列表
+ * 批量获取多语言文章列表（不变）
  */
 export async function getPostsBatch(locales: string[]) {
   const result: Record<string, any[]> = {};
@@ -317,7 +328,7 @@ export async function upsertPost(
   },
   content?: string
 ): Promise<{ id: string; created: boolean }> {
-  // ---------- 新增：自动生成摘要 ----------
+  // ---------- 自动生成摘要 ----------
   let excerpt = postData.excerpt || '';
   if (!excerpt && content) {
     const plainText = content.replace(/<[^>]*>/g, ''); // 去除 HTML 标签
@@ -381,28 +392,27 @@ export async function copyPost(sourceLocale: string, targetLocale: string, id: s
 }
 
 /**
- * 删除文章
+ * 删除文章 — 已迁移到 sql
  */
 export async function deletePost(locale: string, id: string) {
   // 检查是否存在
-  const { data: existing, error: findError } = await supabase
-    .from('blog_posts')
-    .select('id')
-    .eq('site_id', DEFAULT_SITE_ID)
-    .eq('id', id)
-    .eq('locale', locale)
-    .maybeSingle();
-  if (findError || !existing) {
+  const rows = await sql<{ id: string }[]>`
+    SELECT id FROM public.blog_posts
+    WHERE site_id = ${DEFAULT_SITE_ID}
+      AND id = ${id}
+      AND locale = ${locale}
+    LIMIT 1
+  `;
+  if (!rows[0]) {
     throw new Error('文章不存在');
   }
 
-  const { error: deleteError } = await supabase
-    .from('blog_posts')
-    .delete()
-    .eq('site_id', DEFAULT_SITE_ID)
-    .eq('id', id)
-    .eq('locale', locale);
-  if (deleteError) throw deleteError;
+  await sql`
+    DELETE FROM public.blog_posts
+    WHERE site_id = ${DEFAULT_SITE_ID}
+      AND id = ${id}
+      AND locale = ${locale}
+  `;
 
   await deleteMarkdownContent(locale, id);
   await deleteResourceAssociations('blog', id);
@@ -417,7 +427,7 @@ export async function deletePost(locale: string, id: string) {
 }
 
 /**
- * 批量更新博客文章翻译字段
+ * 批量更新博客文章翻译字段 — 已迁移到 sql
  */
 export async function updatePostTranslations(
   targetLocale: string,
@@ -456,8 +466,8 @@ export async function updatePostTranslations(
         continue;
       }
 
-      // 更新字段
-      const updateData: any = {};
+      // 收集更新字段
+      const updateData: Record<string, any> = {};
       if (title !== undefined) updateData.title = title;
       if (excerpt !== undefined) updateData.excerpt = excerpt;
       if (seo_keywords !== undefined) updateData.seo_keywords = seo_keywords;
@@ -474,18 +484,26 @@ export async function updatePostTranslations(
         await saveMarkdownContent(targetLocale, id, newContent);
       }
 
-      // 更新数据库字段
+      // 更新数据库字段（动态 SET）
       if (Object.keys(updateData).length > 0) {
-        const { error: updateError } = await supabase
-          .from('blog_posts')
-          .update({
-            ...updateData,
-            updated_at: new Date().toISOString(),
-          })
-          .eq('site_id', DEFAULT_SITE_ID)
-          .eq('id', id)
-          .eq('locale', targetLocale);
-        if (updateError) throw updateError;
+        const setClauses: any[] = [];
+        for (const [key, value] of Object.entries(updateData)) {
+          // sql(key) 将列名作为标识符注入（白名单，来自代码，非用户输入）
+          setClauses.push(sql`${sql(key)} = ${value}`);
+        }
+        setClauses.push(sql`updated_at = ${new Date().toISOString()}`);
+        const setClause = setClauses.reduce(
+          (acc, c, i) => (i === 0 ? c : sql`${acc}, ${c}`),
+          sql``
+        );
+
+        await sql`
+          UPDATE public.blog_posts
+          SET ${setClause}
+          WHERE site_id = ${DEFAULT_SITE_ID}
+            AND id = ${id}
+            AND locale = ${targetLocale}
+        `;
       }
 
       // 重新注册到 pages

@@ -6,7 +6,7 @@ import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import rehypeRaw from 'rehype-raw';
 import { getTranslations } from 'next-intl/server';
-import { withDynamicLocale } from '@/lib/withPageLocale';
+import { withStaticLocale } from '@/lib/withPageLocale';
 import { getSeoInput } from '@/lib/seo/getSeoInput';
 import { generatePageMetadata } from '@/lib/seo';
 import { getSiteSettings } from '@/lib/getSiteSettings';
@@ -14,6 +14,7 @@ import {
   getCachedDocsLibBySlug,
   getCachedDocBySlug,
   getCachedDocsTree,
+  getAllDocParams,
 } from '@/lib/docs';
 
 type Props = {
@@ -22,7 +23,15 @@ type Props = {
 
 // ===== generateMetadata =====
 export async function generateMetadata({ params }: Props) {
-  const { locale, libSlug, docSlug } = await params;
+  const resolvedParams = await params;
+  if (!resolvedParams?.locale) {
+    return {
+      title: 'Docs',
+      robots: 'noindex, follow',
+    };
+  }
+
+  const { locale, libSlug, docSlug } = resolvedParams;
 
   const settings = await getSiteSettings();
   const baseUrl = (settings.websiteUrl || process.env.NEXT_PUBLIC_BASE_URL || '').replace(/\/$/, '');
@@ -66,7 +75,12 @@ export async function generateMetadata({ params }: Props) {
 
 // ===== 页面组件 =====
 async function DocPage({ params }: Props) {
-  const { locale, libSlug, docSlug } = await params;
+  const resolvedParams = await params;
+  if (!resolvedParams?.locale) {
+    notFound();
+  }
+
+  const { locale, libSlug, docSlug } = resolvedParams;
   const t = await getTranslations('Docs');
 
   const library = await getCachedDocsLibBySlug(libSlug, locale);
@@ -80,7 +94,6 @@ async function DocPage({ params }: Props) {
 
   const docTree = await getCachedDocsTree(locale, library.id);
 
-  // 生成 JSON-LD
   const settings = await getSiteSettings();
   const baseUrl = (settings.websiteUrl || process.env.NEXT_PUBLIC_BASE_URL || '').replace(/\/$/, '');
   const siteName = settings.siteName || 'Site Name';
@@ -97,9 +110,6 @@ async function DocPage({ params }: Props) {
     }
   }
 
-  // ============================================================
-  // ✅ 文档详情页专属 CSS 变量（带最终 fallback）
-  // ============================================================
   const containerBg = 'var(--doc-detail-bg, var(--background, #ffffff))';
   const containerText = 'var(--doc-detail-text, var(--foreground, #0f172a))';
   const titleColor = 'var(--doc-detail-title-color, var(--foreground, #0f172a))';
@@ -159,5 +169,30 @@ async function DocPage({ params }: Props) {
   );
 }
 
+// ============================================================
+// ✅ ISR 预生成
+// ============================================================
+export async function generateStaticParams() {
+  const t0 = Date.now();
+  console.log(`[docs/[libSlug]/[docSlug]] generateStaticParams 开始`);
+
+  try {
+    const docs = await getAllDocParams();
+    const elapsed = Date.now() - t0;
+    console.log(`[docs/[libSlug]/[docSlug]] generateStaticParams: ${docs.length} 个文档，总耗时 ${elapsed}ms`);
+
+    return docs.map((d) => ({
+      locale: d.locale,
+      libSlug: d.libSlug,
+      docSlug: d.docSlug,
+    }));
+  } catch (err) {
+    const elapsed = Date.now() - t0;
+    console.error(`[docs/[libSlug]/[docSlug]] generateStaticParams 失败（耗时 ${elapsed}ms）:`, err);
+    return [];
+  }
+}
+
+export const dynamicParams = true;
 export const revalidate = 3600;
-export default withDynamicLocale(DocPage);
+export default withStaticLocale(DocPage);

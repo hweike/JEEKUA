@@ -22,7 +22,7 @@ function extractAlibaba() {
   const titleSelectors = ['.product-title', '.product-name', '.ma-title', '[data-testid="product-title"]', 'h1'];
   let title = '';
   for (const sel of titleSelectors) {
-    const el = document.querySelector(sel);
+    const el = document.querySelector(sel) as HTMLElement | null;
     if (el) {
       title = el.innerText?.trim() || '';
       if (title) break;
@@ -32,7 +32,7 @@ function extractAlibaba() {
   const priceSelectors = ['.price span', '.price-value', '[data-price]', '.price'];
   let price = '';
   for (const sel of priceSelectors) {
-    const el = document.querySelector(sel);
+    const el = document.querySelector(sel) as HTMLElement | null;
     if (el) {
       price = el.innerText?.trim() || '';
       if (price) break;
@@ -52,7 +52,7 @@ function extract1688() {
   const titleSelectors = ['.offer-title', '.d-title', '.product-title'];
   let title = '';
   for (const sel of titleSelectors) {
-    const el = document.querySelector(sel);
+    const el = document.querySelector(sel) as HTMLElement | null;
     if (el?.innerText) {
       title = el.innerText.trim();
       if (title) break;
@@ -62,38 +62,33 @@ function extract1688() {
 
   // 2. 价格提取（增强逻辑：覆盖阶梯价、区间价、起批量价）
   let price = '';
-  // 优先查找包含价格的主要容器
   const priceContainers = [
     '.price', '.price-wrap', '.sku-price', '.offer-price-range',
     '.price-list', '.price-range', '[class*="price"]'
   ];
   for (const containerSel of priceContainers) {
-    const container = document.querySelector(containerSel);
+    const container = document.querySelector(containerSel) as HTMLElement | null;
     if (container) {
-      // 尝试提取文本，并清理
       let rawPrice = container.innerText.trim();
       if (rawPrice) {
-        // 匹配数字、小数点、货币符号（¥、$）和中文“起”
         const match = rawPrice.match(/[\d\.,]+/);
         if (match) {
           price = match[0].replace(/,/g, '');
-          // 如果价格是区间，取最小值
           if (rawPrice.includes('-')) {
             const parts = rawPrice.split('-');
             if (parts[0]) price = parts[0].replace(/[^\d\.]/g, '');
           }
-          // 添加货币符号
           if (rawPrice.includes('¥')) price = '¥' + price;
           break;
         }
       }
     }
   }
-  // 备选：查找页面中任何包含价格字符的元素（用于非常规布局）
+  // 备选：查找页面中任何包含价格字符的元素
   if (!price) {
     const allElements = document.querySelectorAll('*');
     for (const el of allElements) {
-      const text = el.innerText?.trim();
+      const text = (el as HTMLElement).innerText?.trim();
       if (text && /¥\s*\d+(\.\d+)?/.test(text)) {
         const match = text.match(/¥\s*(\d+(\.\d+)?)/);
         if (match) {
@@ -166,7 +161,6 @@ export async function crawlProductByUrl(url: string, userCookie?: string): Promi
 
     await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 60000 });
 
-    // 等待关键元素
     const platformSelectors = {
       alibaba: ['.product-title', '.price', '.gallery-img'],
       '1688': ['.offer-title', '.price', '.offer-image'],

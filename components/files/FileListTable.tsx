@@ -33,18 +33,24 @@ interface FileItem {
   category_id: string | null;
 }
 
-interface FileListTableProps {
-  onRefresh: () => void;
-  categoryId?: string | null;
-}
-
 interface CategoryTree {
   id: string;
   name: string;
   children?: CategoryTree[];
 }
 
-export default function FileListTable({ onRefresh, categoryId }: FileListTableProps) {
+// ✅ 新增：categories 从父组件传入
+interface FileListTableProps {
+  onRefresh: () => void;
+  categoryId?: string | null;
+  categories?: CategoryTree[];
+}
+
+export default function FileListTable({
+  onRefresh,
+  categoryId,
+  categories: externalCategories,   // ✅ 从 props 接收
+}: FileListTableProps) {
   const [files, setFiles] = useState<FileItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [page, setPage] = useState(1);
@@ -52,40 +58,32 @@ export default function FileListTable({ onRefresh, categoryId }: FileListTablePr
   const [searchKeyword, setSearchKeyword] = useState('');
   const [searchInput, setSearchInput] = useState('');
   const [referenceFilter, setReferenceFilter] = useState<'all' | 'referenced' | 'unreferenced'>('all');
-  
+
   // ✅ 选择状态
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [isAllSelected, setIsAllSelected] = useState(false);
-  
+
   const [modalOpen, setModalOpen] = useState(false);
   const [modalType, setModalType] = useState<'rename' | 'alt' | 'move' | 'batchMove' | 'batchDelete'>('rename');
   const [selectedFile, setSelectedFile] = useState<FileItem | null>(null);
   const [tempValue, setTempValue] = useState('');
   const [selectedCategoryId, setSelectedCategoryId] = useState('');
-  const [categories, setCategories] = useState<CategoryTree[]>([]);
-  
+
+  // ✅ 用 props 传入的 categories，不再自己加载
+  const categories: CategoryTree[] = externalCategories || [];
+
   const [openDropdownId, setOpenDropdownId] = useState<string | null>(null);
   const dropdownRefs = useRef<{ [key: string]: HTMLDivElement | null }>({});
-  
+
   const pageSize = 30;
 
-  // 加载分类列表
-  useEffect(() => {
-    fetch('/api/admin/files/categories')
-      .then(res => res.json())
-      .then(data => {
-        const filterUncategorized = (items: any[]): any[] => {
-          return items
-            .filter(item => item.id !== '00000000-0000-0000-0000-000000000000')
-            .map(item => ({
-              ...item,
-              children: item.children ? filterUncategorized(item.children) : [],
-            }));
-        };
-        setCategories(filterUncategorized(data));
-      })
-      .catch(console.error);
-  }, []);
+  // ❌ 删除这段：不再自己加载分类
+  // useEffect(() => {
+  //   fetch('/api/admin/files/categories')
+  //     .then(res => res.json())
+  //     .then(data => { ... })
+  //     .catch(console.error);
+  // }, []);
 
   const fetchFiles = useCallback(async () => {
     setLoading(true);
@@ -102,7 +100,7 @@ export default function FileListTable({ onRefresh, categoryId }: FileListTablePr
       } else if (referenceFilter === 'unreferenced') {
         url += `&referenced=false`;
       }
-      
+
       const res = await fetch(url);
       if (!res.ok) {
         throw new Error(`Fetch failed: ${res.status}`);
@@ -136,7 +134,7 @@ export default function FileListTable({ onRefresh, categoryId }: FileListTablePr
       setSelectedIds(new Set());
       setIsAllSelected(false);
     } else {
-      const allIds = files.map(f => f.id);
+      const allIds = files.map((f) => f.id);
       setSelectedIds(new Set(allIds));
       setIsAllSelected(true);
     }
@@ -159,7 +157,7 @@ export default function FileListTable({ onRefresh, categoryId }: FileListTablePr
   const handleBatchDelete = async () => {
     if (selectedIds.size === 0) return;
     if (!confirm(`确定要删除选中的 ${selectedIds.size} 个文件吗？`)) return;
-    
+
     let successCount = 0;
     let failCount = 0;
     for (const id of selectedIds) {
@@ -174,7 +172,7 @@ export default function FileListTable({ onRefresh, categoryId }: FileListTablePr
         failCount++;
       }
     }
-    
+
     alert(`删除完成：成功 ${successCount} 个，失败 ${failCount} 个`);
     setSelectedIds(new Set());
     setIsAllSelected(false);
@@ -189,7 +187,7 @@ export default function FileListTable({ onRefresh, categoryId }: FileListTablePr
       alert('请选择目标分类');
       return;
     }
-    
+
     let successCount = 0;
     let failCount = 0;
     for (const id of selectedIds) {
@@ -208,7 +206,7 @@ export default function FileListTable({ onRefresh, categoryId }: FileListTablePr
         failCount++;
       }
     }
-    
+
     alert(`移动完成：成功 ${successCount} 个，失败 ${failCount} 个`);
     setSelectedIds(new Set());
     setIsAllSelected(false);
@@ -239,11 +237,14 @@ export default function FileListTable({ onRefresh, categoryId }: FileListTablePr
     }
   };
 
-  const openModal = (type: 'rename' | 'alt' | 'move' | 'batchMove' | 'batchDelete', file?: FileItem) => {
+  const openModal = (
+    type: 'rename' | 'alt' | 'move' | 'batchMove' | 'batchDelete',
+    file?: FileItem
+  ) => {
     if (file) setSelectedFile(file);
     setModalType(type);
     setModalOpen(true);
-    
+
     if (type === 'rename' && file) {
       const nameWithoutExt = file.display_name.replace(/\.[^.]+$/, '');
       setTempValue(nameWithoutExt);
@@ -270,19 +271,19 @@ export default function FileListTable({ onRefresh, categoryId }: FileListTablePr
       return;
     }
     try {
-      const ext = selectedFile.display_name.includes('.') 
+      const ext = selectedFile.display_name.includes('.')
         ? selectedFile.display_name.substring(selectedFile.display_name.lastIndexOf('.'))
         : '';
       const newName = tempValue.trim() + ext;
-      
+
       const res = await fetch(`/api/admin/files/${selectedFile.id}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ displayName: newName }),
       });
       if (!res.ok) throw new Error('保存失败');
-      setFiles(prev =>
-        prev.map(f => (f.id === selectedFile.id ? { ...f, display_name: newName } : f))
+      setFiles((prev) =>
+        prev.map((f) => (f.id === selectedFile.id ? { ...f, display_name: newName } : f))
       );
       closeModal();
       onRefresh();
@@ -300,8 +301,8 @@ export default function FileListTable({ onRefresh, categoryId }: FileListTablePr
         body: JSON.stringify({ altText: tempValue }),
       });
       if (!res.ok) throw new Error('保存失败');
-      setFiles(prev =>
-        prev.map(f => (f.id === selectedFile.id ? { ...f, alt_text: tempValue } : f))
+      setFiles((prev) =>
+        prev.map((f) => (f.id === selectedFile.id ? { ...f, alt_text: tempValue } : f))
       );
       closeModal();
       onRefresh();
@@ -366,12 +367,14 @@ export default function FileListTable({ onRefresh, categoryId }: FileListTablePr
 
   const renderCategoryTree = (nodes: CategoryTree[], depth: number = 0): JSX.Element[] => {
     const result: JSX.Element[] = [];
-    nodes.forEach(node => {
+    nodes.forEach((node) => {
       const indent = '　'.repeat(depth);
       const prefix = depth > 0 ? '├─ ' : '';
       result.push(
         <option key={node.id} value={node.id}>
-          {indent}{prefix}{node.name}
+          {indent}
+          {prefix}
+          {node.name}
         </option>
       );
       if (node.children && node.children.length > 0) {
@@ -431,7 +434,10 @@ export default function FileListTable({ onRefresh, categoryId }: FileListTablePr
               删除
             </button>
             <button
-              onClick={() => { setSelectedIds(new Set()); setIsAllSelected(false); }}
+              onClick={() => {
+                setSelectedIds(new Set());
+                setIsAllSelected(false);
+              }}
               className="text-sm text-gray-500 hover:text-gray-700 px-1"
             >
               <X size={14} />
@@ -495,9 +501,9 @@ export default function FileListTable({ onRefresh, categoryId }: FileListTablePr
                       <span className="text-xs text-gray-500 mt-1">文件</span>
                     </div>
                   )}
-                  
+
                   {/* ✅ 选择框 - 悬浮显示在右上角 */}
-                  <div 
+                  <div
                     className={`absolute top-1 right-1 opacity-0 group-hover:opacity-100 transition-opacity ${
                       isSelected ? 'opacity-100' : ''
                     }`}
@@ -513,7 +519,7 @@ export default function FileListTable({ onRefresh, categoryId }: FileListTablePr
                       className="w-4 h-4 cursor-pointer"
                     />
                   </div>
-                  
+
                   {file.referenceCount > 0 && (
                     <span className="absolute bottom-1 right-1 bg-blue-500 text-white text-xs px-1.5 py-0.5 rounded-full">
                       {file.referenceCount}
@@ -531,7 +537,7 @@ export default function FileListTable({ onRefresh, categoryId }: FileListTablePr
 
                 {/* 操作按钮 */}
                 <div className="absolute top-2 left-2 opacity-0 group-hover:opacity-100 transition-opacity">
-                  <div 
+                  <div
                     className="relative"
                     ref={(el) => {
                       if (el) dropdownRefs.current[file.id] = el;
@@ -610,7 +616,7 @@ export default function FileListTable({ onRefresh, categoryId }: FileListTablePr
           <div className="flex gap-2">
             <button
               disabled={page === 1}
-              onClick={() => setPage(p => p - 1)}
+              onClick={() => setPage((p) => p - 1)}
               className="px-3 py-1 border rounded disabled:opacity-50 hover:bg-gray-50"
             >
               上一页
@@ -620,7 +626,7 @@ export default function FileListTable({ onRefresh, categoryId }: FileListTablePr
             </span>
             <button
               disabled={page * pageSize >= total}
-              onClick={() => setPage(p => p + 1)}
+              onClick={() => setPage((p) => p + 1)}
               className="px-3 py-1 border rounded disabled:opacity-50 hover:bg-gray-50"
             >
               下一页
@@ -641,10 +647,7 @@ export default function FileListTable({ onRefresh, categoryId }: FileListTablePr
                 {modalType === 'batchMove' && `批量调整分类（${selectedIds.size} 个文件）`}
                 {modalType === 'batchDelete' && `批量删除（${selectedIds.size} 个文件）`}
               </h3>
-              <button
-                onClick={closeModal}
-                className="text-gray-400 hover:text-gray-600"
-              >
+              <button onClick={closeModal} className="text-gray-400 hover:text-gray-600">
                 <X size={20} />
               </button>
             </div>
@@ -653,7 +656,8 @@ export default function FileListTable({ onRefresh, categoryId }: FileListTablePr
               {modalType === 'rename' && selectedFile && (
                 <>
                   <div className="text-sm text-gray-500">
-                    当前文件：<span className="font-medium text-gray-700">{selectedFile.display_name}</span>
+                    当前文件：
+                    <span className="font-medium text-gray-700">{selectedFile.display_name}</span>
                   </div>
                   <input
                     type="text"
@@ -671,7 +675,10 @@ export default function FileListTable({ onRefresh, categoryId }: FileListTablePr
               {modalType === 'alt' && selectedFile && (
                 <>
                   <div className="text-sm text-gray-500">
-                    当前替代文本：<span className="font-medium text-gray-700">{selectedFile.alt_text || '（未设置）'}</span>
+                    当前替代文本：
+                    <span className="font-medium text-gray-700">
+                      {selectedFile.alt_text || '（未设置）'}
+                    </span>
                   </div>
                   <input
                     type="text"
@@ -690,7 +697,8 @@ export default function FileListTable({ onRefresh, categoryId }: FileListTablePr
                 <>
                   {modalType === 'move' && selectedFile && (
                     <div className="text-sm text-gray-500">
-                      当前分类：<span className="font-medium text-gray-700">
+                      当前分类：
+                      <span className="font-medium text-gray-700">
                         {(() => {
                           const findCategory = (items: CategoryTree[]): string => {
                             for (const item of items) {
@@ -725,10 +733,7 @@ export default function FileListTable({ onRefresh, categoryId }: FileListTablePr
             </div>
 
             <div className="flex justify-end gap-2 mt-6 pt-4 border-t">
-              <button
-                onClick={closeModal}
-                className="px-4 py-2 border rounded-md hover:bg-gray-50"
-              >
+              <button onClick={closeModal} className="px-4 py-2 border rounded-md hover:bg-gray-50">
                 取消
               </button>
               <button

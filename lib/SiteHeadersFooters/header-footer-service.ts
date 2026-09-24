@@ -1,13 +1,13 @@
 // lib/SiteHeadersFooters/header-footer-service.ts
-import { supabase } from '@/lib/supabase/client';
+import sql from '@/lib/db/admin';
 import { DEFAULT_HEADER_CONFIG, DEFAULT_FOOTER_CONFIG } from './config';
 import { getPrivateStorage } from '@/lib/storage/factory';
 
 const DEFAULT_SITE_ID = '000001';
 
 // 重试配置
-const MAX_RETRIES = 3;         // 最多重试次数
-const RETRY_DELAY_MS = 1000;   // 重试间隔（毫秒）
+const MAX_RETRIES = 3;
+const RETRY_DELAY_MS = 1000;
 
 /**
  * 带重试的异步函数包装器
@@ -26,7 +26,6 @@ async function withRetry<T>(
       lastError = error;
       console.warn(`[${label}] 第 ${attempt}/${retries} 次失败:`, error.message);
 
-      // 业务错误不重试
       const isBusinessError =
         error.message?.includes('does not exist') ||
         error.message?.includes('relation') ||
@@ -37,7 +36,6 @@ async function withRetry<T>(
         throw error;
       }
 
-      // 等待后重试
       await new Promise(resolve => setTimeout(resolve, delay));
     }
   }
@@ -46,38 +44,32 @@ async function withRetry<T>(
 
 export class HeaderFooterService {
   async getHeaderConfig(locale: string): Promise<any> {
-    const { data, error } = await supabase
-      .from('site_configs')
-      .select('config')
-      .eq('id', 'header')
-      .eq('site_id', DEFAULT_SITE_ID)
-      .eq('locale', locale)
-      .maybeSingle();
-
-    if (error) {
+    try {
+      const rows = await sql<{ config: any }[]>`
+        SELECT config FROM site_configs
+        WHERE id = 'header'
+          AND site_id = ${DEFAULT_SITE_ID}
+          AND locale = ${locale}
+        LIMIT 1
+      `;
+      return rows[0]?.config ?? null;
+    } catch (error) {
       console.error(`获取页头配置失败 [${locale}]:`, error);
       return null;
     }
-    return data?.config ?? null;
   }
 
   async saveHeaderConfig(locale: string, config: any): Promise<void> {
     await withRetry(
       async () => {
-        const { error } = await supabase
-          .from('site_configs')
-          .upsert(
-            {
-              id: 'header',
-              site_id: DEFAULT_SITE_ID,
-              locale,
-              config,
-              updatedAt: new Date().toISOString(),
-            },
-            { onConflict: 'id, site_id, locale' }
-          );
-
-        if (error) throw new Error(error.message);
+        await sql`
+          INSERT INTO site_configs (id, site_id, locale, config, "updatedAt")
+          VALUES ('header', ${DEFAULT_SITE_ID}, ${locale}, ${sql.json(config)}, ${new Date().toISOString()})
+          ON CONFLICT (id, site_id, locale)
+          DO UPDATE SET
+            config = ${sql.json(config)},
+            "updatedAt" = ${new Date().toISOString()}
+        `;
       },
       MAX_RETRIES,
       RETRY_DELAY_MS,
@@ -86,38 +78,32 @@ export class HeaderFooterService {
   }
 
   async getFooterConfig(locale: string): Promise<any> {
-    const { data, error } = await supabase
-      .from('site_configs')
-      .select('config')
-      .eq('id', 'footer')
-      .eq('site_id', DEFAULT_SITE_ID)
-      .eq('locale', locale)
-      .maybeSingle();
-
-    if (error) {
+    try {
+      const rows = await sql<{ config: any }[]>`
+        SELECT config FROM site_configs
+        WHERE id = 'footer'
+          AND site_id = ${DEFAULT_SITE_ID}
+          AND locale = ${locale}
+        LIMIT 1
+      `;
+      return rows[0]?.config ?? null;
+    } catch (error) {
       console.error(`获取页脚配置失败 [${locale}]:`, error);
       return null;
     }
-    return data?.config ?? null;
   }
 
   async saveFooterConfig(locale: string, config: any): Promise<void> {
     await withRetry(
       async () => {
-        const { error } = await supabase
-          .from('site_configs')
-          .upsert(
-            {
-              id: 'footer',
-              site_id: DEFAULT_SITE_ID,
-              locale,
-              config,
-              updatedAt: new Date().toISOString(),
-            },
-            { onConflict: 'id, site_id, locale' }
-          );
-
-        if (error) throw new Error(error.message);
+        await sql`
+          INSERT INTO site_configs (id, site_id, locale, config, "updatedAt")
+          VALUES ('footer', ${DEFAULT_SITE_ID}, ${locale}, ${sql.json(config)}, ${new Date().toISOString()})
+          ON CONFLICT (id, site_id, locale)
+          DO UPDATE SET
+            config = ${sql.json(config)},
+            "updatedAt" = ${new Date().toISOString()}
+        `;
       },
       MAX_RETRIES,
       RETRY_DELAY_MS,
@@ -131,7 +117,6 @@ export class HeaderFooterService {
     let configData: any;
 
     try {
-      // ✅ 修复类型错误：storage.read 返回 string | Buffer
       const contentResult = await storage.read(sampleKey, 'utf8');
       const contentStr =
         typeof contentResult === 'string'
@@ -156,7 +141,6 @@ export class HeaderFooterService {
     const saveMethod = type === 'header' ? this.saveHeaderConfig : this.saveFooterConfig;
     await saveMethod.call(this, locale, configData);
 
-    // 返回写入的配置（供前端直接使用）
     return configData;
   }
 }

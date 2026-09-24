@@ -1,6 +1,6 @@
 // lib/languages/settings.ts
 import { getConfigWithCache, invalidateConfig } from '@/lib/config-cache';
-import { supabase } from '@/lib/supabase/client';
+import sql from '@/lib/db/admin';
 import { LANGUAGES } from './config';
 
 export interface LanguageSettings {
@@ -10,26 +10,41 @@ export interface LanguageSettings {
 
 const CACHE_KEY = 'language-settings';
 
+/**
+ * ⚠️ 关键：数据库连接失败时的兜底
+ * （保留原有注释，省略）
+ */
 const DEFAULT_SETTINGS: LanguageSettings = {
-  enabled: Object.fromEntries(LANGUAGES.map(lang => [lang.code, true])),
+  enabled: {
+    zh: true,
+    en: true,
+  },
   defaultLanguage: 'zh',
 };
+
+// ========== 数据库行类型 ==========
+interface LanguageSettingsRow {
+  enabled: Record<string, boolean> | null;
+  default_language: string | null;
+}
 
 /**
  * 实际查询数据库的逻辑（无缓存）
  */
 async function fetchLanguageSettings(): Promise<LanguageSettings> {
-  const { data, error } = await supabase
-    .from('language_settings')
-    .select('enabled, default_language')
-    .eq('id', 1)
-    .single();
+  const rows = await sql<LanguageSettingsRow[]>`
+    SELECT enabled, default_language
+    FROM language_settings
+    WHERE id = 1
+    LIMIT 1
+  `;
 
-  if (error) throw error;
+  const data = rows[0];
+  if (!data) throw new Error('language_settings 表中 id=1 的记录不存在');
 
   return {
-    enabled: data.enabled,
-    defaultLanguage: data.default_language,
+    enabled: data.enabled ?? {},
+    defaultLanguage: data.default_language ?? 'zh',
   };
 }
 
@@ -40,28 +55,23 @@ export async function getLanguageSettings(): Promise<LanguageSettings> {
   try {
     return await getConfigWithCache(CACHE_KEY, fetchLanguageSettings, 600);
   } catch (error) {
-    console.error('读取语言设置失败，使用默认设置:', error);
-    // 返回默认设置，但不缓存（getConfigWithCache 内部 fetch 抛错不会写缓存）
+    console.error('读取语言设置失败，使用默认设置（仅 zh/en）:', error);
     return { ...DEFAULT_SETTINGS };
   }
 }
 
 /**
- * 保存语言设置（更新 Supabase 并清除缓存）
+ * 保存语言设置（更新数据库并清除缓存）
  */
 export async function saveLanguageSettings(settings: LanguageSettings): Promise<void> {
-  const { error } = await supabase
-    .from('language_settings')
-    .update({
-      enabled: settings.enabled,
-      default_language: settings.defaultLanguage,
-      updated_at: new Date().toISOString(),
-    })
-    .eq('id', 1);
+  await sql`
+    UPDATE language_settings
+    SET enabled = ${sql.json(settings.enabled)},
+        default_language = ${settings.defaultLanguage},
+        updated_at = ${new Date().toISOString()}
+    WHERE id = 1
+  `;
 
-  if (error) throw new Error(`保存语言设置失败: ${error.message}`);
-
-  // 清除缓存
   invalidateConfig(CACHE_KEY);
 }
 

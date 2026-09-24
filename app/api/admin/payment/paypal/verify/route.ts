@@ -1,6 +1,6 @@
 // app/api/admin/payment/paypal/verify/route.ts
 import { NextRequest, NextResponse } from 'next/server';
-import { supabase } from '@/lib/supabase/client';
+import sql from '@/lib/db/admin';
 import { getSiteId } from '@/lib/utils/request';
 
 const PAYPAL_API_BASE = process.env.PAYPAL_ENV === 'production'
@@ -25,17 +25,15 @@ export async function POST(request: NextRequest) {
 
       const siteId = await getSiteId(request);
 
-      // 重置验证状态
-      const { error: resetError } = await supabase
-        .from('payment_accounts')
-        .update({
-          is_verified: false,
-          updated_at: new Date().toISOString(),
-        })
-        .eq('site_id', siteId)
-        .eq('id', account_id);
-
-      if (resetError) {
+      try {
+        await sql`
+          UPDATE public.payment_accounts
+          SET is_verified = false,
+              updated_at = ${new Date().toISOString()}
+          WHERE site_id = ${siteId}
+            AND id = ${account_id}
+        `;
+      } catch (resetError: any) {
         console.error('重置验证状态失败:', resetError);
         return NextResponse.json(
           { success: false, error: '重置验证状态失败' },
@@ -56,7 +54,6 @@ export async function POST(request: NextRequest) {
     // 2. 处理"验证连接"操作
     // ============================================================
 
-    // 验证必填字段
     if (!client_id || !client_secret) {
       return NextResponse.json(
         { success: false, error: '请提供 Client ID 和 Client Secret' },
@@ -64,22 +61,22 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // ✅ 如果提供了 account_id，检查是否已认证
+    // 检查是否已认证
     if (account_id) {
       const siteId = await getSiteId(request);
-      const { data: existingAccount, error: fetchError } = await supabase
-        .from('payment_accounts')
-        .select('is_verified')
-        .eq('site_id', siteId)
-        .eq('id', account_id)
-        .single();
-
-      if (fetchError && fetchError.code !== 'PGRST116') {
+      let existingAccount: { is_verified: boolean | null } | undefined;
+      try {
+        const rows = await sql<{ is_verified: boolean | null }[]>`
+          SELECT is_verified FROM public.payment_accounts
+          WHERE site_id = ${siteId}
+            AND id = ${account_id}
+          LIMIT 1
+        `;
+        existingAccount = rows[0];
+      } catch (fetchError: any) {
         console.error('查询账号失败:', fetchError);
-        // 查询失败不阻断验证流程
       }
 
-      // ✅ 如果已认证，返回提示（但不阻断验证，用户可以重新验证）
       if (existingAccount?.is_verified) {
         return NextResponse.json(
           {
@@ -120,7 +117,7 @@ export async function POST(request: NextRequest) {
     const accessToken = tokenData.access_token;
 
     // 4. 获取账户信息（可选）
-    let accountInfo = null;
+    let accountInfo: any = null;
     try {
       const userInfoResponse = await fetch(`${PAYPAL_API_BASE}/v1/identity/oauth2/userinfo?schema=paypal`, {
         method: 'GET',
@@ -158,25 +155,19 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    // 6. ✅ 更新数据库验证状态
+    // 6. 更新数据库验证状态
     let dbUpdateSuccess = false;
     if (account_id) {
       try {
         const siteId = await getSiteId(request);
-        const { error: updateError } = await supabase
-          .from('payment_accounts')
-          .update({
-            is_verified: true,
-            updated_at: new Date().toISOString(),
-          })
-          .eq('site_id', siteId)
-          .eq('id', account_id);
-
-        if (updateError) {
-          console.error('更新验证状态失败:', updateError);
-        } else {
-          dbUpdateSuccess = true;
-        }
+        await sql`
+          UPDATE public.payment_accounts
+          SET is_verified = true,
+              updated_at = ${new Date().toISOString()}
+          WHERE site_id = ${siteId}
+            AND id = ${account_id}
+        `;
+        dbUpdateSuccess = true;
       } catch (error) {
         console.error('更新验证状态异常:', error);
       }

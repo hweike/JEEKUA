@@ -1,6 +1,5 @@
 // lib/litechat/services/admin-settings.service.ts
-import { supabase } from '@/lib/supabase/client';
-import { getSupabaseAdminClient } from '@/lib/supabase/admin-client';
+import sql from '@/lib/db/admin';
 
 const DEFAULT_SITE_ID = process.env.NEXT_PUBLIC_SITE_ID || '000001';
 
@@ -24,17 +23,19 @@ export interface AdminUser extends AdminSettings {
  * 获取当前管理员信息（含设置）
  */
 export async function getCurrentAdminSettings(adminId: string): Promise<AdminUser | null> {
-  const { data, error } = await supabase
-    .from('admin_users')
-    .select('id, email, name, avatar_url, nickname, online_status, default_welcome, offline_reply, online_start_time, online_end_time')
-    .eq('id', adminId)
-    .maybeSingle();
-
-  if (error) {
+  try {
+    const rows = await sql<AdminUser[]>`
+      SELECT id, email, name, avatar_url, nickname, online_status,
+             default_welcome, offline_reply, online_start_time, online_end_time
+      FROM public.admin_users
+      WHERE id = ${adminId}
+      LIMIT 1
+    `;
+    return rows[0] ?? null;
+  } catch (error) {
     console.error('获取管理员设置失败:', error);
     return null;
   }
-  return data;
 }
 
 /**
@@ -44,42 +45,43 @@ export async function updateAdminSettings(
   adminId: string,
   settings: Partial<AdminSettings>
 ): Promise<AdminUser> {
-  const { data, error } = await supabase
-    .from('admin_users')
-    .update({
-      avatar_url: settings.avatar_url,
-      nickname: settings.nickname,
-      online_status: settings.online_status,
-      default_welcome: settings.default_welcome,
-      offline_reply: settings.offline_reply,
-      online_start_time: settings.online_start_time,
-      online_end_time: settings.online_end_time,
-      updated_at: new Date().toISOString(),
-    })
-    .eq('id', adminId)
-    .select('id, email, name, avatar_url, nickname, online_status, default_welcome, offline_reply, online_start_time, online_end_time')
-    .single();
-
-  if (error) {
+  try {
+    const rows = await sql<AdminUser[]>`
+      UPDATE public.admin_users
+      SET avatar_url = ${settings.avatar_url ?? null},
+          nickname = ${settings.nickname ?? null},
+          online_status = ${settings.online_status ?? null},
+          default_welcome = ${settings.default_welcome ?? null},
+          offline_reply = ${settings.offline_reply ?? null},
+          online_start_time = ${settings.online_start_time ?? null},
+          online_end_time = ${settings.online_end_time ?? null},
+          updated_at = ${new Date().toISOString()}
+      WHERE id = ${adminId}
+      RETURNING id, email, name, avatar_url, nickname, online_status,
+                default_welcome, offline_reply, online_start_time, online_end_time
+    `;
+    if (!rows[0]) throw new Error('管理员不存在');
+    return rows[0];
+  } catch (error) {
     console.error('更新管理员设置失败:', error);
     throw error;
   }
-  return data;
 }
 
 /**
  * 获取所有管理员列表（用于会话分配）
  */
 export async function getAllAdmins(siteId: string = DEFAULT_SITE_ID) {
-  const { data, error } = await supabase
-    .from('admin_users')
-    .select('id, email, name, nickname, avatar_url, online_status')
-    .eq('site_id', siteId)  // ✅ 添加 site_id 过滤
-    .order('name', { ascending: true });
-
-  if (error) {
+  try {
+    const rows = await sql<any[]>`
+      SELECT id, email, name, nickname, avatar_url, online_status
+      FROM public.admin_users
+      WHERE site_id = ${siteId}
+      ORDER BY name ASC
+    `;
+    return rows;
+  } catch (error) {
     console.error('获取管理员列表失败:', error);
     throw error;
   }
-  return data || [];
 }

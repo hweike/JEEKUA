@@ -1,7 +1,9 @@
 // lib/products/utils/helpers.ts
 import { getPrivateStorage } from '@/lib/storage/factory';
-import { supabase } from '@/lib/supabase/client';
+import sql from '@/lib/db/admin';
 import { Series, Category, ProductLine, ProductData } from '../types';
+
+const DEFAULT_SITE_ID = process.env.NEXT_PUBLIC_SITE_ID || '000001';
 
 /** 存储路径 */
 export function getStorageKey(locale: string): string {
@@ -72,17 +74,14 @@ export function toRelativeImageUrl(imageUrl: string): string {
 
 // ==================== 排序工具函数 ====================
 
-/** 按 order 字段升序排列产品线 */
 function sortProductLines(lines: ProductLine[]): ProductLine[] {
   return [...lines].sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
 }
 
-/** 按 order 字段升序排列系列 */
 function sortSeries(series: Series[]): Series[] {
   return [...series].sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
 }
 
-/** 按 order 字段升序排列分类，并对其内部的 series 进行排序 */
 function sortCategories(categories: Category[]): Category[] {
   return categories
     .map(cat => ({
@@ -94,7 +93,7 @@ function sortCategories(categories: Category[]): Category[] {
 
 // ==================== 读写函数 ====================
 
-/** 读取完整的 JSON 数据，若文件不存在则返回空结构 */
+/** 读取完整的 JSON 数据 */
 export async function readFullData(locale: string): Promise<ProductData> {
   const storage = getPrivateStorage();
   const key = getStorageKey(locale);
@@ -106,7 +105,6 @@ export async function readFullData(locale: string): Promise<ProductData> {
       categories: parsed.categories || [],
     };
   } catch (error: any) {
-    // 文件不存在则返回空结构
     if (error?.code === 'NoSuchKey' || error?.Code === 'NoSuchKey' || error?.message?.includes('File not found')) {
       return { productLines: [], categories: [] };
     }
@@ -119,7 +117,6 @@ export async function writeFullData(locale: string, data: ProductData): Promise<
   const storage = getPrivateStorage();
   const key = getStorageKey(locale);
 
-  // 对数据排序
   const sortedData = {
     productLines: sortProductLines(data.productLines || []),
     categories: sortCategories(data.categories || []),
@@ -128,35 +125,50 @@ export async function writeFullData(locale: string, data: ProductData): Promise<
   await storage.write(key, JSON.stringify(sortedData, null, 2), { contentType: 'application/json' });
 }
 
-// ==================== 其他辅助函数 ====================
+// ==================== 其他辅助函数 — 已迁移 ====================
 
 /** 批量更新分类图片引用（与路由逻辑完全一致） */
 export async function syncCategoryImageReferences(categories: Category[]): Promise<void> {
   const categoryIds = categories.map(cat => cat.id);
+
+  // 1. 删除旧引用
   if (categoryIds.length > 0) {
-    // 删除旧引用
-    const { error: delError } = await supabase
-      .from('file_references')
-      .delete()
-      .eq('reference_type', 'product_category')
-      .in('reference_id', categoryIds);
-    if (delError) console.error('批量删除引用失败:', delError);
+    try {
+      await sql`
+        DELETE FROM public.file_references
+        WHERE reference_type = 'product_category'
+          AND reference_id IN ${sql(categoryIds)}
+      `;
+    } catch (delError) {
+      console.error('批量删除引用失败:', delError);
+    }
   }
 
-  // 收集需要插入的引用
-  const insertBatch: any[] = [];
+  // 2. 收集需要插入的引用
+  const insertBatch: Array<{
+    file_id: string;
+    reference_type: string;
+    reference_id: string;
+    alt_text: string;
+    sort_order: number;
+  }> = [];
+
   const imagePaths = categories
     .map(cat => cat.image)
     .filter(path => path && path.trim() !== '');
 
   if (imagePaths.length > 0) {
-    const { data: mediaFiles, error: mediaError } = await supabase
-      .from('media_files')
-      .select('id, storage_key')
-      .in('storage_key', imagePaths);
-    if (mediaError) {
+    let mediaFiles: { id: string; storage_key: string }[] = [];
+    try {
+      mediaFiles = await sql<{ id: string; storage_key: string }[]>`
+        SELECT id, storage_key FROM public.media_files
+        WHERE storage_key IN ${sql(imagePaths)}
+      `;
+    } catch (mediaError) {
       console.error('批量查询 media_files 失败:', mediaError);
-    } else {
+    }
+
+    if (mediaFiles.length > 0) {
       const storageKeyToId = new Map(mediaFiles.map(mf => [mf.storage_key, mf.id]));
       for (const cat of categories) {
         if (cat.image) {
@@ -177,10 +189,23 @@ export async function syncCategoryImageReferences(categories: Category[]): Promi
     }
   }
 
+  // 3. 批量插入（✅ 显式传入 site_id）
   if (insertBatch.length > 0) {
-    const { error: insertError } = await supabase
-      .from('file_references')
-      .insert(insertBatch);
-    if (insertError) console.error('批量插入引用失败:', insertError);
+    try {
+      for (const item of insertBatch) {
+        await sql`
+          INSERT INTO public.file_references (
+            site_id, file_id, reference_type, reference_id, alt_text, sort_order
+          )
+          VALUES (
+            ${DEFAULT_SITE_ID},
+            ${item.file_id}, ${item.reference_type}, ${item.reference_id},
+            ${item.alt_text}, ${item.sort_order}
+          )
+        `;
+      }
+    } catch (insertError) {
+      console.error('批量插入引用失败:', insertError);
+    }
   }
 }

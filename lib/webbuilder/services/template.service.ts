@@ -1,5 +1,5 @@
 // lib/webbuilder/services/template.service.ts
-import { supabase } from '@/lib/supabase/client';
+// ✅ 删除 import { supabase }（未使用）
 import { getPrivateStorage } from '@/lib/storage/factory';
 import { createHash } from 'crypto';
 import { syncTemplateToPages } from '@/lib/webbuilder/sync-templates';
@@ -240,11 +240,6 @@ export async function saveDraft(
 
 /**
  * 发布模板
- * 
- * 说明：
- * - 模板 JSON 写入私有对象存储
- * - 多语言文案已包含在 template_data 中，不需要 component_texts 表
- * - 异步同步到 site_pages 表
  */
 export async function publishTemplate(
   baseId: string,
@@ -252,7 +247,12 @@ export async function publishTemplate(
   category: TemplateCategory,
   data: any,
   existingTemplate?: Template | null
-): Promise<{ id: string; baseId: string; version: 'published' }> {
+): Promise<{
+  id: string;
+  baseId: string;
+  version: 'published';
+  affectedPages: Array<{ locale: string; slug: string }>;
+}> {
   const now = new Date().toISOString();
   const puckData = data && Object.keys(data).length > 0 ? data : getDefaultPuckData();
   const newHash = createHash('sha256').update(JSON.stringify(puckData)).digest('hex');
@@ -283,37 +283,34 @@ export async function publishTemplate(
 
   clearCache();
 
-  // 异步同步到 site_pages（不再操作 component_texts）
-  syncTemplateToPages(
-    publishedTemplate.id,
-    puckData,
-    newHash,
-    category,
-    publishedTemplate.targetLayoutId
-  )
-    .then(result => {
-      console.log(`[publish] 同步完成:`, result);
-      return updateTemplateSyncStatus(
-        publishedTemplate.id,
-        result.failed === 0 ? 'done' : 'error'
-      );
-    })
-    .catch(err => {
-      console.error(`[publish] 同步模板 ${baseId} 到页面失败:`, err);
-      return updateTemplateSyncStatus(publishedTemplate.id, 'error').catch(e => {
-        console.error('更新同步状态失败:', e);
-      });
+  // ✅ 同步到 site_pages（syncTemplateToPages 已迁移）
+  let affectedPages: Array<{ locale: string; slug: string }> = [];
+  try {
+    const result = await syncTemplateToPages(
+      publishedTemplate.id,
+      puckData,
+      newHash,
+      category,
+      publishedTemplate.targetLayoutId
+    );
+    console.log(`[publish] 同步完成:`, result);
+    await updateTemplateSyncStatus(
+      publishedTemplate.id,
+      result.failed === 0 ? 'done' : 'error'
+    );
+    affectedPages = result.affectedPages || [];
+  } catch (err) {
+    console.error(`[publish] 同步模板 ${baseId} 到页面失败:`, err);
+    await updateTemplateSyncStatus(publishedTemplate.id, 'error').catch(e => {
+      console.error('更新同步状态失败:', e);
     });
+  }
 
-  return { id: publishedTemplate.id, baseId, version: 'published' };
+  return { id: publishedTemplate.id, baseId, version: 'published', affectedPages };
 }
 
 /**
  * 删除模板
- * 
- * 说明：
- * - 删除对象存储中的 JSON 文件
- * - 不再需要删除 component_texts 记录
  */
 export async function deleteTemplate(baseId: string): Promise<void> {
   const template = await getTemplateById(baseId);

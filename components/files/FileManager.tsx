@@ -390,6 +390,7 @@ export default function FileManager() {
             key={refreshKey}
             categoryId={getEffectiveCategoryId()}
             onRefresh={refresh}
+            categories={categories}
           />
         </div>
       </div>

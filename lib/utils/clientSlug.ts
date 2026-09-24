@@ -5,22 +5,33 @@
 // - 生成逻辑由 SeoFields 组件内部的 generateSlugFromText 负责（支持中文转拼音）
 // - 本文件只负责判断 slug 是否已存在，以及生成唯一的替代值
 
+// ============================================================
+// 类型定义
+// ============================================================
+
+export interface EnsureUniqueSlugOptions {
+  /** API 端点（默认 '/api/admin/pages/slugs'） */
+  endpoint?: string;
+  /** 排除的 ID（编辑模式下排除自身） */
+  excludeId?: string;
+  /** 响应数据字段名（默认 'pages'） */
+  dataKey?: string;
+  /** 数据项中 ID 字段名（默认 'id'） */
+  idKey?: string;
+  /** ✅ 数据项中 slug 字段名（默认 'slug'） */
+  slugKey?: string;
+}
+
+// ============================================================
+// 同步版本：确保 slug 唯一（添加数字后缀）
+// ============================================================
+
 /**
  * 同步版本：确保 slug 唯一（添加数字后缀）
  *
  * @param baseSlug 基础 slug（如 "about-us"）
  * @param existingSlugs 当前语言下已存在的 slug 列表
  * @returns 唯一的 slug（如 "about-us-1"）
- *
- * 示例：
- *   ensureUniqueSlug("about-us", ["about-us", "contact"])
- *   → "about-us-1"
- *
- *   ensureUniqueSlug("about-us", ["about-us", "about-us-1"])
- *   → "about-us-2"
- *
- *   ensureUniqueSlug("about-us", ["contact"])
- *   → "about-us"（不冲突，返回原值）
  */
 export function ensureUniqueSlug(baseSlug: string, existingSlugs: string[]): string {
   if (!baseSlug) return '';
@@ -39,22 +50,31 @@ export function ensureUniqueSlug(baseSlug: string, existingSlugs: string[]): str
   return slug;
 }
 
+// ============================================================
+// 异步版本：确保 slug 唯一（自动从 API 获取已存在列表）
+// ============================================================
+
 /**
  * 异步版本：确保 slug 唯一（自动从 API 获取已存在列表）
  *
- * @param baseSlug 基础 slug（如 "about-us"）
- * @param locale 当前语言（如 "zh"、"en"）
- * @param excludePageId 排除的页面 ID（编辑模式下排除自身，避免自己和自己冲突）
+ * ✅ 兼容两种调用方式：
+ *
+ *   1. 旧调用（字符串）：
+ *      ensureUniqueSlugAsync('about-us', 'zh', 'page-id-123')
+ *      → 等价于 { excludeId: 'page-id-123' }
+ *
+ *   2. 新调用（对象）：
+ *      ensureUniqueSlugAsync('about-us', 'zh', {
+ *        endpoint: '/api/admin/products/slugs',
+ *        excludeId: 'product-id-456',
+ *        idKey: 'productId',
+ *        slugKey: 'slug',
+ *      })
+ *
+ * @param baseSlug 基础 slug
+ * @param locale 当前语言（如 'zh'、'en'）
+ * @param optionsOrExcludeId 配置对象或（兼容旧版）排除的 ID
  * @returns 唯一的 slug
- *
- * 示例：
- *   const uniqueSlug = await ensureUniqueSlugAsync('about-us', 'zh');
- *   // 如果 about-us 已存在，返回 about-us-1
- *   // 如果 about-us-1 也存在，返回 about-us-2
- *
- *   // 编辑模式：排除自身
- *   const uniqueSlug = await ensureUniqueSlugAsync('about-us', 'zh', '69687106');
- *   // 如果 about-us 是当前页面自己的 slug，返回 about-us（不冲突）
  *
  * 失败降级：
  *   API 请求失败时，返回原始 slug，不阻塞用户操作
@@ -62,17 +82,31 @@ export function ensureUniqueSlug(baseSlug: string, existingSlugs: string[]): str
 export async function ensureUniqueSlugAsync(
   baseSlug: string,
   locale: string,
-  excludePageId?: string
+  optionsOrExcludeId?: string | EnsureUniqueSlugOptions
 ): Promise<string> {
   if (!baseSlug || !baseSlug.trim()) {
     return '';
   }
 
+  // ✅ 兼容旧调用：字符串 → { excludeId: 字符串 }
+  const options: EnsureUniqueSlugOptions =
+    typeof optionsOrExcludeId === 'string'
+      ? { excludeId: optionsOrExcludeId }
+      : optionsOrExcludeId || {};
+
+  const {
+    endpoint = '/api/admin/pages/slugs',
+    excludeId,
+    dataKey = 'pages',
+    idKey = 'id',
+    slugKey = 'slug', // ✅ 新增
+  } = options;
+
   try {
-    // 1. 从 API 获取当前语言下所有已存在的 slug
-    const res = await fetch(
-      `/api/admin/pages/slugs?locale=${encodeURIComponent(locale)}`
-    );
+    // ✅ 不传 excludeId 到 URL（后端不支持，纯前端 filter）
+    const url = `${endpoint}?locale=${encodeURIComponent(locale)}`;
+
+    const res = await fetch(url);
 
     if (!res.ok) {
       console.warn(
@@ -84,25 +118,37 @@ export async function ensureUniqueSlugAsync(
     const data = await res.json();
     let existingSlugs: string[] = [];
 
-    // 2. 优先使用 pages（带 id），可以排除自身
-    if (Array.isArray(data.pages)) {
-      existingSlugs = data.pages
-        .filter((p: any) => !excludePageId || p.id !== excludePageId)
-        .map((p: any) => p.slug)
+    // ✅ 优先使用完整数据（带 id），可以排除自身
+    if (Array.isArray(data[dataKey])) {
+      existingSlugs = data[dataKey]
+        .filter((item: any) => {
+          // 字符串项无法排除自身，直接保留
+          if (typeof item === 'string') return true;
+          return !excludeId || item[idKey] !== excludeId;
+        })
+        .map((item: any) => {
+          // ✅ 兼容字符串项和对象项
+          if (typeof item === 'string') return item;
+          return item[slugKey];
+        })
         .filter(Boolean);
     } else if (Array.isArray(data.slugs)) {
-      // 3. 回退：旧 API，无法排除自身
+      // 回退：只有 slug 数组，无法排除自身
       existingSlugs = data.slugs;
-      if (excludePageId) {
+      if (excludeId) {
         console.warn(
-          '[ensureUniqueSlugAsync] API 未返回 pageId，无法排除自身，可能误判为占用'
+          '[ensureUniqueSlugAsync] API 未返回完整数据，无法排除自身，可能误判为占用'
         );
       }
+    } else {
+      // ✅ 新增：静默失败保护
+      console.warn(
+        `[ensureUniqueSlugAsync] 响应中未找到数组字段 "${dataKey}" 或 "slugs"，按无冲突处理`
+      );
     }
 
-    // 4. 调用同步版本判断唯一性
-    const uniqueSlug = ensureUniqueSlug(baseSlug, existingSlugs);
-    return uniqueSlug;
+    // 调用同步版本判断唯一性
+    return ensureUniqueSlug(baseSlug, existingSlugs);
   } catch (err) {
     console.warn('[ensureUniqueSlugAsync] 异常，使用原始 slug:', err);
     return baseSlug;
@@ -110,11 +156,34 @@ export async function ensureUniqueSlugAsync(
 }
 
 // ============================================================
+// 兼容旧代码：generateClientSlug（生成基础 slug）
+// ============================================================
+
+/**
+ * 生成客户端 slug（兼容旧代码）
+ *
+ * 注意：
+ *   本函数不做中文转拼音，调用方应先通过 toPinyin 转换。
+ *   SeoFields 组件内部有自己的 generateSlugFromText（支持中文转拼音）。
+ *
+ * @param title 要转换的文本
+ * @returns URL 友好的 slug
+ */
+export function generateClientSlug(title: string): string {
+  if (!title) return 'page';
+  return title
+    .toLowerCase()
+    .replace(/\s+/g, '-')
+    .replace(/[^\w\-]/g, '')
+    .replace(/-+/g, '-')
+    .replace(/^-|-$/g, '') || 'page';
+}
+
+// ============================================================
 // 默认导出（兼容旧代码）
 // ============================================================
-// 如果旧代码中有 `import clientSlug from '@/lib/utils/clientSlug'`，
-// 保留以下默认导出。如果没有旧代码引用，可以删除。
 export default {
   ensureUniqueSlug,
   ensureUniqueSlugAsync,
+  generateClientSlug,
 };

@@ -4,8 +4,6 @@
 import { useState, useEffect, use } from 'react';
 import { useRouter } from 'next/navigation';
 import { ChevronRight, Globe, MapPin, Building2, Copy, Check } from 'lucide-react';
-import { accountService } from '@/lib/payment/services/account.service';
-import { getSiteSettings } from '@/lib/getSiteSettings';
 import { 
   BANK_LOGOS, 
   PRESET_LOGOS, 
@@ -148,7 +146,7 @@ export default function ShareAccountsPage({ params }: ShareAccountsPageProps) {
   const router = useRouter();
   const [loading, setLoading] = useState(true);
   const [accounts, setAccounts] = useState<AccountData[]>([]);
-  const [siteName, setSiteName] = useState('Feisman Power');
+  const [siteName, setSiteName] = useState('');
   const [selectedAccountId, setSelectedAccountId] = useState<string | null>(null);
   const [expandedTypes, setExpandedTypes] = useState<Set<AccountType>>(new Set(['global', 'local', 'domestic']));
   const [copied, setCopied] = useState(false);
@@ -220,7 +218,6 @@ export default function ShareAccountsPage({ params }: ShareAccountsPageProps) {
     },
   };
 
-  // ✅ 使用类型断言解决索引问题
   const text = lang === 'zh' ? t.zh : t.en;
 
   // ============================================================
@@ -264,23 +261,42 @@ export default function ShareAccountsPage({ params }: ShareAccountsPageProps) {
     };
   };
 
+  // ============================================================
+  // ✅ 修复：改用 fetch 调用公开 API
+  // ============================================================
   useEffect(() => {
     const loadData = async () => {
       try {
-        // ✅ 并行加载：使用 accountService.list 和 getSiteSettings
-        const [accountsData, settings] = await Promise.all([
-          accountService.list(DEFAULT_SITE_ID),
-          getSiteSettings(),
+        // ✅ 并行加载：账号列表 + 站点设置
+        // ✅ 使用 /api/payment/account/share（单数 account）
+        const [accountsRes, settingsRes] = await Promise.all([
+          fetch(`/api/payment/account/share?site_id=${DEFAULT_SITE_ID}`),
+          fetch('/api/settings/basic'),
         ]);
-        
+
+        // 解析账号列表
+        let accountsData: AccountData[] = [];
+        if (accountsRes.ok) {
+          const accountsResult = await accountsRes.json();
+          if (accountsResult.success && accountsResult.data) {
+            accountsData = accountsResult.data;
+          }
+        }
+
         if (!accountsData || accountsData.length === 0) {
           router.replace('/404');
           return;
         }
-        
+
         setAccounts(accountsData);
-        setSiteName(settings?.companyName || settings?.siteName || 'Feisman Power');
-        
+
+        // 解析站点设置
+        if (settingsRes.ok) {
+          const settingsResult = await settingsRes.json();
+          const settings = settingsResult.data || {};
+          setSiteName(settings.siteName || settings.companyName || '');
+        }
+
         // 选择第一个 TT 账户作为默认
         const firstTT = accountsData.find((a: AccountData) => a.payment_method === 'tt');
         if (firstTT) {

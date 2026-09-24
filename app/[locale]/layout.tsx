@@ -12,7 +12,7 @@ import DetectLanguage from '@/components/DetectLanguage';
 import { getEnabledLanguages } from '@/lib/languages/settings';
 import ChatWidgetWrapper from '@/components/litechat/ChatWidgetWrapper';
 import RtlSupport from '@/components/RtlSupport';
-import PageThemeStyle from '@/components/front/PageThemeStyle';   // ✅ 新增
+import PageThemeStyle from '@/components/front/PageThemeStyle';
 
 export async function generateStaticParams() {
   const enabled = await getEnabledLanguages();
@@ -20,7 +20,16 @@ export async function generateStaticParams() {
 }
 
 export async function generateMetadata({ params }: { params: Promise<{ locale: string }> }) {
-  const { locale } = await params;
+  // ✅ 防御性检查：构建时 Next.js 可能传入 undefined
+  const resolvedParams = await params;
+  if (!resolvedParams?.locale) {
+    return {
+      title: 'Site',
+      robots: 'noindex, follow',
+    };
+  }
+
+  const { locale } = resolvedParams;
 
   const settings = await getSiteSettings();
   const configuredDomain = settings.websiteUrl?.trim()?.replace(/\/+$/, '');
@@ -56,7 +65,13 @@ export default async function LocaleLayout({
   children: React.ReactNode;
   params: Promise<{ locale: string }>;
 }) {
-  const { locale } = await params;
+  // ✅ 防御性检查：构建时 Next.js 可能传入 undefined
+  const resolvedParams = await params;
+  if (!resolvedParams?.locale) {
+    notFound();
+  }
+
+  const { locale } = resolvedParams;
   if (!locales.includes(locale as any)) notFound();
 
   setRequestLocale(locale);
@@ -102,9 +117,8 @@ export default async function LocaleLayout({
 
   return (
     <NextIntlClientProvider messages={messages} locale={locale}>
-      {/* ✅ 注入页面级主题覆盖 */}
       <PageThemeStyle />
-      
+
       <RtlSupport locale={locale} />
       <DetectLanguage />
       <div className="min-h-screen flex flex-col">
@@ -131,7 +145,6 @@ export default async function LocaleLayout({
           />
         </div>
 
-        {/* ✅ 修改：给 main 加 padding-bottom，让内容与 Footer 之间有间距 */}
         <main className="flex-grow w-full relative z-0 pb-8 md:pb-12 lg:pb-16">
           {children}
         </main>

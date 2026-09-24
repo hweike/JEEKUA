@@ -1,5 +1,5 @@
 // lib/payment/services/paypal.service.ts
-import { supabase } from '@/lib/supabase/client';
+import sql from '@/lib/db/admin';
 import type { PaymentAccount } from '../types/account';
 
 const PAYPAL_API_BASE = process.env.PAYPAL_ENV === 'production'
@@ -31,7 +31,7 @@ export interface PayPalCaptureResponse {
 
 export const paypalService = {
   /**
-   * 获取 PayPal Access Token
+   * 获取 PayPal Access Token（纯 HTTP，不碰数据库）
    */
   async getAccessToken(account: PaymentAccount): Promise<string> {
     const auth = Buffer.from(
@@ -57,7 +57,7 @@ export const paypalService = {
   },
 
   /**
-   * 创建 PayPal 支付订单
+   * 创建 PayPal 支付订单（纯 HTTP）
    */
   async createOrder(
     account: PaymentAccount,
@@ -130,7 +130,6 @@ export const paypalService = {
 
     const data: PayPalOrderResponse = await response.json();
 
-    // 查找 approval_url
     const approvalLink = data.links.find((link) => link.rel === 'approve');
     if (!approvalLink) {
       throw new Error('无法获取 PayPal 支付链接');
@@ -143,7 +142,7 @@ export const paypalService = {
   },
 
   /**
-   * 查询 PayPal 订单状态
+   * 查询 PayPal 订单状态（纯 HTTP）
    */
   async getOrderStatus(account: PaymentAccount, paypalOrderId: string): Promise<string> {
     const accessToken = await this.getAccessToken(account);
@@ -165,7 +164,7 @@ export const paypalService = {
   },
 
   /**
-   * 捕获 PayPal 支付
+   * 捕获 PayPal 支付（纯 HTTP）
    */
   async captureOrder(account: PaymentAccount, paypalOrderId: string): Promise<PayPalCaptureResponse> {
     const accessToken = await this.getAccessToken(account);
@@ -185,7 +184,6 @@ export const paypalService = {
 
     const data = await response.json();
 
-    // 提取关键信息
     const capture = data.purchase_units?.[0]?.payments?.captures?.[0];
     return {
       id: capture?.id || data.id,
@@ -202,20 +200,27 @@ export const paypalService = {
   },
 
   /**
-   * 验证 PayPal Webhook 签名
+   * 验证 PayPal Webhook 签名 — 已迁移
    */
   async verifyWebhookSignature(
     payload: any,
     headers: Headers,
     webhookId: string
   ): Promise<boolean> {
-    // 获取 PayPal 账号（需要 webhook_id 对应的账号）
-    const { data: account } = await supabase
-      .from('payment_accounts')
-      .select('*')
-      .eq('paypal_webhook_id', webhookId)
-      .eq('is_active', true)
-      .single();
+    // 获取 PayPal 账号
+    let account: any;
+    try {
+      const rows = await sql<any[]>`
+        SELECT * FROM public.payment_accounts
+        WHERE paypal_webhook_id = ${webhookId}
+          AND is_active = true
+        LIMIT 1
+      `;
+      account = rows[0];
+    } catch (error) {
+      console.error('查询 PayPal 账号失败:', error);
+      return false;
+    }
 
     if (!account) {
       console.error('未找到对应的 PayPal 账号配置');
@@ -259,19 +264,25 @@ export const paypalService = {
   },
 
   /**
-   * 处理 PayPal Webhook 事件
+   * 处理 PayPal Webhook 事件 — 已迁移
    */
   async handleWebhookEvent(eventType: string, resource: any): Promise<void> {
     // 保存 Webhook 日志
-    await supabase
-      .from('paypal_webhook_logs')
-      .insert({
-        event_id: resource.id || resource.order_id,
-        event_type: eventType,
-        paypal_order_id: resource.id || resource.order_id,
-        payload: resource,
-        processed: false,
-      });
+    try {
+      await sql`
+        INSERT INTO public.paypal_webhook_logs (
+          event_id, event_type, paypal_order_id, payload, processed
+        ) VALUES (
+          ${resource.id || resource.order_id},
+          ${eventType},
+          ${resource.id || resource.order_id},
+          ${sql.json(resource)},
+          false
+        )
+      `;
+    } catch (logError) {
+      console.error('[handleWebhookEvent] 保存日志失败:', logError);
+    }
 
     switch (eventType) {
       case 'PAYMENT.CAPTURE.COMPLETED':
@@ -283,7 +294,6 @@ export const paypalService = {
         break;
 
       case 'CHECKOUT.ORDER.APPROVED':
-        // 订单已批准，等待捕获
         console.log('订单已批准:', resource.id);
         break;
 
@@ -293,19 +303,26 @@ export const paypalService = {
   },
 
   /**
-   * 处理支付完成事件
+   * 处理支付完成事件 — 已迁移
    */
   async handlePaymentCompleted(resource: any): Promise<void> {
     const paypalOrderId = resource.order_id || resource.id;
 
     // 查找对应的本地订单
-    const { data: order, error: orderError } = await supabase
-      .from('orders')
-      .select('id, status')
-      .eq('paypal_order_id', paypalOrderId)
-      .single();
+    let order: { id: string; status: string } | undefined;
+    try {
+      const rows = await sql<{ id: string; status: string }[]>`
+        SELECT id, status FROM public.orders
+        WHERE paypal_order_id = ${paypalOrderId}
+        LIMIT 1
+      `;
+      order = rows[0];
+    } catch (orderError) {
+      console.error('查询订单失败:', orderError);
+      return;
+    }
 
-    if (orderError || !order) {
+    if (!order) {
       console.error('未找到对应的订单:', paypalOrderId);
       return;
     }
@@ -317,56 +334,64 @@ export const paypalService = {
     }
 
     // 更新订单状态
-    const { error: updateError } = await supabase
-      .from('orders')
-      .update({
-        status: 'paid',
-        payment_status: 'completed',
-        paid_at: new Date().toISOString(),
-        updated_at: new Date().toISOString(),
-      })
-      .eq('id', order.id);
-
-    if (updateError) {
+    try {
+      await sql`
+        UPDATE public.orders
+        SET status = 'paid',
+            payment_status = 'completed',
+            paid_at = ${new Date().toISOString()},
+            updated_at = ${new Date().toISOString()}
+        WHERE id = ${order.id}
+      `;
+    } catch (updateError) {
       console.error('更新订单状态失败:', updateError);
       return;
     }
 
     // 记录状态日志
-    await supabase
-      .from('order_status_logs')
-      .insert({
-        order_id: order.id,
-        from_status: order.status,
-        to_status: 'paid',
-        operator: 'paypal_webhook',
-        note: `PayPal 支付完成 (${paypalOrderId})`,
-      });
+    try {
+      await sql`
+        INSERT INTO public.order_status_logs (order_id, from_status, to_status, operator, note)
+        VALUES (
+          ${order.id}, ${order.status}, 'paid', 'paypal_webhook',
+          ${'PayPal 支付完成 (' + paypalOrderId + ')'}
+        )
+      `;
+    } catch (logError) {
+      console.error('记录状态日志失败:', logError);
+    }
 
     // 更新 Webhook 日志处理状态
-    await supabase
-      .from('paypal_webhook_logs')
-      .update({
-        processed: true,
-        processed_at: new Date().toISOString(),
-        order_id: order.id,
-      })
-      .eq('paypal_order_id', paypalOrderId);
+    try {
+      await sql`
+        UPDATE public.paypal_webhook_logs
+        SET processed = true,
+            processed_at = ${new Date().toISOString()},
+            order_id = ${order.id}
+        WHERE paypal_order_id = ${paypalOrderId}
+      `;
+    } catch (updateLogError) {
+      console.error('更新 Webhook 日志失败:', updateLogError);
+    }
 
     console.log('订单支付完成:', order.id, paypalOrderId);
   },
 
   /**
-   * 处理支付拒绝事件
+   * 处理支付拒绝事件 — 已迁移
    */
   async handlePaymentDenied(resource: any): Promise<void> {
     const paypalOrderId = resource.order_id || resource.id;
 
-    const { data: order } = await supabase
-      .from('orders')
-      .select('id, status')
-      .eq('paypal_order_id', paypalOrderId)
-      .single();
+    let order: { id: string; status: string } | undefined;
+    try {
+      const rows = await sql<{ id: string; status: string }[]>`
+        SELECT id, status FROM public.orders
+        WHERE paypal_order_id = ${paypalOrderId}
+        LIMIT 1
+      `;
+      order = rows[0];
+    } catch {}
 
     if (!order) {
       console.error('未找到对应的订单:', paypalOrderId);
@@ -374,25 +399,31 @@ export const paypalService = {
     }
 
     // 更新订单状态为取消
-    await supabase
-      .from('orders')
-      .update({
-        status: 'cancelled',
-        payment_status: 'failed',
-        updated_at: new Date().toISOString(),
-      })
-      .eq('id', order.id);
+    try {
+      await sql`
+        UPDATE public.orders
+        SET status = 'cancelled',
+            payment_status = 'failed',
+            updated_at = ${new Date().toISOString()}
+        WHERE id = ${order.id}
+      `;
+    } catch (updateError) {
+      console.error('更新订单状态失败:', updateError);
+      return;
+    }
 
     // 记录状态日志
-    await supabase
-      .from('order_status_logs')
-      .insert({
-        order_id: order.id,
-        from_status: order.status,
-        to_status: 'cancelled',
-        operator: 'paypal_webhook',
-        note: `PayPal 支付拒绝 (${paypalOrderId})`,
-      });
+    try {
+      await sql`
+        INSERT INTO public.order_status_logs (order_id, from_status, to_status, operator, note)
+        VALUES (
+          ${order.id}, ${order.status}, 'cancelled', 'paypal_webhook',
+          ${'PayPal 支付拒绝 (' + paypalOrderId + ')'}
+        )
+      `;
+    } catch (logError) {
+      console.error('记录状态日志失败:', logError);
+    }
 
     console.log('订单支付被拒绝:', order.id, paypalOrderId);
   },

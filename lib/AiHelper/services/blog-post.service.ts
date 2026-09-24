@@ -1,7 +1,6 @@
 // lib/AiHelper/services/blog-post.service.ts
 import { ITranslationService } from '../core/types';
 import { getPost, updatePostTranslations } from '@/lib/blog/services/post.service';
-import { supabase } from '@/lib/supabase/client';
 
 const DEFAULT_SITE_ID = process.env.NEXT_PUBLIC_SITE_ID || '000001';
 

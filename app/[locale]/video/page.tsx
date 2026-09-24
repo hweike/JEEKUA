@@ -47,7 +47,16 @@ export async function generateMetadata({
 }: {
   params: Promise<{ locale: string }>;
 }) {
-  const { locale } = await params;
+  // ✅ 防御性检查：构建时 Next.js 可能传入 undefined
+  const resolvedParams = await params;
+  if (!resolvedParams?.locale) {
+    return {
+      title: 'Video',
+      robots: 'noindex, follow',
+    };
+  }
+
+  const { locale } = resolvedParams;
 
   const [settings, t, homeData] = await Promise.all([
     getSiteSettingsCached(),
@@ -205,7 +214,13 @@ interface VideoIndexPageProps {
 }
 
 async function VideoIndexPage({ params }: VideoIndexPageProps) {
-  const { locale } = await params;
+  // ✅ 防御性检查：构建时 Next.js 可能传入 undefined
+  const resolvedParams = await params;
+  if (!resolvedParams?.locale) {
+    notFound();
+  }
+
+  const { locale } = resolvedParams;
 
   return (
     <Suspense fallback={<VideoLoading />}>

@@ -5,7 +5,7 @@ import { useState, useEffect, useMemo } from 'react';
 import { toast } from 'sonner';
 import { createConfig } from '@/lib/webbuilder/config';
 import { customFieldTypes } from '@/lib/webbuilder/field-types';
-import '@puckeditor/core/puck.css';
+import '@puckeditor/core/no-external.css';
 import './puck-overrides.css';
 import {
   LayoutGrid,

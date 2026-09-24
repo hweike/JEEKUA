@@ -1,6 +1,6 @@
 // lib/discovery/scanners/product.scanner.ts
 import matter from 'gray-matter';
-import { supabase } from '@/lib/supabase/client';
+import sql from '@/lib/db/admin';
 import { upsertPage, SITE_ID } from '../register';
 import { getPrivateStorage } from '@/lib/storage/factory';
 import { mapProductToPageData, mapVariantToPageData } from '../mappers/product.mapper';
@@ -18,51 +18,54 @@ export async function scanProducts(locale: string, onProgress?: ProgressCallback
     totalFailed = 0,
     totalSkipped = 0;
 
-  // 先获取总数以便显示
-  const { count: totalCount, error: countError } = await supabase
-    .from('products')
-    .select('*', { count: 'exact', head: true })
-    .eq('site_id', SITE_ID)
-    .eq('locale', locale)
-    .is('parent_product_id', null);
-
-  if (countError) {
+  // 1. 获取总数
+  let totalCount = 0;
+  try {
+    const countRows = await sql<{ count: string }[]>`
+      SELECT COUNT(*)::text AS count FROM public.products
+      WHERE site_id = ${SITE_ID}
+        AND locale = ${locale}
+        AND parent_product_id IS NULL
+    `;
+    totalCount = parseInt(countRows[0]?.count || '0', 10);
+  } catch (countError: any) {
     onProgress?.(`❌ 获取产品总数失败: ${countError.message}`, 'error');
     throw countError;
   }
-  onProgress?.(`📊 总共 ${totalCount || 0} 个父产品，分页处理中`, 'info');
+  onProgress?.(`📊 总共 ${totalCount} 个父产品，分页处理中`, 'info');
 
+  // 2. 分页循环
   while (true) {
-    const { data: parentProducts, error } = await supabase
-      .from('products')
-      .select('*')
-      .eq('site_id', SITE_ID)
-      .eq('locale', locale)
-      .is('parent_product_id', null)
-      .range(page * PAGE_SIZE, (page + 1) * PAGE_SIZE - 1);
-
-    if (error) {
+    let parentProducts: any[];
+    try {
+      parentProducts = await sql<any[]>`
+        SELECT * FROM public.products
+        WHERE site_id = ${SITE_ID}
+          AND locale = ${locale}
+          AND parent_product_id IS NULL
+        LIMIT ${PAGE_SIZE} OFFSET ${page * PAGE_SIZE}
+      `;
+    } catch (error: any) {
       onProgress?.(`❌ 查询产品表失败: ${error.message}`, 'error');
       throw error;
     }
     if (!parentProducts || parentProducts.length === 0) break;
 
-    // 查询当前批次的现有页面
-    const productIds = parentProducts.map(p => p.productId);
-    const pageIds = productIds.map(id => `product:${id}`);
-    const { data: existingPages, error: pagesError } = await supabase
-      .from('pages')
-      .select('id, updatedAt, content_hash')
-      .in('id', pageIds)
-      .eq('site_id', SITE_ID)
-      .eq('locale', locale);
-
+    // 3. 查询当前批次的现有 pages
+    const productIds = parentProducts.map((p) => p.productId);
+    const pageIds = productIds.map((id) => `product:${id}`);
     const pageMap = new Map<string, { updatedAt: string; content_hash: string }>();
-    if (!pagesError && existingPages) {
+    try {
+      const existingPages = await sql<{ id: string; updatedAt: string; content_hash: string }[]>`
+        SELECT id, "updatedAt", content_hash FROM public.pages
+        WHERE id IN ${sql(pageIds)}
+          AND site_id = ${SITE_ID}
+          AND locale = ${locale}
+      `;
       for (const p of existingPages) {
         pageMap.set(p.id, { updatedAt: p.updatedAt, content_hash: p.content_hash });
       }
-    } else if (pagesError) {
+    } catch (pagesError: any) {
       onProgress?.(`⚠️ 查询现有页面失败: ${pagesError.message}，将强制全部重新处理`, 'warning');
     }
 
@@ -104,20 +107,12 @@ export async function scanProducts(locale: string, onProgress?: ProgressCallback
       } catch (err: any) {
         if (err?.code === 'NoSuchKey' || err?.Code === 'NoSuchKey' || err?.message?.includes('File not found')) {
           onProgress?.(`⚠️ MD 文件不存在: ${mdKey}，根据数据库生成基础页面`, 'warning');
-          // mdData 和 mdContent 保持空，后续使用 product 后备
         } else {
           onProgress?.(`❌ 读取云存储 MD 文件失败: ${err.message}，将使用数据库信息`, 'error');
-          // 同样使用空 mdData，product 作为后备
         }
       }
 
-      // 使用 mapper 构建主产品 PageData
-      const pageData = mapProductToPageData(
-        product,
-        mdData,
-        mdContent,
-        productUpdatedAt
-      );
+      const pageData = mapProductToPageData(product, mdData, mdContent, productUpdatedAt);
 
       try {
         await upsertPage(pageData, locale);
@@ -129,17 +124,12 @@ export async function scanProducts(locale: string, onProgress?: ProgressCallback
       }
       processed++;
 
-      // 处理变体（使用 mapper）
-      for (const variant of (mdData.variants || [])) {
+      // 处理变体
+      for (const variant of mdData.variants || []) {
         const varId = variant.id;
         if (!varId) continue;
 
-        const variantPageData = mapVariantToPageData(
-          productId,
-          variant,
-          mdData,
-          productUpdatedAt
-        );
+        const variantPageData = mapVariantToPageData(productId, variant, mdData, productUpdatedAt);
 
         try {
           await upsertPage(variantPageData, locale);

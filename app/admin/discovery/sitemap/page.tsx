@@ -13,7 +13,6 @@ import {
   AlertCircle,
 } from 'lucide-react';
 import Toast from '@/components/common/Toast';
-import { getSiteSettings } from '@/lib/getSiteSettings';
 
 interface SitemapStatus {
   locale: string;
@@ -33,15 +32,26 @@ export default function SitemapAdmin() {
   const [lastRun, setLastRun] = useState<string | null>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
 
-  // 加载站点设置
+  // ✅ 加载站点设置（通过 API，避免 Client Component 引 server-only）
   useEffect(() => {
     const loadSettings = async () => {
       try {
-        const settings = await getSiteSettings();
-        const url = (settings.websiteUrl || '').replace(/\/+$/, '');
-        setBaseUrl(url);
+        const res = await fetch('/api/admin/settings/basic');
+        if (res.ok) {
+          const settings = await res.json();
+          const url = (settings.websiteUrl || '').replace(/\/+$/, '');
+          setBaseUrl(url || (typeof window !== 'undefined' ? window.location.origin : ''));
+        } else {
+          // 无权限或失败时，回退到当前 origin
+          if (typeof window !== 'undefined') {
+            setBaseUrl(window.location.origin);
+          }
+        }
       } catch (err) {
         console.error('加载站点设置失败:', err);
+        if (typeof window !== 'undefined') {
+          setBaseUrl(window.location.origin);
+        }
       }
     };
     loadSettings();
@@ -89,7 +99,6 @@ export default function SitemapAdmin() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         signal: controller.signal,
-        // 无需 body
       });
 
       if (!response.ok) {
@@ -111,13 +120,12 @@ export default function SitemapAdmin() {
           if (line.startsWith('data: ')) {
             const data = JSON.parse(line.slice(6));
             if (data.type === 'progress') {
-              // 更新进度（简单提示）
               if (data.message) {
                 setToast({ message: data.message, type: 'info' });
               }
             } else if (data.type === 'complete') {
               setToast({ message: '✅ 站点地图生成成功！', type: 'success' });
-              await loadStatus(); // 刷新状态
+              await loadStatus();
             } else if (data.type === 'error') {
               setToast({ message: `❌ ${data.message}`, type: 'error' });
             }

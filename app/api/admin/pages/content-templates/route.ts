@@ -1,6 +1,6 @@
 // app/api/admin/pages/content-templates/route.ts
 import { NextRequest, NextResponse } from 'next/server';
-import { supabaseAdmin } from '@/lib/supabase/admin-client';
+import sql from '@/lib/db/admin';
 
 const SITE_ID = '000001';
 
@@ -15,22 +15,17 @@ export async function GET(request: NextRequest) {
   }
 
   try {
-    const { data, error } = await supabaseAdmin
-      .from('content_templates')
-      .select('id, name, content, is_system, created_at, updated_at')
-      .eq('site_id', SITE_ID)
-      .eq('locale', locale)
-      .order('is_system', { ascending: false })
-      .order('created_at', { ascending: false });
-
-    if (error) {
-      console.error('[content-templates GET] 查询失败:', error);
-      return NextResponse.json({ error: error.message }, { status: 500 });
-    }
+    const data = await sql<any[]>`
+      SELECT id, name, content, is_system, created_at, updated_at
+      FROM public.content_templates
+      WHERE site_id = ${SITE_ID}
+        AND locale = ${locale}
+      ORDER BY is_system DESC, created_at DESC
+    `;
 
     return NextResponse.json({
-      templates: data || [],
-      count: data?.length || 0,
+      templates: data,
+      count: data.length,
       locale,
     });
   } catch (err: any) {
@@ -62,25 +57,17 @@ export async function POST(request: NextRequest) {
 
     const id = `user_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
 
-    const { data, error } = await supabaseAdmin
-      .from('content_templates')
-      .insert({
-        id,
-        site_id: SITE_ID,
-        locale,
-        name: name.trim(),
-        content,
-        is_system: false,
-      })
-      .select('id, name, content, is_system, created_at, updated_at')
-      .single();
+    const rows = await sql<any[]>`
+      INSERT INTO public.content_templates (id, site_id, locale, name, content, is_system)
+      VALUES (${id}, ${SITE_ID}, ${locale}, ${name.trim()}, ${content}, false)
+      RETURNING id, name, content, is_system, created_at, updated_at
+    `;
 
-    if (error) {
-      console.error('[content-templates POST] 插入失败:', error);
-      return NextResponse.json({ error: error.message }, { status: 500 });
+    if (!rows[0]) {
+      return NextResponse.json({ error: '插入失败' }, { status: 500 });
     }
 
-    return NextResponse.json({ template: data }, { status: 201 });
+    return NextResponse.json({ template: rows[0] }, { status: 201 });
   } catch (err: any) {
     console.error('[content-templates POST] 异常:', err?.message);
     return NextResponse.json(
@@ -102,16 +89,12 @@ export async function DELETE(request: NextRequest) {
 
   try {
     // 先检查是否为系统模板
-    const { data: template, error: findError } = await supabaseAdmin
-      .from('content_templates')
-      .select('is_system')
-      .eq('id', id)
-      .maybeSingle();
-
-    if (findError) {
-      console.error('[content-templates DELETE] 查询失败:', findError);
-      return NextResponse.json({ error: findError.message }, { status: 500 });
-    }
+    const rows = await sql<{ is_system: boolean }[]>`
+      SELECT is_system FROM public.content_templates
+      WHERE id = ${id}
+      LIMIT 1
+    `;
+    const template = rows[0];
 
     if (!template) {
       return NextResponse.json({ error: 'Template not found' }, { status: 404 });
@@ -126,15 +109,10 @@ export async function DELETE(request: NextRequest) {
     }
 
     // 删除用户模板
-    const { error: deleteError } = await supabaseAdmin
-      .from('content_templates')
-      .delete()
-      .eq('id', id);
-
-    if (deleteError) {
-      console.error('[content-templates DELETE] 删除失败:', deleteError);
-      return NextResponse.json({ error: deleteError.message }, { status: 500 });
-    }
+    await sql`
+      DELETE FROM public.content_templates
+      WHERE id = ${id}
+    `;
 
     return NextResponse.json({ success: true });
   } catch (err: any) {

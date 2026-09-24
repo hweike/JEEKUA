@@ -1,6 +1,6 @@
 // app/api/blog/posts/search/route.ts
 import { NextRequest, NextResponse } from 'next/server';
-import { supabase } from '@/lib/supabase/client';
+import sql from '@/lib/db/admin';
 
 const DEFAULT_SITE_ID = process.env.NEXT_PUBLIC_SITE_ID || '000001';
 
@@ -13,33 +13,42 @@ export async function GET(request: NextRequest) {
   const size = parseInt(searchParams.get('size') || '12', 10);
 
   try {
-    let query = supabase
-      .from('blog_posts')
-      .select(
-        'id, slug, title, excerpt, featured_image, category_id, author, updated_at',
-        { count: 'exact' }
-      )
-      .eq('site_id', DEFAULT_SITE_ID)
-      .eq('locale', locale)
-      .eq('visibility', 'visible');
-
+    // 动态 WHERE
+    const conditions: any[] = [
+      sql`site_id = ${DEFAULT_SITE_ID}`,
+      sql`locale = ${locale}`,
+      sql`visibility = 'visible'`,
+    ];
     if (keyword) {
-      query = query.ilike('title', `%${keyword}%`);
+      conditions.push(sql`title ILIKE ${'%' + keyword + '%'}`);
     }
     if (categoryId) {
-      query = query.eq('category_id', categoryId);
+      conditions.push(sql`category_id = ${categoryId}`);
     }
+    const whereClause = conditions.reduce(
+      (acc, c, i) => (i === 0 ? c : sql`${acc} AND ${c}`),
+      sql``
+    );
 
-    const from = (page - 1) * size;
-    const to = from + size - 1;
+    const offset = (page - 1) * size;
 
-    const { data, error, count } = await query
-      .order('updated_at', { ascending: false })
-      .range(from, to);
+    // 总数
+    const countRows = await sql<{ count: string }[]>`
+      SELECT COUNT(*)::text AS count FROM public.blog_posts
+      WHERE ${whereClause}
+    `;
+    const total = parseInt(countRows[0]?.count || '0', 10);
 
-    if (error) throw error;
+    // 数据
+    const data = await sql<any[]>`
+      SELECT id, slug, title, excerpt, featured_image, category_id, author, updated_at
+      FROM public.blog_posts
+      WHERE ${whereClause}
+      ORDER BY updated_at DESC
+      LIMIT ${size} OFFSET ${offset}
+    `;
 
-    const items = (data || []).map((row: any) => ({
+    const items = data.map((row: any) => ({
       id: row.id,
       slug: row.slug || '',
       title: row.title || '',
@@ -52,7 +61,7 @@ export async function GET(request: NextRequest) {
 
     return NextResponse.json({
       items,
-      total: count || 0,
+      total,
       page,
       size,
     });

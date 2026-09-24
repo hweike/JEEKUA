@@ -5,7 +5,7 @@ import {
   getProductBySlug,
 } from '@/lib/products/indexDb';
 import { readProduct } from '@/lib/products/mdParser';
-import { supabase } from '@/lib/supabase/client';
+import sql from '@/lib/db/admin';
 import { unstable_cache } from 'next/cache';
 
 // ---------- 本地类型定义 ----------
@@ -40,9 +40,6 @@ interface Category {
 const cache = new Map<string, { data: { productLines: ProductLine[]; categories: Category[] }; timestamp: number }>();
 const CACHE_TTL = 3600 * 1000;
 
-// ============================================================================
-// getFullCatalogData - 读取完整目录数据（已预排序，不再执行排序）
-// ============================================================================
 export async function getFullCatalogData(locale: string): Promise<{
   productLines: ProductLine[];
   categories: Category[];
@@ -53,7 +50,6 @@ export async function getFullCatalogData(locale: string): Promise<{
     return cached.data;
   }
 
-  // 直接读取已排序的数据（writeFullData 已预排序）
   const full = await readFullData(locale);
 
   const data = {
@@ -65,9 +61,6 @@ export async function getFullCatalogData(locale: string): Promise<{
   return data;
 }
 
-// ============================================================================
-// 产品线页面数据
-// ============================================================================
 export async function getProductLinePageData(
   locale: string,
   slug: string
@@ -131,9 +124,6 @@ export async function getProductLinePageData(
   };
 }
 
-// ============================================================================
-// 分类查询
-// ============================================================================
 export async function findCategoryBySlug(
   locale: string,
   slug: string
@@ -156,9 +146,6 @@ export async function getAllProductLineSlugs(locale: string): Promise<string[]> 
   return productLines.map((pl) => pl.slug);
 }
 
-// ============================================================================
-// 分类页数据（含分页产品列表）
-// ============================================================================
 export async function getCategoryPageData(
   locale: string,
   slug: string,
@@ -201,14 +188,13 @@ export async function getCategoryPageData(
     if (!category || !productLine) return null;
   }
 
-  // 类型收窄：确保 category 和 productLine 存在
   if (!category || !productLine) return null;
 
   const page = options?.page || 1;
   const pageSize = options?.pageSize || 20;
   const result = await getProductsByCategoryAndSeries(
     locale,
-    category.id,  // 此时安全
+    category.id,
     seriesId,
     page,
     pageSize
@@ -227,9 +213,6 @@ export async function getAllCategorySlugs(locale: string): Promise<string[]> {
   return categories.map((cat) => cat.slug);
 }
 
-// ============================================================================
-// 产品详情页数据（核心，并行优化）
-// ============================================================================
 export async function getProductPageData(
   locale: string,
   slug: string
@@ -260,9 +243,7 @@ export async function getProductPageData(
   let mdData: any = {};
   try {
     mdData = await readProduct(locale, productIndex.productId);
-  } catch {
-    // 忽略读取失败，仅使用索引数据
-  }
+  } catch {}
 
   const product: any = {
     ...productIndex,
@@ -282,9 +263,6 @@ export async function getProductPageData(
   };
 }
 
-// ============================================================================
-// 清除目录缓存
-// ============================================================================
 export function clearCatalogCache(locale?: string): void {
   if (locale) {
     cache.delete(`full_catalog_${locale}`);
@@ -293,26 +271,66 @@ export function clearCatalogCache(locale?: string): void {
   }
 }
 
-// ============================================================================
-// 获取所有产品 slug（用于 generateStaticParams）
-// ============================================================================
+// ✅ 已迁移：getAllProductSlugs
 export async function getAllProductSlugs(locale: string): Promise<string[]> {
-  const { data, error } = await supabase
-    .from('products')
-    .select('slug')
-    .eq('site_id', process.env.NEXT_PUBLIC_SITE_ID || '000001')
-    .eq('locale', locale)
-    .is('parent_product_id', null);
-  if (error) {
+  try {
+    const rows = await sql<{ slug: string }[]>`
+      SELECT slug FROM public.products
+      WHERE site_id = ${process.env.NEXT_PUBLIC_SITE_ID || '000001'}
+        AND locale = ${locale}
+        AND parent_product_id IS NULL
+    `;
+    return rows.map((row) => row.slug).filter(Boolean);
+  } catch (error: any) {
     console.error(`[getAllProductSlugs] 查询失败: ${error.message}`);
     return [];
   }
-  return data?.map((row: { slug: string }) => row.slug).filter(Boolean) || [];
 }
 
-// ============================================================================
-// 缓存版本的产品详情页数据（unstable_cache 包装，用于 ISR/SSR）
-// ============================================================================
+// ============================================================
+// ✅ 新增：获取所有已发布产品的 {locale, slug}
+// ============================================================
+let cachedAllProducts: Array<{ locale: string; slug: string }> | null = null;
+let cachedAllProductsAt = 0;
+const ALL_PRODUCTS_TTL = 5 * 60 * 1000;
+
+export async function getAllPublishedProducts(): Promise<Array<{ locale: string; slug: string }>> {
+  const now = Date.now();
+
+  if (cachedAllProducts && now - cachedAllProductsAt < ALL_PRODUCTS_TTL) {
+    console.log(`[getAllPublishedProducts] ✅ 命中缓存（${cachedAllProducts.length} 条）`);
+    return cachedAllProducts;
+  }
+
+  console.log(`[getAllPublishedProducts] ❌ 未命中，查库中...`);
+  const start = Date.now();
+
+  try {
+    const rows = await sql<{ locale: string; slug: string }[]>`
+      SELECT locale, slug FROM public.products
+      WHERE site_id = ${process.env.NEXT_PUBLIC_SITE_ID || '000001'}
+        AND parent_product_id IS NULL
+    `;
+
+    const result = rows.filter(r => r.locale && r.slug);
+    const elapsed = Date.now() - start;
+    console.log(`[getAllPublishedProducts] ✅ 查库完成，${result.length} 条，耗时 ${elapsed}ms`);
+
+    cachedAllProducts = result;
+    cachedAllProductsAt = now;
+    return result;
+  } catch (error: any) {
+    console.error(`[getAllPublishedProducts] 查询失败: ${error.message}`);
+    return cachedAllProducts ?? [];
+  }
+}
+
+export function clearAllPublishedProductsCache(): void {
+  cachedAllProducts = null;
+  cachedAllProductsAt = 0;
+  console.log('[getAllPublishedProducts] 缓存已清空');
+}
+
 export const getCachedProductPageData = unstable_cache(
   async (locale: string, slug: string) => {
     return getProductPageData(locale, slug);

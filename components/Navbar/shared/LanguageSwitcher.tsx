@@ -2,17 +2,13 @@
 
 import { usePathname } from 'next/navigation';
 import { useState, useEffect, useRef } from 'react';
-import { getEnabledLanguages } from '@/lib/languages/client';
+import { getEnabledLanguages, clearEnabledLanguagesCache } from '@/lib/languages/client';
 
-// ============================================================
-// 公共样式常量
-// ============================================================
 const COLOR_TRANSITION = `color var(--transition-duration-150, 150ms) var(--transition-timing-ease, ease)`;
 const BG_COLOR_TRANSITION = `background-color var(--transition-duration-150, 150ms) var(--transition-timing-ease, ease)`;
 
 export default function LanguageSwitcher() {
   const pathname = usePathname();
-  // 从路径第一段提取语言，例如 /zh/xxx -> zh
   const currentLocale = pathname.split('/')[1] || 'en';
 
   const [languages, setLanguages] = useState<any[]>([]);
@@ -26,11 +22,29 @@ export default function LanguageSwitcher() {
       .finally(() => setLoading(false));
   }, []);
 
+  // ✅ 打开下拉框时，先清缓存再拉最新
+  const handleToggle = async () => {
+    const nextOpen = !open;
+
+    if (nextOpen) {
+      try {
+        clearEnabledLanguagesCache();  // 先清缓存，强制重新拉取
+        const fresh = await getEnabledLanguages();
+        if (Array.isArray(fresh)) {
+          setLanguages(fresh);
+        }
+      } catch (err) {
+        console.warn('[LanguageSwitcher] 刷新语言列表失败，用缓存:', err);
+      }
+    }
+
+    setOpen(nextOpen);
+  };
+
   const handleLocaleChange = (newLocale: string) => {
     if (newLocale === currentLocale) return;
     document.cookie = `preferred_language=${newLocale}; path=/; max-age=31536000`;
     document.cookie = `user_selected_language=true; path=/; max-age=31536000`;
-    // 跳转首页
     window.location.href = `/${newLocale}`;
   };
 
@@ -50,11 +64,8 @@ export default function LanguageSwitcher() {
 
   return (
     <div className="relative" ref={dropdownRef}>
-      {/* ============================================================
-          触发按钮
-          ============================================================ */}
       <button
-        onClick={() => setOpen(!open)}
+        onClick={handleToggle}
         className="flex items-center transition-colors"
         style={{
           color: 'var(--navbar-text, var(--foreground, #0f172a))',
@@ -84,9 +95,6 @@ export default function LanguageSwitcher() {
         </svg>
       </button>
 
-      {/* ============================================================
-          下拉面板
-          ============================================================ */}
       {open && (
         <div
           className="absolute right-0 w-48 max-h-80 overflow-y-auto z-50"

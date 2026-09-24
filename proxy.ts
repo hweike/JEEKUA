@@ -65,9 +65,6 @@ const countryToLocale: Record<string, string> = {
 const accountPathRegex = new RegExp(`^/(?:${locales.join('|')})?/account(/.*)?$`);
 const loginPathRegex = new RegExp(`^/(?:${locales.join('|')})?/login$`);
 
-/**
- * 创建一个新的 NextRequest，包含自定义 headers
- */
 function createRequestWithHeaders(request: NextRequest, headers: Headers): NextRequest {
   const newRequest = new Request(request.url, {
     method: request.method,
@@ -95,11 +92,9 @@ export async function proxy(request: NextRequest) {
     pathname.startsWith('/share/') ||
     pathname.startsWith('/fonts/') ||
     pathname === '/robots.txt';
-  
+
   if (isStaticAsset) {
-    // ✅ 修复：使用 headers 方法设置自定义请求头
     const response = NextResponse.next();
-    // 将自定义请求头添加到响应中，以便后续处理
     requestHeaders.forEach((value, key) => {
       response.headers.set(key, value);
     });
@@ -119,13 +114,18 @@ export async function proxy(request: NextRequest) {
   const isAdminPath = pathname.startsWith('/admin');
   const isAdminApiPath = pathname.startsWith('/api/admin');
   const isWebBuilderPath = pathname.startsWith('/webbuilder');
+  const isWebBuilderApiPath = pathname.startsWith('/api/webbuilder');  // ✅ 新增
   const isLoginPage = pathname === '/admin/login';
   const isLoginApi = pathname === '/api/admin/login';
 
-  if ((isAdminPath || isAdminApiPath || isWebBuilderPath) && !isLoginPage && !isLoginApi) {
+  if (
+    (isAdminPath || isAdminApiPath || isWebBuilderPath || isWebBuilderApiPath) &&
+    !isLoginPage &&
+    !isLoginApi
+  ) {
     const user = await getCurrentUser(request);
     if (!user) {
-      if (isAdminApiPath || pathname.startsWith('/webbuilder/api')) {
+      if (isAdminApiPath || isWebBuilderApiPath) {   // ✅ 加上 isWebBuilderApiPath
         return NextResponse.json({ error: '未授权' }, { status: 401 });
       }
       const loginUrl = new URL('/admin/login', request.url);
@@ -172,7 +172,12 @@ export async function proxy(request: NextRequest) {
   }
 
   // ---------- 5. 后台路径跳过语言中间件 ----------
-  if (pathname.startsWith('/admin') || pathname.startsWith('/api/admin') || pathname.startsWith('/webbuilder')) {
+  if (
+    pathname.startsWith('/admin') ||
+    pathname.startsWith('/api/admin') ||
+    pathname.startsWith('/webbuilder') ||
+    pathname.startsWith('/api/webbuilder')   // ✅ 新增
+  ) {
     const response = NextResponse.next();
     requestHeaders.forEach((value, key) => {
       response.headers.set(key, value);
@@ -227,5 +232,9 @@ export async function proxy(request: NextRequest) {
 }
 
 export const config = {
-  matcher: ['/((?!api|_next/static|_next/image|favicon.ico|share/|fonts/).*)'],
+  matcher: [
+    '/((?!api|_next/static|_next/image|favicon.ico|share/|fonts/).*)',
+    '/api/admin/:path*',
+    '/api/webbuilder/:path*',
+  ],
 };

@@ -1,6 +1,6 @@
 // lib/discovery/scanners/doc.scanner.ts
 import matter from 'gray-matter';
-import { supabase } from '@/lib/supabase/client';
+import sql from '@/lib/db/admin';
 import { upsertPage, SITE_ID } from '../register';
 import { getPrivateStorage } from '@/lib/storage/factory';
 import { readR2Json } from './utils';
@@ -9,12 +9,6 @@ import type { ProgressCallback } from './types';
 
 const storage = getPrivateStorage();
 
-/**
- * 扫描文档
- * 数据源：
- * - 索引：数据库 documents 表
- * - 内容：R2 docs/${locale}/${lib_id}/${file}
- */
 export async function scanDocs(locale: string, onProgress?: ProgressCallback): Promise<void> {
   onProgress?.(`📁 从数据库分页获取文档列表 (locale=${locale})`, 'info');
 
@@ -39,50 +33,51 @@ export async function scanDocs(locale: string, onProgress?: ProgressCallback): P
     totalFailed = 0,
     totalSkipped = 0;
 
-  // 获取总数
-  const { count: totalCount, error: countError } = await supabase
-    .from('documents')
-    .select('*', { count: 'exact', head: true })
-    .eq('site_id', SITE_ID)
-    .eq('locale', locale);
-
-  if (countError) {
+  // 2. 获取总数
+  let totalCount = 0;
+  try {
+    const countRows = await sql<{ count: string }[]>`
+      SELECT COUNT(*)::text AS count FROM public.documents
+      WHERE site_id = ${SITE_ID} AND locale = ${locale}
+    `;
+    totalCount = parseInt(countRows[0]?.count || '0', 10);
+  } catch (countError: any) {
     onProgress?.(`❌ 获取文档总数失败: ${countError.message}`, 'error');
     throw countError;
   }
-  onProgress?.(`📊 总共 ${totalCount || 0} 篇文档，分页处理中`, 'info');
+  onProgress?.(`📊 总共 ${totalCount} 篇文档，分页处理中`, 'info');
 
   while (true) {
-    const { data: docs, error } = await supabase
-      .from('documents')
-      .select('*')
-      .eq('site_id', SITE_ID)
-      .eq('locale', locale)
-      .range(page * PAGE_SIZE, (page + 1) * PAGE_SIZE - 1)
-      .order('order_index', { ascending: true });
-
-    if (error) {
+    let docs: any[];
+    try {
+      docs = await sql<any[]>`
+        SELECT * FROM public.documents
+        WHERE site_id = ${SITE_ID}
+          AND locale = ${locale}
+        ORDER BY order_index ASC
+        LIMIT ${PAGE_SIZE} OFFSET ${page * PAGE_SIZE}
+      `;
+    } catch (error: any) {
       onProgress?.(`❌ 查询文档表失败: ${error.message}`, 'error');
       throw error;
     }
     if (!docs || docs.length === 0) break;
 
-    // 查询当前批次已存在的 pages
-    const docIds = docs.map(d => d.id);
-    const pageIds = docIds.map(id => `doc:${id}`);
-    const { data: existingPages, error: pagesError } = await supabase
-      .from('pages')
-      .select('id, updatedAt, content_hash')
-      .in('id', pageIds)
-      .eq('site_id', SITE_ID)
-      .eq('locale', locale);
-
+    // 3. 查询当前批次已存在的 pages
+    const docIds = docs.map((d) => d.id);
+    const pageIds = docIds.map((id) => `doc:${id}`);
     const pageMap = new Map<string, { updatedAt: string; content_hash: string }>();
-    if (!pagesError && existingPages) {
+    try {
+      const existingPages = await sql<{ id: string; updatedAt: string; content_hash: string }[]>`
+        SELECT id, "updatedAt", content_hash FROM public.pages
+        WHERE id IN ${sql(pageIds)}
+          AND site_id = ${SITE_ID}
+          AND locale = ${locale}
+      `;
       for (const p of existingPages) {
         pageMap.set(p.id, { updatedAt: p.updatedAt, content_hash: p.content_hash });
       }
-    } else if (pagesError) {
+    } catch (pagesError: any) {
       onProgress?.(`⚠️ 查询现有页面失败: ${pagesError.message}，将强制全部重新处理`, 'warning');
     }
 
@@ -104,7 +99,6 @@ export async function scanDocs(locale: string, onProgress?: ProgressCallback): P
       const pageId = `doc:${docId}`;
       const docUpdatedAt = doc.updated_at || new Date().toISOString();
 
-      // 跳过逻辑
       const existing = pageMap.get(pageId);
       if (existing && existing.updatedAt >= docUpdatedAt) {
         skipped++;
@@ -113,7 +107,6 @@ export async function scanDocs(locale: string, onProgress?: ProgressCallback): P
         continue;
       }
 
-      // 读取 MD 内容
       const libSlug = libMap.get(doc.lib_id) || doc.lib_id;
       const mdKey = `docs/${locale}/${doc.lib_id}/${doc.file}`;
       let mdContent = '';
@@ -132,7 +125,6 @@ export async function scanDocs(locale: string, onProgress?: ProgressCallback): P
         }
       }
 
-      // 使用 mapper 构建 PageData，传入合并后的数据
       const pageData = mapDocToPageData(doc, mdData, libSlug, mdContent);
       try {
         await upsertPage(pageData, locale);

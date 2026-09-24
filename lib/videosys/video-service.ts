@@ -1,8 +1,8 @@
 // lib/videosys/video-service.ts
+import sql from '@/lib/db/admin';
 import { insertVideo, updateVideo, deleteVideo, getVideoById } from './videos-db';
 import { saveVideoMarkdown, loadVideoMarkdown, deleteVideoMarkdown } from './videos-fs';
 import { VideoIndex, VideoData } from './types';
-import { supabase } from '@/lib/supabase/client';
 import { registerEntity } from '@/lib/discovery/services/business-register-pages.service';
 import { deletePage } from '@/lib/discovery/register';
 import { revalidateTag } from 'next/cache';
@@ -17,20 +17,11 @@ const CACHE_TAGS = {
   categories: 'video-categories',
 };
 
-/**
- * 清空所有视频相关的 Next.js 缓存标签
- * 在写操作（创建/更新/删除/翻译）后调用
- */
 function invalidateVideoCache() {
   try {
     revalidateTag(CACHE_TAGS.list);
     revalidateTag(CACHE_TAGS.detail);
-    // 如果视频变更可能影响分类页/配置页，也一并刷新
-    // revalidateTag(CACHE_TAGS.categories);  // 视需要开启
-    // revalidateTag(CACHE_TAGS.config);
   } catch (err) {
-    // revalidateTag 只能在 Server Action / Route Handler 中调用
-    // 在纯服务端函数中调用可能会失败，捕获并忽略
     console.warn('[video-service] revalidateTag failed:', err);
   }
 }
@@ -56,16 +47,10 @@ function setVideoCache(key: string, data: any) {
   videoListCache[key] = { data, timestamp: Date.now() };
 }
 
-/**
- * 清空内存缓存（写操作后必须调用）
- */
 export function invalidateVideoListCache() {
   Object.keys(videoListCache).forEach(k => delete videoListCache[k]);
 }
 
-/**
- * 统一清缓存：内存 + Next.js unstable_cache
- */
 function clearAllVideoCache() {
   invalidateVideoListCache();
   invalidateVideoCache();
@@ -148,7 +133,6 @@ async function upsertVideo(video: VideoData, locale: string): Promise<void> {
   }
   await saveVideoMarkdown(video, locale);
   await registerVideoToPages(video, locale);
-  // 写操作后清所有缓存
   clearAllVideoCache();
 }
 
@@ -179,11 +163,10 @@ export async function deleteVideoService(id: string, locale: string): Promise<vo
   } catch (err) {
     console.error(`删除视频 pages 失败 (${pageId}):`, err);
   }
-  // 删除后清所有缓存
   clearAllVideoCache();
 }
 
-// ========== 单语言分页列表（带内存缓存） ==========
+// ========== 单语言分页列表（带内存缓存）—— 已迁移 ==========
 export async function listVideos(options: {
   locale: string;
   title?: string;
@@ -197,44 +180,52 @@ export async function listVideos(options: {
   const cached = getVideoCache(cacheKey);
   if (cached) return cached;
 
-  const from = (page - 1) * limit;
-  const to = from + limit - 1;
+  const offset = (page - 1) * limit;
 
-  let query = supabase
-    .from('videos')
-    .select('*', { count: 'exact' })
-    .eq('site_id', DEFAULT_SITE_ID)
-    .eq('locale', locale);
-
+  const conditions: any[] = [
+    sql`site_id = ${DEFAULT_SITE_ID}`,
+    sql`locale = ${locale}`,
+  ];
   if (!includeInvisible) {
-    query = query.eq('visible', 1);
+    conditions.push(sql`visible = 1`);
   }
-
   if (title) {
-    query = query.ilike('title', `%${title}%`);
+    conditions.push(sql`title ILIKE ${'%' + title + '%'}`);
   }
   if (category) {
-    query = query.eq('category_key', category);
+    conditions.push(sql`category_key = ${category}`);
   }
+  const whereClause = conditions.reduce(
+    (acc, c, i) => (i === 0 ? c : sql`${acc} AND ${c}`),
+    sql``
+  );
 
-  const { data, error, count } = await query
-    .order('published_at', { ascending: false })
-    .range(from, to);
+  try {
+    const countRows = await sql<{ count: string }[]>`
+      SELECT COUNT(*)::text AS count FROM public.videos WHERE ${whereClause}
+    `;
+    const total = parseInt(countRows[0]?.count || '0', 10);
 
-  if (error) {
+    const items = await sql<any[]>`
+      SELECT * FROM public.videos
+      WHERE ${whereClause}
+      ORDER BY published_at DESC
+      LIMIT ${limit} OFFSET ${offset}
+    `;
+
+    const result = { items, total, page, limit };
+    setVideoCache(cacheKey, result);
+    return result;
+  } catch (error: any) {
     console.error('listVideos error:', error);
     throw error;
   }
-
-  const result = { items: data || [], total: count || 0, page, limit };
-  setVideoCache(cacheKey, result);
-  return result;
 }
 
-// ========== 批量多语言列表（带内存缓存 + 字段裁剪） ==========
+// ========== 批量多语言列表 —— 已迁移 ==========
 
 const VIDEO_LIST_FIELDS =
-  'id,locale,title,slug,category_key,source_type,video_id,thumbnail,duration,visible,flagged,template,seo_keywords,seo_title,seo_description,order_index,published_at,updated_at,created_at,tags';
+  'id, locale, title, slug, category_key, source_type, video_id, thumbnail, duration, visible, flagged, template, seo_keywords, seo_title, seo_description, order_index, published_at, updated_at, created_at, tags';
 
 export async function listVideosBatch(
   locales: string[],
@@ -246,35 +237,42 @@ export async function listVideosBatch(
   const cached = getVideoCache(cacheKey);
   if (cached) return cached;
 
-  let query = supabase
-    .from('videos')
-    .select(VIDEO_LIST_FIELDS)
-    .eq('site_id', DEFAULT_SITE_ID)
-    .in('locale', locales);
-
+  const conditions: any[] = [
+    sql`site_id = ${DEFAULT_SITE_ID}`,
+    sql`locale IN ${sql(locales)}`,
+  ];
   if (!includeInvisible) {
-    query = query.eq('visible', 1);
+    conditions.push(sql`visible = 1`);
   }
+  const whereClause = conditions.reduce(
+    (acc, c, i) => (i === 0 ? c : sql`${acc} AND ${c}`),
+    sql``
+  );
 
-  const { data, error } = await query;
-  if (error) {
+  try {
+    const data = await sql<any[]>`
+      SELECT ${sql(VIDEO_LIST_FIELDS.split(',').map(f => f.trim()))}
+      FROM public.videos
+      WHERE ${whereClause}
+    `;
+
+    const result: Record<string, VideoData[]> = {};
+    locales.forEach(loc => { result[loc] = []; });
+    data.forEach((video: any) => {
+      const loc = video.locale;
+      if (result[loc]) {
+        result[loc].push(video);
+      } else {
+        result[loc] = [video];
+      }
+    });
+
+    setVideoCache(cacheKey, result);
+    return result;
+  } catch (error: any) {
     console.error('listVideosBatch error:', error);
     throw error;
   }
-
-  const result: Record<string, VideoData[]> = {};
-  locales.forEach(loc => { result[loc] = []; });
-  (data || []).forEach((video: any) => {
-    const loc = video.locale;
-    if (result[loc]) {
-      result[loc].push(video);
-    } else {
-      result[loc] = [video];
-    }
-  });
-
-  setVideoCache(cacheKey, result);
-  return result;
 }
 
 // ========== 创建/更新/复制/翻译 ==========

@@ -1,5 +1,6 @@
+// app/api/collect/plugin/route.ts
 import { NextRequest, NextResponse } from 'next/server';
-import { supabase } from '@/lib/supabase/client';
+import sql from '@/lib/db/admin';
 
 function addCORSHeaders(response: NextResponse) {
   response.headers.set('Access-Control-Allow-Origin', '*');
@@ -18,11 +19,18 @@ export async function POST(req: NextRequest) {
   console.log('🔍 Received token:', token);
 
   // 1. 验证 token
-  const { data: admin, error } = await supabase
-    .from('admin_users')
-    .select('id, site_id')
-    .eq('api_token', token)
-    .maybeSingle();
+  let admin: { id: string; site_id: string } | undefined;
+  try {
+    const rows = await sql<{ id: string; site_id: string }[]>`
+      SELECT id, site_id FROM public.admin_users
+      WHERE api_token = ${token}
+      LIMIT 1
+    `;
+    admin = rows[0];
+  } catch (error) {
+    console.error('❌ Token 查询失败:', error);
+    return addCORSHeaders(NextResponse.json({ error: 'Invalid token' }, { status: 401 }));
+  }
 
   if (!admin) {
     console.error('❌ Invalid token');
@@ -30,11 +38,18 @@ export async function POST(req: NextRequest) {
   }
 
   // 2. 获取租户 ID
-  const { data: site } = await supabase
-    .from('sites')
-    .select('tenant_id')
-    .eq('site_id', admin.site_id)
-    .maybeSingle();
+  let site: { tenant_id: string | null } | undefined;
+  try {
+    const rows = await sql<{ tenant_id: string | null }[]>`
+      SELECT tenant_id FROM public.sites
+      WHERE site_id = ${admin.site_id}
+      LIMIT 1
+    `;
+    site = rows[0];
+  } catch (error) {
+    console.error('❌ Site 查询失败:', error);
+    return addCORSHeaders(NextResponse.json({ error: 'Site configuration missing' }, { status: 500 }));
+  }
 
   if (!site) {
     console.error('❌ Site not found for site_id:', admin.site_id);
@@ -51,27 +66,28 @@ export async function POST(req: NextRequest) {
   }
 
   // 4. 存入数据库
-  const { data: inserted, error: insertError } = await supabase
-    .from('collected_products')
-    .insert({
+  try {
+    const insertData: any = {
       tenant_id: tenantId,
       site_id: siteId,
       source_url: product.source_url,
-      platform: product.platform,
+      platform: product.platform ?? null,
       title: product.title,
       main_image_url: product.images?.[0] || null,
       price: product.price ? parseFloat(product.price) : null,
       raw_data: product,
       status: 'unclaimed',
-    })
-    .select()
-    .single();
+    };
 
-  if (insertError) {
-    console.error('❌ Insert error:', insertError);
-    return addCORSHeaders(NextResponse.json({ error: insertError.message }, { status: 500 }));
+    const inserted = await sql<{ id: number }[]>`
+      INSERT INTO public.collected_products ${sql(insertData)}
+      RETURNING id
+    `;
+
+    console.log('✅ Product saved, id:', inserted[0]?.id);
+    return addCORSHeaders(NextResponse.json({ success: true, id: inserted[0]?.id }));
+  } catch (error: any) {
+    console.error('❌ Insert error:', error);
+    return addCORSHeaders(NextResponse.json({ error: error.message }, { status: 500 }));
   }
-
-  console.log('✅ Product saved, id:', inserted.id);
-  return addCORSHeaders(NextResponse.json({ success: true, id: inserted.id }));
 }

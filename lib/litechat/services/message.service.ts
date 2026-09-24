@@ -1,6 +1,5 @@
 // lib/litechat/services/message.service.ts
-import { supabase } from '@/lib/supabase/client';
-import { getSupabaseAdminClient } from '@/lib/supabase/admin-client';
+import sql from '@/lib/db/admin';
 import { getConversationById } from './conversation.service';
 import { Message } from '../types';
 
@@ -19,35 +18,28 @@ export async function getMessagesByConversation(
     throw new Error('会话不存在或无权访问');
   }
 
-  const { data, error } = await supabase
-    .schema(CHAT_SCHEMA)
-    .from('messages')
-    .select('*')
-    .eq('conversation_id', conversationId)
-    .order('created_at', { ascending: true });
-
-  if (error) {
+  try {
+    const rows = await sql`
+      SELECT * FROM chat.messages
+      WHERE conversation_id = ${conversationId}
+      ORDER BY created_at ASC
+    `;
+    return rows;
+  } catch (error) {
     console.error('获取消息失败:', error);
     throw new Error('获取消息失败');
   }
-  return data || [];
 }
 
 /**
  * 分页获取会话消息（支持时间范围和数量限制）
- * @param conversationId 会话ID
- * @param options.limit 每页数量，默认30
- * @param options.before 获取此时间之前的消息（ISO字符串），用于加载更早的消息
- * @param options.after 获取此时间之后的消息（ISO字符串），用于初始加载（如最近7天）
- * @param siteId 站点ID
- * @returns { messages: Message[], hasMore: boolean }
  */
 export async function getMessagesWithPagination(
   conversationId: string,
   options: {
     limit?: number;
-    before?: string; // ISO 时间字符串
-    after?: string;  // ISO 时间字符串
+    before?: string;
+    after?: string;
   },
   siteId: string = DEFAULT_SITE_ID
 ): Promise<{ messages: Message[]; hasMore: boolean }> {
@@ -57,30 +49,32 @@ export async function getMessagesWithPagination(
   }
 
   const { limit = 30, before, after } = options;
-  let query = supabase
-    .schema(CHAT_SCHEMA)
-    .from('messages')
-    .select('*')
-    .eq('conversation_id', conversationId)
-    .order('created_at', { ascending: false })
-    .limit(limit + 1); // 多取一条判断是否有更多
 
-  if (before) {
-    query = query.lt('created_at', before);
-  }
-  if (after) {
-    query = query.gt('created_at', after);
-  }
+  // 动态 WHERE 条件
+  const conditions: any[] = [sql`conversation_id = ${conversationId}`];
+  if (before) conditions.push(sql`created_at < ${before}`);
+  if (after) conditions.push(sql`created_at > ${after}`);
 
-  const { data, error } = await query;
-  if (error) {
+  const whereClause = conditions.reduce(
+    (acc, cond, i) => (i === 0 ? cond : sql`${acc} AND ${cond}`),
+    sql``
+  );
+
+  try {
+    const rows = await sql<Message[]>`
+      SELECT * FROM chat.messages
+      WHERE ${whereClause}
+      ORDER BY created_at DESC
+      LIMIT ${limit + 1}
+    `;
+
+    const hasMore = rows.length > limit;
+    const messages = rows.slice(0, limit).reverse();
+    return { messages, hasMore };
+  } catch (error) {
     console.error('获取分页消息失败:', error);
     throw new Error('获取消息失败');
   }
-
-  const hasMore = (data?.length || 0) > limit;
-  const messages = (data || []).slice(0, limit).reverse(); // 反转成正序（从旧到新）
-  return { messages, hasMore };
 }
 
 export async function sendMessage(
@@ -100,21 +94,15 @@ export async function sendMessage(
     throw new Error('会话不存在或无权访问');
   }
 
-  // 根据发送者类型选择客户端
-  const client = senderType === 'agent' ? getSupabaseAdminClient() : supabase;
-
   // 如果是管理员回复，自动更新会话状态
   if (senderType === 'agent') {
-    const adminClient = getSupabaseAdminClient();
-    await adminClient
-      .schema(CHAT_SCHEMA)
-      .from('conversations')
-      .update({
-        status: 'active',
-        agent_id: senderId,
-        updated_at: new Date().toISOString(),
-      })
-      .eq('id', conversationId);
+    await sql`
+      UPDATE chat.conversations
+      SET status = 'active',
+          agent_id = ${senderId ?? null},
+          updated_at = ${new Date().toISOString()}
+      WHERE id = ${conversationId}
+    `;
   }
 
   // 插入消息
@@ -134,42 +122,43 @@ export async function sendMessage(
 
   console.log('[sendMessage] 插入数据:', JSON.stringify(insertData, null, 2));
 
-  const { data, error } = await client
-    .schema(CHAT_SCHEMA)
-    .from('messages')
-    .insert(insertData)
-    .select()
-    .single();
+  try {
+    const rows = await sql<Message[]>`
+      INSERT INTO chat.messages ${sql(insertData)}
+      RETURNING *
+    `;
 
-  if (error) {
-    console.error('[sendMessage] 插入失败:', JSON.stringify(error, null, 2));
-    throw new Error(`发送消息失败: ${error.message || error.details || '未知错误'}`);
+    if (!rows[0]) {
+      throw new Error('插入消息未返回数据');
+    }
+
+    // 更新会话最后活动时间
+    await sql`
+      UPDATE chat.conversations
+      SET last_message_at = ${now}
+      WHERE id = ${conversationId}
+    `;
+
+    return rows[0];
+  } catch (error: any) {
+    console.error('[sendMessage] 插入失败:', error);
+    throw new Error(`发送消息失败: ${error.message || '未知错误'}`);
   }
-
-  // 更新会话最后活动时间
-  await supabase
-    .schema(CHAT_SCHEMA)
-    .from('conversations')
-    .update({ last_message_at: now })
-    .eq('id', conversationId);
-
-  return data;
 }
 
 export async function markMessagesAsRead(
   conversationId: string,
   siteId: string = DEFAULT_SITE_ID
 ) {
-  const supabaseAdmin = getSupabaseAdminClient();
-  const { error } = await supabaseAdmin
-    .schema(CHAT_SCHEMA)
-    .from('messages')
-    .update({ is_read: true })
-    .eq('conversation_id', conversationId)
-    .eq('sender_type', 'visitor')
-    .eq('is_read', false);
-
-  if (error) {
+  try {
+    await sql`
+      UPDATE chat.messages
+      SET is_read = true
+      WHERE conversation_id = ${conversationId}
+        AND sender_type = 'visitor'
+        AND is_read = false
+    `;
+  } catch (error) {
     console.error('标记已读失败:', error);
     throw new Error('标记已读失败');
   }
@@ -179,18 +168,17 @@ export async function getUnreadCount(
   conversationId: string,
   siteId: string = DEFAULT_SITE_ID
 ) {
-  const supabaseAdmin = getSupabaseAdminClient();
-  const { count, error } = await supabaseAdmin
-    .schema(CHAT_SCHEMA)
-    .from('messages')
-    .select('*', { count: 'exact', head: true })
-    .eq('conversation_id', conversationId)
-    .eq('sender_type', 'visitor')
-    .eq('is_read', false);
-
-  if (error) {
+  try {
+    const rows = await sql<{ count: string }[]>`
+      SELECT COUNT(*)::text AS count
+      FROM chat.messages
+      WHERE conversation_id = ${conversationId}
+        AND sender_type = 'visitor'
+        AND is_read = false
+    `;
+    return parseInt(rows[0]?.count || '0', 10);
+  } catch (error) {
     console.error('获取未读消息数失败:', error);
     return 0;
   }
-  return count || 0;
 }

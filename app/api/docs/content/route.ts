@@ -2,7 +2,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import NodeCache from 'node-cache';
 import { getCachedDocsLibBySlug, getCachedDocBySlug } from '@/lib/docs';
-import { supabase } from '@/lib/supabase/client';
+import sql from '@/lib/db/admin';
 
 const DEFAULT_SITE_ID = process.env.NEXT_PUBLIC_SITE_ID || '000001';
 
@@ -41,7 +41,6 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: 'Document not found' }, { status: 404 });
     }
 
-    // ✅ 修复：docData 直接就是 { id, title, slug, content, seo_* }
     const docId = docData.id;
     const products = await getAssociatedProducts(docId, locale);
 
@@ -75,36 +74,32 @@ export async function GET(request: NextRequest) {
 
 async function getAssociatedProducts(docId: string, locale: string) {
   try {
-    const { data: associations, error: assocError } = await supabase
-      .from('resource_product')
-      .select('product_id')
-      .eq('site_id', DEFAULT_SITE_ID)
-      .eq('resource_type', 'document')
-      .eq('resource_id', docId)
-      .order('sort_order', { ascending: true });
+    // 1. 查询关联
+    const associations = await sql<{ product_id: string }[]>`
+      SELECT product_id FROM public.resource_product
+      WHERE site_id = ${DEFAULT_SITE_ID}
+        AND resource_type = 'document'
+        AND resource_id = ${docId}
+      ORDER BY sort_order ASC
+    `;
 
-    if (assocError || !associations || associations.length === 0) {
+    if (!associations || associations.length === 0) {
       return [];
     }
 
     const productIds = associations.map((a) => a.product_id);
 
-    const { data: products, error: productError } = await supabase
-      .from('products')
-      .select(
-        'productId, product_name, slug, main_image_url, price_tiers, currency, availability, min_order_quantity'
-      )
-      .eq('site_id', DEFAULT_SITE_ID)
-      .eq('locale', locale)
-      .in('productId', productIds)
-      .is('parent_product_id', null);
+    // 2. 查询产品详情
+    const products = await sql<any[]>`
+      SELECT "productId", product_name, slug, main_image_url, price_tiers, currency, availability, min_order_quantity
+      FROM public.products
+      WHERE site_id = ${DEFAULT_SITE_ID}
+        AND locale = ${locale}
+        AND "productId" IN ${sql(productIds)}
+        AND parent_product_id IS NULL
+    `;
 
-    if (productError) {
-      console.error('[API] Products query error:', productError);
-      return [];
-    }
-
-    return (products || []).map((p) => {
+    return products.map((p) => {
       let priceTiers: any[] = [];
       if (p.price_tiers) {
         try {

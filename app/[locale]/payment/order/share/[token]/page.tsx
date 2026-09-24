@@ -1,15 +1,12 @@
 // app/[locale]/payment/order/share/[token]/page.tsx
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, use } from 'react';
 import { useRouter } from 'next/navigation';
-import { orderService } from '@/lib/payment/services/order.service';
-import { accountService } from '@/lib/payment/services/account.service';
-import { getSiteSettings } from '@/lib/getSiteSettings';
 import { Copy, Printer, Loader2, ChevronDown, ChevronUp, Shield, Check, Truck, CreditCard, Clock, ExternalLink } from 'lucide-react';
-import { 
-  BANK_LOGOS, 
-  PRESET_LOGOS, 
+import {
+  BANK_LOGOS,
+  PRESET_LOGOS,
   DEFAULT_LOGO,
   getBankLogo as getBankLogoFromConfig,
 } from '@/lib/payment/types/logos';
@@ -17,10 +14,10 @@ import { getCountryFlag, getCountryNameEn, getCountryNameZh } from '@/lib/countr
 import { getCustomerProfile } from '@/lib/account/client';
 
 interface ShareOrderPageProps {
-  params: {
+  params: Promise<{
     locale: string;
     token: string;
-  };
+  }>;
 }
 
 // ✅ 完整的订单类型
@@ -87,6 +84,14 @@ interface OrderData {
   }>;
 }
 
+// ============================================================
+// ✅ 数值安全格式化函数
+// ============================================================
+const formatAmount = (value: any): string => {
+  const num = Number(value);
+  return isNaN(num) ? '0.00' : num.toFixed(2);
+};
+
 // ✅ 使用 lib/countries.ts 获取国家旗帜和名称
 const getCountryDisplay = (countryCode: string) => {
   if (!countryCode) return { flag: '🌍', name: 'Unknown' };
@@ -142,8 +147,8 @@ const renderLogo = (logo: string, alt: string) => {
     );
   }
   return (
-    <img 
-      src={logo} 
+    <img
+      src={logo}
       alt={alt}
       className="w-[100px] h-[50px] object-contain rounded-lg border bg-white p-1"
       style={{
@@ -158,9 +163,9 @@ const renderLogo = (logo: string, alt: string) => {
 };
 
 export default function ShareOrderPage({ params }: ShareOrderPageProps) {
-  const { locale, token } = params;
+  const { locale, token } = use(params);
   const router = useRouter();
-  
+
   const [loading, setLoading] = useState(true);
   const [order, setOrder] = useState<OrderData | null>(null);
   const [sellerInfo, setSellerInfo] = useState<any>(null);
@@ -169,38 +174,28 @@ export default function ShareOrderPage({ params }: ShareOrderPageProps) {
   const [showPaymentDetail, setShowPaymentDetail] = useState(false);
   const [accountCopiedIndex, setAccountCopiedIndex] = useState<number | null>(null);
   const [showTrackingImage, setShowTrackingImage] = useState(false);
-  
-  // ✅ 权限验证状态
+
   const [authorized, setAuthorized] = useState<boolean | null>(null);
   const [currentUser, setCurrentUser] = useState<any>(null);
 
   // ============================================================
   // ✅ 主题 CSS 变量
   // ============================================================
-  // ---- 页面容器 ----
   const pageBg = 'var(--order-share-bg, #f9fafb)';
   const pageText = 'var(--order-share-text-color, #374151)';
-  
-  // ---- 卡片 ----
   const cardBg = 'var(--order-share-card-bg, #ffffff)';
   const cardShadow = 'var(--order-share-card-shadow, 0 10px 15px -3px rgba(0,0,0,0.1))';
   const cardRadius = 'var(--order-share-card-radius, 0.5rem)';
-  
-  // ---- 标题 ----
   const titleColor = 'var(--order-share-title-color, #111827)';
   const mutedColor = 'var(--order-share-muted-color, #6b7280)';
   const mutedBg = 'var(--order-share-muted-bg, #f3f4f6)';
   const borderColor = 'var(--order-share-border-color, #e5e7eb)';
-  
-  // ---- 按钮 ----
   const primaryBtnBg = 'var(--order-share-primary-btn-bg, #2563eb)';
   const primaryBtnHover = 'var(--order-share-primary-btn-hover, #1d4ed8)';
   const primaryBtnText = 'var(--order-share-primary-btn-text, #ffffff)';
   const secondaryBtnBg = 'var(--order-share-secondary-btn-bg, #f3f4f6)';
   const secondaryBtnHover = 'var(--order-share-secondary-btn-hover, #e5e7eb)';
   const secondaryBtnText = 'var(--order-share-secondary-btn-text, #374151)';
-  
-  // ---- 状态色 ----
   const successColor = 'var(--order-share-success-color, #16a34a)';
   const successBg = 'var(--order-share-success-bg, #dcfce7)';
   const successText = 'var(--order-share-success-text, #166534)';
@@ -211,36 +206,43 @@ export default function ShareOrderPage({ params }: ShareOrderPageProps) {
   const infoBg = 'var(--order-share-info-bg, #eff6ff)';
   const infoBorder = 'var(--order-share-info-border, #bfdbfe)';
   const infoText = 'var(--order-share-info-text, #1e40af)';
-  
-  // ---- 加载状态 ----
   const loadingColor = 'var(--order-share-loading-color, #2563eb)';
 
+  // ============================================================
   // ✅ 第一步：验证用户登录和权限
+  // ============================================================
   useEffect(() => {
     const checkAuth = async () => {
       try {
-        // 1. 获取当前登录客户
         const userData = await getCustomerProfile();
-        
+
         if (!userData) {
-          // 未登录，跳转到登录页，登录后返回
           const redirectUrl = encodeURIComponent(`/payment/order/share/${token}`);
           router.push(`/${locale}/login?redirect=${redirectUrl}`);
           return;
         }
-        
+
         setCurrentUser(userData);
-        
-        // 2. 加载订单数据
-        const orderResult = await orderService.getByShareToken(token);
+
+        const res = await fetch(`/api/payment/orders/share/${token}`);
+        if (!res.ok) {
+          if (res.status === 404) {
+            router.replace('/404');
+            return;
+          }
+          throw new Error(`获取订单失败: ${res.status}`);
+        }
+        const data = await res.json();
+
+        const orderResult = data.data;
         if (!orderResult) {
           router.replace('/404');
           return;
         }
-        
+
         setOrder(orderResult as OrderData);
-        
-        // 3. ✅ 验证邮箱是否匹配
+        setPaymentAccounts(data.accounts || []);
+
         if (userData.email && orderResult.buyer_email) {
           if (userData.email.toLowerCase() === orderResult.buyer_email.toLowerCase()) {
             setAuthorized(true);
@@ -250,63 +252,26 @@ export default function ShareOrderPage({ params }: ShareOrderPageProps) {
         } else {
           setAuthorized(false);
         }
-        
-        // 4. ✅ 加载站点设置 - 使用正确的字段名
+
+        // ✅ 修复：站点设置 API 返回 { success: true, data: {...} } 结构
         try {
-          const settings = await getSiteSettings();
-          setSellerInfo({
-            company: settings.companyName || '',
-            address: settings.address || '',
-            phone: settings.phone || '',
-            email: settings.email || '',
-          });
+          const settingsRes = await fetch('/api/settings/basic');
+          if (settingsRes.ok) {
+            const result = await settingsRes.json();
+            const settings = result.data || {};
+            setSellerInfo({
+              company: settings.companyName || '',
+              address: settings.registeredAddress || '',
+              phone: settings.contactPhone || '',
+              email: settings.contactEmail || '',
+            });
+          } else {
+            setSellerInfo({ company: '', address: '', phone: '', email: '' });
+          }
         } catch (settingsError) {
           console.warn('[ShareOrderPage] 获取站点设置失败:', settingsError);
-          setSellerInfo({
-            company: '',
-            address: '',
-            phone: '',
-            email: '',
-          });
+          setSellerInfo({ company: '', address: '', phone: '', email: '' });
         }
-
-        // 5. 获取支付账户信息
-        try {
-          const accounts: any[] = [];
-          const selectedIds = (orderResult as any).selected_account_ids || [];
-          
-          if (selectedIds.length > 0) {
-            for (const id of selectedIds) {
-              try {
-                const account = await accountService.getById(orderResult.site_id, id);
-                if (account) {
-                  accounts.push(account);
-                }
-              } catch (e) {
-                console.warn('获取账号失败:', id, e);
-              }
-            }
-          } else {
-            const methodMap: Record<string, string> = {
-              'bank_transfer': 'tt',
-              'online_payment': 'paypal',
-              'qr_code': 'wechat'
-            };
-            const method = methodMap[orderResult.payment_method] || 'tt';
-            const accountList = await accountService.list(orderResult.site_id, {
-              method: method
-            });
-            if (accountList && accountList.length > 0) {
-              const defaultAccount = accountList.find(a => a.is_default) || accountList[0];
-              accounts.push(defaultAccount);
-            }
-          }
-          
-          setPaymentAccounts(accounts);
-        } catch (accError) {
-          console.warn('获取支付账户失败:', accError);
-        }
-        
       } catch (error) {
         console.error('[ShareOrderPage] 加载失败:', error);
         router.replace('/404');
@@ -314,11 +279,10 @@ export default function ShareOrderPage({ params }: ShareOrderPageProps) {
         setLoading(false);
       }
     };
-    
+
     checkAuth();
   }, [token, router, locale]);
 
-  // ✅ 复制订单信息（含脱敏）
   const handleCopy = async () => {
     if (!order) return;
     const copyText = generateOrderCopyText(order);
@@ -367,7 +331,6 @@ export default function ShareOrderPage({ params }: ShareOrderPageProps) {
     );
   }
 
-  // ✅ 无权限访问
   if (authorized === false) {
     return (
       <div className="min-h-screen flex items-center justify-center"
@@ -416,16 +379,9 @@ export default function ShareOrderPage({ params }: ShareOrderPageProps) {
     return null;
   }
 
-  // ============================================================
-  // ✅ 支持的语言列表
-  // ============================================================
   const SUPPORTED_LOCALES = ['zh', 'en'];
-  // ✅ 如果当前语言不在支持列表中，默认使用英文
   const lang = SUPPORTED_LOCALES.includes(locale) ? locale : 'en';
 
-  // ============================================================
-  // ✅ 语言映射
-  // ============================================================
   const t = {
     zh: {
       title: '订单详情',
@@ -521,6 +477,10 @@ export default function ShareOrderPage({ params }: ShareOrderPageProps) {
       fully_paid_badge: '已付全款',
       no_payment_needed: '无需支付',
       paid_in_full: '已付清',
+      account_holder: '收款户名',
+      account_identifier: '账号',
+      paypal_email: 'PayPal 邮箱',
+      no_qr_code: '暂无二维码',
     },
     en: {
       title: 'Order Details',
@@ -616,13 +576,16 @@ export default function ShareOrderPage({ params }: ShareOrderPageProps) {
       fully_paid_badge: 'Fully Paid',
       no_payment_needed: 'No Payment Needed',
       paid_in_full: 'Paid in Full',
+      account_holder: 'Account Holder',
+      account_identifier: 'Account ID',
+      paypal_email: 'PayPal Email',
+      no_qr_code: 'No QR Code',
     },
   };
 
   const text = t[lang];
   const siteName = process.env.NEXT_PUBLIC_SITE_NAME || '';
 
-  // ✅ 状态映射
   const statusMap: Record<string, Record<string, string>> = {
     zh: {
       draft: '草稿',
@@ -641,14 +604,8 @@ export default function ShareOrderPage({ params }: ShareOrderPageProps) {
   };
 
   const sentStatusMap: Record<string, Record<string, string>> = {
-    zh: {
-      sent: '已发送',
-      unsent: '未发送',
-    },
-    en: {
-      sent: 'Sent',
-      unsent: 'Unsent',
-    },
+    zh: { sent: '已发送', unsent: '未发送' },
+    en: { sent: 'Sent', unsent: 'Unsent' },
   };
 
   const paymentMethodMap: Record<string, Record<string, string>> = {
@@ -664,7 +621,6 @@ export default function ShareOrderPage({ params }: ShareOrderPageProps) {
     },
   };
 
-  // ✅ 运输方式映射
   const shippingMethodMap: Record<string, Record<string, string>> = {
     zh: {
       '快递': '快递',
@@ -684,7 +640,6 @@ export default function ShareOrderPage({ params }: ShareOrderPageProps) {
     },
   };
 
-  // ✅ 贸易术语映射
   const tradeTermMap: Record<string, Record<string, string>> = {
     zh: {
       'EXW': '工厂交货',
@@ -715,18 +670,19 @@ export default function ShareOrderPage({ params }: ShareOrderPageProps) {
   };
 
   const statusLabel = statusMap[lang][order.status] || order.status;
-  const sentStatusLabel = order.sent_status ? sentStatusMap[lang][order.sent_status] || order.sent_status : '';
+  const sentStatusLabel = order.sent_status
+    ? sentStatusMap[lang][order.sent_status] || order.sent_status
+    : '';
   const paymentMethodLabel = paymentMethodMap[lang][order.payment_method] || order.payment_method;
-  
-  const shippingMethodDisplay = order.shipping_method 
-    ? (shippingMethodMap[lang][order.shipping_method] || order.shipping_method)
-    : '-';
-  
-  const tradeTermDisplay = order.trade_term 
-    ? (tradeTermMap[lang][order.trade_term] || order.trade_term)
+
+  const shippingMethodDisplay = order.shipping_method
+    ? shippingMethodMap[lang][order.shipping_method] || order.shipping_method
     : '-';
 
-  // 获取发货日期显示
+  const tradeTermDisplay = order.trade_term
+    ? tradeTermMap[lang][order.trade_term] || order.trade_term
+    : '-';
+
   const getShippingDateDisplay = () => {
     if (!order.shipping_date_type) return '-';
     if (order.shipping_date_type === 'deposit') {
@@ -736,17 +692,20 @@ export default function ShareOrderPage({ params }: ShareOrderPageProps) {
       return text.balance_shipping.replace('{{days}}', String(order.shipping_days || 10));
     }
     if (order.shipping_date_type === 'fixed' && order.shipping_date) {
-      return text.fixed_shipping.replace('{{date}}', new Date(order.shipping_date).toLocaleDateString(lang === 'en' ? 'en-US' : 'zh-CN'));
+      return text.fixed_shipping.replace(
+        '{{date}}',
+        new Date(order.shipping_date).toLocaleDateString(lang === 'en' ? 'en-US' : 'zh-CN')
+      );
     }
     return '-';
   };
 
   // ============================================================
-  // ✅ 支付记录数据
+  // ✅ 支付记录数据（已做数值安全转换）
   // ============================================================
   const getPaymentRecords = () => {
-    const total = order.total_amount || 0;
-    const deposit = order.deposit_amount || 0;
+    const total = Number(order.total_amount) || 0;
+    const deposit = Number(order.deposit_amount) || 0;
     const paid = deposit;
     const pending = total - paid;
 
@@ -790,11 +749,11 @@ export default function ShareOrderPage({ params }: ShareOrderPageProps) {
   const paymentRecords = getPaymentRecords();
 
   // ============================================================
-  // ✅ 物流记录 - 支持多条记录
+  // ✅ 物流记录
   // ============================================================
   const getLogisticsRecords = () => {
     const shippingRecords = order.shipping_records || [];
-    
+
     if (shippingRecords.length > 0) {
       return {
         records: shippingRecords,
@@ -803,7 +762,7 @@ export default function ShareOrderPage({ params }: ShareOrderPageProps) {
         latest: shippingRecords[shippingRecords.length - 1],
       };
     }
-    
+
     const hasTracking = order.tracking_number || order.carrier || order.carrier_name;
     if (hasTracking) {
       const legacyRecord = {
@@ -823,7 +782,7 @@ export default function ShareOrderPage({ params }: ShareOrderPageProps) {
         latest: legacyRecord,
       };
     }
-    
+
     return {
       records: [],
       hasRecords: false,
@@ -834,7 +793,6 @@ export default function ShareOrderPage({ params }: ShareOrderPageProps) {
 
   const logisticsData = getLogisticsRecords();
 
-  // ✅ 格式化日期（用于物流记录）
   const formatLogisticsDate = (dateStr: string) => {
     if (!dateStr) return '-';
     try {
@@ -851,7 +809,6 @@ export default function ShareOrderPage({ params }: ShareOrderPageProps) {
     }
   };
 
-  // ✅ 生成账户复制文本
   function generateAccountCopyText(account: any, locale: string): string {
     const isEn = lang === 'en';
     const labels = {
@@ -889,8 +846,8 @@ export default function ShareOrderPage({ params }: ShareOrderPageProps) {
 
     const l = isEn ? labels.en : labels.zh;
     const isDomesticAccount = isDomestic(account);
-    const currencyDisplay = Array.isArray(account.currency) 
-      ? account.currency.join(', ') 
+    const currencyDisplay = Array.isArray(account.currency)
+      ? account.currency.join(', ')
       : account.currency || 'All';
     const displayName = account.display_name_en || account.display_name_zh || 'Account';
 
@@ -927,18 +884,15 @@ export default function ShareOrderPage({ params }: ShareOrderPageProps) {
     return text;
   }
 
-  // ✅ 生成产品详情链接 - 必须使用 slug
   const getProductLink = (item: any) => {
     if (!item?.slug) return '#';
     return `/${locale}/product/${item.slug}`;
   };
 
-  // ✅ 判断是否有有效链接（必须有 slug）
   const hasValidProductLink = (item: any) => {
     return item && !!item.slug;
   };
 
-  // ✅ 生成订单复制文本（含脱敏）
   function generateOrderCopyText(order: OrderData): string {
     let text = `=== 合同号: ${order.contract_no || order.order_no} ===\n\n`;
     text += `买家: ${order.buyer_name}\n`;
@@ -946,26 +900,23 @@ export default function ShareOrderPage({ params }: ShareOrderPageProps) {
     text += `邮箱: ${maskEmail(order.buyer_email)}\n`;
     if (order.buyer_phone) text += `电话: ${maskPhone(order.buyer_phone)}\n`;
     text += `\n--- 商品清单 ---\n`;
-    
+
     order.items.forEach((item: any, index: number) => {
       text += `${index + 1}. ${item.product_name}`;
       if (item.specification) text += ` (${item.specification})`;
-      text += ` x${item.quantity}${item.unit || 'pcs'} = ${order.currency} ${item.total.toFixed(2)}\n`;
+      text += ` x${item.quantity}${item.unit || 'pcs'} = ${order.currency} ${formatAmount(item.total)}\n`;
     });
-    
+
     text += `\n--- 金额汇总 ---\n`;
-    text += `商品总金额: ${order.currency} ${order.sub_total.toFixed(2)}\n`;
-    if (order.discount > 0) text += `折扣: -${order.currency} ${order.discount.toFixed(2)}\n`;
-    if (order.shipping_fee > 0) text += `运费: ${order.currency} ${order.shipping_fee.toFixed(2)}\n`;
-    if (order.tax > 0) text += `税费: ${order.currency} ${order.tax.toFixed(2)}\n`;
-    text += `账单总金额: ${order.currency} ${order.total_amount.toFixed(2)}\n`;
-    
+    text += `商品总金额: ${order.currency} ${formatAmount(order.sub_total)}\n`;
+    if (Number(order.discount) > 0) text += `折扣: -${order.currency} ${formatAmount(order.discount)}\n`;
+    if (Number(order.shipping_fee) > 0) text += `运费: ${order.currency} ${formatAmount(order.shipping_fee)}\n`;
+    if (Number(order.tax) > 0) text += `税费: ${order.currency} ${formatAmount(order.tax)}\n`;
+    text += `账单总金额: ${order.currency} ${formatAmount(order.total_amount)}\n`;
+
     return text;
   }
 
-  // ============================================================
-  // ✅ 动态样式辅助函数
-  // ============================================================
   const getStatusColor = (status: string) => {
     const map: Record<string, { bg: string; text: string; border: string }> = {
       draft: { bg: 'bg-gray-100', text: 'text-gray-600', border: 'border-gray-200' },
@@ -995,14 +946,8 @@ export default function ShareOrderPage({ params }: ShareOrderPageProps) {
           {/* 头部 */}
           <div className="flex justify-between items-start mb-6 print:hidden">
             <div>
-              <h1 className="text-2xl font-bold"
-                style={{ color: titleColor }}
-              >
-                {text.title}
-              </h1>
-              <p className="text-sm mt-1"
-                style={{ color: mutedColor }}
-              >
+              <h1 className="text-2xl font-bold" style={{ color: titleColor }}>{text.title}</h1>
+              <p className="text-sm mt-1" style={{ color: mutedColor }}>
                 {text.contract_no}: {order.contract_no || order.order_no}
               </p>
             </div>
@@ -1010,32 +955,18 @@ export default function ShareOrderPage({ params }: ShareOrderPageProps) {
               <button
                 onClick={handleCopy}
                 className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded transition-colors text-sm"
-                style={{
-                  backgroundColor: secondaryBtnBg,
-                  color: secondaryBtnText,
-                }}
-                onMouseEnter={(e) => {
-                  e.currentTarget.style.backgroundColor = secondaryBtnHover;
-                }}
-                onMouseLeave={(e) => {
-                  e.currentTarget.style.backgroundColor = secondaryBtnBg;
-                }}
+                style={{ backgroundColor: secondaryBtnBg, color: secondaryBtnText }}
+                onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = secondaryBtnHover; }}
+                onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = secondaryBtnBg; }}
               >
                 {copied ? '✅' : '📋'} {copied ? text.copied : text.copy}
               </button>
               <button
                 onClick={handlePrint}
                 className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded transition-colors text-sm"
-                style={{
-                  backgroundColor: secondaryBtnBg,
-                  color: secondaryBtnText,
-                }}
-                onMouseEnter={(e) => {
-                  e.currentTarget.style.backgroundColor = secondaryBtnHover;
-                }}
-                onMouseLeave={(e) => {
-                  e.currentTarget.style.backgroundColor = secondaryBtnBg;
-                }}
+                style={{ backgroundColor: secondaryBtnBg, color: secondaryBtnText }}
+                onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = secondaryBtnHover; }}
+                onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = secondaryBtnBg; }}
               >
                 🖨️ {text.print}
               </button>
@@ -1126,9 +1057,7 @@ export default function ShareOrderPage({ params }: ShareOrderPageProps) {
             <div className="overflow-x-auto">
               <table className="w-full text-sm">
                 <thead>
-                  <tr className="print:bg-gray-100"
-                    style={{ backgroundColor: mutedBg }}
-                  >
+                  <tr className="print:bg-gray-100" style={{ backgroundColor: mutedBg }}>
                     <th className="px-3 py-2 text-left w-[50%]" style={{ color: pageText }}>{text.product_name}</th>
                     <th className="px-3 py-2 text-left w-[15%]" style={{ color: pageText }}>{text.specification}</th>
                     <th className="px-3 py-2 text-center w-[15%]" style={{ color: pageText }}>{text.quantity}</th>
@@ -1140,54 +1069,41 @@ export default function ShareOrderPage({ params }: ShareOrderPageProps) {
                   {order.items.map((item: any) => {
                     const productLink = getProductLink(item);
                     const hasLink = hasValidProductLink(item);
-                    
+
                     return (
                       <tr key={item.id} style={{ borderColor: borderColor }}>
                         <td className="px-3 py-2">
                           <div className="flex items-center gap-2">
                             {item.product_image && (
                               hasLink ? (
-                                <a 
-                                  href={productLink}
-                                  target="_blank"
-                                  rel="noopener noreferrer"
-                                  className="flex-shrink-0"
-                                >
-                                  <img 
-                                    src={item.product_image} 
+                                <a href={productLink} target="_blank" rel="noopener noreferrer" className="flex-shrink-0">
+                                  <img
+                                    src={item.product_image}
                                     alt={item.product_name}
                                     className="w-8 h-8 object-cover rounded border flex-shrink-0 hover:opacity-80 transition-opacity"
                                     style={{ borderColor: borderColor }}
-                                    onError={(e) => {
-                                      (e.target as HTMLImageElement).style.display = 'none';
-                                    }}
+                                    onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }}
                                   />
                                 </a>
                               ) : (
-                                <img 
-                                  src={item.product_image} 
+                                <img
+                                  src={item.product_image}
                                   alt={item.product_name}
                                   className="w-8 h-8 object-cover rounded border flex-shrink-0"
                                   style={{ borderColor: borderColor }}
-                                  onError={(e) => {
-                                    (e.target as HTMLImageElement).style.display = 'none';
-                                  }}
+                                  onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }}
                                 />
                               )
                             )}
                             {hasLink ? (
-                              <a 
+                              <a
                                 href={productLink}
                                 target="_blank"
                                 rel="noopener noreferrer"
                                 className="font-medium hover:underline"
                                 style={{ color: titleColor }}
-                                onMouseEnter={(e) => {
-                                  e.currentTarget.style.color = primaryBtnBg;
-                                }}
-                                onMouseLeave={(e) => {
-                                  e.currentTarget.style.color = titleColor;
-                                }}
+                                onMouseEnter={(e) => { e.currentTarget.style.color = primaryBtnBg; }}
+                                onMouseLeave={(e) => { e.currentTarget.style.color = titleColor; }}
                               >
                                 {item.product_name}
                               </a>
@@ -1204,10 +1120,10 @@ export default function ShareOrderPage({ params }: ShareOrderPageProps) {
                           </div>
                         </td>
                         <td className="px-3 py-2 text-right font-mono" style={{ color: pageText }}>
-                          {order.currency} {item.price.toFixed(2)}
+                          {order.currency} {formatAmount(item.price)}
                         </td>
                         <td className="px-3 py-2 text-right font-mono" style={{ color: pageText }}>
-                          {order.currency} {item.total.toFixed(2)}
+                          {order.currency} {formatAmount(item.total)}
                         </td>
                       </tr>
                     );
@@ -1226,31 +1142,31 @@ export default function ShareOrderPage({ params }: ShareOrderPageProps) {
               <div className="space-y-1 text-sm">
                 <div className="flex justify-between">
                   <span className="text-gray-500">{text.sub_total}</span>
-                  <span className="font-mono" style={{ color: pageText }}>{order.currency} {order.sub_total.toFixed(2)}</span>
+                  <span className="font-mono" style={{ color: pageText }}>{order.currency} {formatAmount(order.sub_total)}</span>
                 </div>
-                {order.discount > 0 && (
+                {Number(order.discount) > 0 && (
                   <div className="flex justify-between" style={{ color: successColor }}>
                     <span>{text.discount}</span>
-                    <span className="font-mono">-{order.currency} {order.discount.toFixed(2)}</span>
+                    <span className="font-mono">-{order.currency} {formatAmount(order.discount)}</span>
                   </div>
                 )}
-                {order.shipping_fee > 0 && (
+                {Number(order.shipping_fee) > 0 && (
                   <div className="flex justify-between">
                     <span className="text-gray-500">{text.shipping_fee}</span>
-                    <span className="font-mono" style={{ color: pageText }}>{order.currency} {order.shipping_fee.toFixed(2)}</span>
+                    <span className="font-mono" style={{ color: pageText }}>{order.currency} {formatAmount(order.shipping_fee)}</span>
                   </div>
                 )}
-                {order.tax > 0 && (
+                {Number(order.tax) > 0 && (
                   <div className="flex justify-between">
                     <span className="text-gray-500">{text.tax}</span>
-                    <span className="font-mono" style={{ color: pageText }}>{order.currency} {order.tax.toFixed(2)}</span>
+                    <span className="font-mono" style={{ color: pageText }}>{order.currency} {formatAmount(order.tax)}</span>
                   </div>
                 )}
                 <div className="border-t pt-2 flex justify-between font-bold text-lg"
                   style={{ borderColor: borderColor }}
                 >
                   <span style={{ color: titleColor }}>{text.total_amount}</span>
-                  <span className="font-mono" style={{ color: primaryBtnBg }}>{order.currency} {order.total_amount.toFixed(2)}</span>
+                  <span className="font-mono" style={{ color: primaryBtnBg }}>{order.currency} {formatAmount(order.total_amount)}</span>
                 </div>
               </div>
             </div>
@@ -1313,7 +1229,7 @@ export default function ShareOrderPage({ params }: ShareOrderPageProps) {
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-4">
                     <div className="text-2xl font-bold" style={{ color: infoText }}>
-                      {order.currency} {paymentRecords.pending.toFixed(2)}
+                      {order.currency} {formatAmount(paymentRecords.pending)}
                     </div>
                     <div className="text-sm" style={{ color: mutedColor }}>
                       <Shield size={16} className="inline mr-1" style={{ color: successColor }} />
@@ -1321,30 +1237,21 @@ export default function ShareOrderPage({ params }: ShareOrderPageProps) {
                     </div>
                     {paymentAccounts.length > 1 && (
                       <span className="text-xs px-2 py-0.5 rounded"
-                        style={{
-                          backgroundColor: infoBg,
-                          color: infoText,
-                        }}
+                        style={{ backgroundColor: infoBg, color: infoText }}
                       >
                         {paymentAccounts.length} 种支付方式
                       </span>
                     )}
                     {paymentRecords.isFullPaid && (
                       <span className="text-xs px-2 py-0.5 rounded"
-                        style={{
-                          backgroundColor: successBg,
-                          color: successText,
-                        }}
+                        style={{ backgroundColor: successBg, color: successText }}
                       >
                         ✅ {text.fully_paid_badge}
                       </span>
                     )}
                     {paymentRecords.pending <= 0 && (
                       <span className="text-xs px-2 py-0.5 rounded"
-                        style={{
-                          backgroundColor: successBg,
-                          color: successText,
-                        }}
+                        style={{ backgroundColor: successBg, color: successText }}
                       >
                         ✅ {text.no_payment_needed}
                       </span>
@@ -1354,9 +1261,7 @@ export default function ShareOrderPage({ params }: ShareOrderPageProps) {
                     onClick={handlePayNow}
                     disabled={paymentRecords.pending <= 0}
                     className={`flex items-center gap-2 px-6 py-2 rounded-lg transition-colors ${
-                      paymentRecords.pending > 0
-                        ? 'text-white'
-                        : 'cursor-not-allowed'
+                      paymentRecords.pending > 0 ? 'text-white' : 'cursor-not-allowed'
                     }`}
                     style={{
                       backgroundColor: paymentRecords.pending > 0 ? primaryBtnBg : mutedBg,
@@ -1382,37 +1287,38 @@ export default function ShareOrderPage({ params }: ShareOrderPageProps) {
 
                 {/* 支付详情 */}
                 {showPaymentDetail && paymentAccounts.length > 0 && (
-                  <div className="mt-4 pt-4 border-t"
-                    style={{ borderColor: infoBorder }}
-                  >
+                  <div className="mt-4 pt-4 border-t" style={{ borderColor: infoBorder }}>
                     <h4 className="font-semibold mb-3" style={{ color: titleColor }}>{text.payment_detail}</h4>
-                    
+
                     <div className="space-y-4">
                       {paymentAccounts.map((account, index) => {
                         const isCopied = accountCopiedIndex === index;
                         const displayName = account.display_name_en || account.display_name_zh || 'Account';
                         const logo = getBankLogo(account);
-                        const currencyDisplay = Array.isArray(account.currency) 
-                          ? account.currency.join(', ') 
+                        const currencyDisplay = Array.isArray(account.currency)
+                          ? account.currency.join(', ')
                           : account.currency || text.all_currencies;
-                        
+
+                        // ✅ 判断支付方式
+                        const isTT = account.payment_method === 'tt';
+                        const isWechat = account.payment_method === 'wechat';
+                        const isAlipay = account.payment_method === 'alipay';
+                        const isPayPal = account.payment_method === 'paypal';
+                        const isDomesticAccount = isDomestic(account);
+                        const hasQRCode = (isWechat || isAlipay) && account.qr_code_image;
+
                         return (
                           <div key={account.id} className="rounded-lg border overflow-hidden"
-                            style={{
-                              backgroundColor: cardBg,
-                              borderColor: borderColor,
-                            }}
+                            style={{ backgroundColor: cardBg, borderColor: borderColor }}
                           >
+                            {/* ✅ 头部 - 完整代码 */}
                             <div className="flex items-center justify-between p-4 border-b"
                               style={{ borderColor: borderColor }}
                             >
                               <div className="flex items-center gap-3">
                                 {paymentAccounts.length > 1 && (
                                   <span className="text-xs px-2 py-0.5 rounded"
-                                    style={{
-                                      backgroundColor: mutedBg,
-                                      color: mutedColor,
-                                    }}
+                                    style={{ backgroundColor: mutedBg, color: mutedColor }}
                                   >
                                     #{index + 1}
                                   </span>
@@ -1422,19 +1328,13 @@ export default function ShareOrderPage({ params }: ShareOrderPageProps) {
                                   <div className="flex items-center gap-2 flex-wrap">
                                     <span className="font-semibold" style={{ color: titleColor }}>{displayName}</span>
                                     <span className="text-xs px-2 py-0.5 rounded"
-                                      style={{
-                                        backgroundColor: mutedBg,
-                                        color: mutedColor,
-                                      }}
+                                      style={{ backgroundColor: mutedBg, color: mutedColor }}
                                     >
                                       {paymentMethodLabel}
                                     </span>
                                     {account.is_default && (
                                       <span className="text-xs px-2 py-0.5 rounded"
-                                        style={{
-                                          backgroundColor: infoBg,
-                                          color: infoText,
-                                        }}
+                                        style={{ backgroundColor: infoBg, color: infoText }}
                                       >
                                         {text.default}
                                       </span>
@@ -1448,9 +1348,7 @@ export default function ShareOrderPage({ params }: ShareOrderPageProps) {
                               <button
                                 onClick={() => handleCopyAccount(account, index)}
                                 className={`flex items-center gap-1.5 px-3 py-1.5 rounded text-sm transition-all flex-shrink-0 ${
-                                  isCopied 
-                                    ? 'border border-green-300' 
-                                    : 'border border-transparent'
+                                  isCopied ? 'border border-green-300' : 'border border-transparent'
                                 }`}
                                 style={{
                                   backgroundColor: isCopied ? successBg : secondaryBtnBg,
@@ -1481,82 +1379,163 @@ export default function ShareOrderPage({ params }: ShareOrderPageProps) {
                               </button>
                             </div>
 
-                            <div className="p-4" style={{ backgroundColor: mutedBg }}>
-                              <div className="space-y-3">
-                                <div>
-                                  <div className="text-xs" style={{ color: mutedColor }}>{text.beneficiary_name}</div>
-                                  <div className="font-medium" style={{ color: pageText }}>{account.beneficiary_name || '-'}</div>
+                            {/* ✅ 根据支付方式渲染不同的内容 */}
+                            {hasQRCode ? (
+                              /* 有二维码：左右两列布局 */
+                              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 p-4" style={{ backgroundColor: mutedBg }}>
+                                {/* 左列：账户信息 */}
+                                <div className="space-y-3">
+                                  <div>
+                                    <div className="text-xs" style={{ color: mutedColor }}>{text.account_holder}</div>
+                                    <div className="font-medium" style={{ color: pageText }}>{account.account_holder || '-'}</div>
+                                  </div>
+                                  {isAlipay && (
+                                    <div>
+                                      <div className="text-xs" style={{ color: mutedColor }}>{text.account_identifier}</div>
+                                      <div className="font-medium" style={{ color: pageText }}>{account.account_identifier || '-'}</div>
+                                    </div>
+                                  )}
+                                  <div>
+                                    <div className="text-xs" style={{ color: mutedColor }}>{text.currency}</div>
+                                    <div className="font-medium" style={{ color: pageText }}>{currencyDisplay}</div>
+                                  </div>
+                                  {account.remark && (
+                                    <div>
+                                      <div className="text-xs" style={{ color: mutedColor }}>备注</div>
+                                      <div className="font-medium text-sm" style={{ color: pageText }}>{account.remark}</div>
+                                    </div>
+                                  )}
                                 </div>
-                                <div>
-                                  <div className="text-xs" style={{ color: mutedColor }}>{text.account_number}</div>
-                                  <div className="font-medium font-mono font-bold select-all text-base"
-                                    style={{ color: infoText }}
-                                  >
-                                    {account.beneficiary_account || '-'}
-                                  </div>
+
+                                {/* 右列：二维码大图 */}
+                                <div className="flex flex-col items-center justify-center">
+                                  <img
+                                    src={account.qr_code_image}
+                                    alt="收款码"
+                                    className="w-48 h-48 md:w-56 md:h-56 object-contain rounded-lg"
+                                    style={{ backgroundColor: cardBg }}
+                                    onError={(e) => {
+                                      (e.target as HTMLImageElement).style.display = 'none';
+                                    }}
+                                  />
                                 </div>
-                                <div>
-                                  <div className="text-xs" style={{ color: mutedColor }}>{text.country_region}</div>
-                                  <div className="font-medium" style={{ color: pageText }}>{account.country_region || '-'}</div>
-                                </div>
-                                {!isDomestic(account) && (
-                                  <div>
-                                    <div className="text-xs" style={{ color: mutedColor }}>{text.swift_code}</div>
-                                    <div className="font-medium font-mono" style={{ color: pageText }}>{account.swift_code || '-'}</div>
-                                  </div>
-                                )}
-                                {!isDomestic(account) && account.beneficiary_address && (
-                                  <div>
-                                    <div className="text-xs" style={{ color: mutedColor }}>{text.beneficiary_address}</div>
-                                    <div className="font-medium" style={{ color: pageText }}>{account.beneficiary_address}</div>
-                                  </div>
-                                )}
-                                <div>
-                                  <div className="text-xs" style={{ color: mutedColor }}>{text.bank}</div>
-                                  <div className="font-medium" style={{ color: pageText }}>{account.beneficiary_bank || '-'}</div>
-                                </div>
-                                {account.beneficiary_bank_address && (
-                                  <div>
-                                    <div className="text-xs" style={{ color: mutedColor }}>{text.bank_address}</div>
-                                    <div className="font-medium" style={{ color: pageText }}>{account.beneficiary_bank_address}</div>
-                                  </div>
-                                )}
-                                {account.bank_code && (
-                                  <div>
-                                    <div className="text-xs" style={{ color: mutedColor }}>{text.bank_code}</div>
-                                    <div className="font-medium" style={{ color: pageText }}>{account.bank_code}</div>
-                                  </div>
-                                )}
-                                {account.branch_code && (
-                                  <div>
-                                    <div className="text-xs" style={{ color: mutedColor }}>{text.branch_code}</div>
-                                    <div className="font-medium" style={{ color: pageText }}>{account.branch_code}</div>
-                                  </div>
-                                )}
-                                {!isDomestic(account) && account.iban && (
-                                  <div>
-                                    <div className="text-xs" style={{ color: mutedColor }}>{text.iban}</div>
-                                    <div className="font-medium font-mono" style={{ color: pageText }}>{account.iban}</div>
-                                  </div>
-                                )}
-                                <div>
-                                  <div className="text-xs" style={{ color: mutedColor }}>{text.currency}</div>
-                                  <div className="font-medium" style={{ color: pageText }}>{currencyDisplay}</div>
-                                </div>
-                                {account.intermediary_bank && (
-                                  <div>
-                                    <div className="text-xs" style={{ color: mutedColor }}>{text.intermediary_bank}</div>
-                                    <div className="font-medium" style={{ color: pageText }}>{account.intermediary_bank}</div>
-                                  </div>
-                                )}
-                                {account.attention && (
-                                  <div>
-                                    <div className="text-xs font-medium" style={{ color: warningText }}>⚠️ {text.attention}</div>
-                                    <div className="text-sm whitespace-pre-wrap" style={{ color: warningText }}>{account.attention}</div>
-                                  </div>
-                                )}
                               </div>
-                            </div>
+                            ) : (
+                              /* 无二维码：原来的单列布局 */
+                              <div className="p-4" style={{ backgroundColor: mutedBg }}>
+                                <div className="space-y-3">
+                                  {/* T/T 银行 */}
+                                  {isTT && (
+                                    <>
+                                      <div>
+                                        <div className="text-xs" style={{ color: mutedColor }}>{text.beneficiary_name}</div>
+                                        <div className="font-medium" style={{ color: pageText }}>{account.beneficiary_name || '-'}</div>
+                                      </div>
+                                      <div>
+                                        <div className="text-xs" style={{ color: mutedColor }}>{text.account_number}</div>
+                                        <div className="font-medium font-mono font-bold select-all text-base" style={{ color: infoText }}>
+                                          {account.beneficiary_account || '-'}
+                                        </div>
+                                      </div>
+                                      <div>
+                                        <div className="text-xs" style={{ color: mutedColor }}>{text.country_region}</div>
+                                        <div className="font-medium" style={{ color: pageText }}>{account.country_region || '-'}</div>
+                                      </div>
+                                      {!isDomesticAccount && (
+                                        <div>
+                                          <div className="text-xs" style={{ color: mutedColor }}>{text.swift_code}</div>
+                                          <div className="font-medium font-mono" style={{ color: pageText }}>{account.swift_code || '-'}</div>
+                                        </div>
+                                      )}
+                                      {!isDomesticAccount && account.beneficiary_address && (
+                                        <div>
+                                          <div className="text-xs" style={{ color: mutedColor }}>{text.beneficiary_address}</div>
+                                          <div className="font-medium" style={{ color: pageText }}>{account.beneficiary_address}</div>
+                                        </div>
+                                      )}
+                                      <div>
+                                        <div className="text-xs" style={{ color: mutedColor }}>{text.bank}</div>
+                                        <div className="font-medium" style={{ color: pageText }}>{account.beneficiary_bank || '-'}</div>
+                                      </div>
+                                      {account.beneficiary_bank_address && (
+                                        <div>
+                                          <div className="text-xs" style={{ color: mutedColor }}>{text.bank_address}</div>
+                                          <div className="font-medium" style={{ color: pageText }}>{account.beneficiary_bank_address}</div>
+                                        </div>
+                                      )}
+                                      {account.bank_code && (
+                                        <div>
+                                          <div className="text-xs" style={{ color: mutedColor }}>{text.bank_code}</div>
+                                          <div className="font-medium" style={{ color: pageText }}>{account.bank_code}</div>
+                                        </div>
+                                      )}
+                                      {account.branch_code && (
+                                        <div>
+                                          <div className="text-xs" style={{ color: mutedColor }}>{text.branch_code}</div>
+                                          <div className="font-medium" style={{ color: pageText }}>{account.branch_code}</div>
+                                        </div>
+                                      )}
+                                      {!isDomesticAccount && account.iban && (
+                                        <div>
+                                          <div className="text-xs" style={{ color: mutedColor }}>{text.iban}</div>
+                                          <div className="font-medium font-mono" style={{ color: pageText }}>{account.iban}</div>
+                                        </div>
+                                      )}
+                                      <div>
+                                        <div className="text-xs" style={{ color: mutedColor }}>{text.currency}</div>
+                                        <div className="font-medium" style={{ color: pageText }}>{currencyDisplay}</div>
+                                      </div>
+                                      {account.intermediary_bank && (
+                                        <div>
+                                          <div className="text-xs" style={{ color: mutedColor }}>{text.intermediary_bank}</div>
+                                          <div className="font-medium" style={{ color: pageText }}>{account.intermediary_bank}</div>
+                                        </div>
+                                      )}
+                                      {account.attention && (
+                                        <div>
+                                          <div className="text-xs font-medium" style={{ color: warningText }}>⚠️ {text.attention}</div>
+                                          <div className="text-sm whitespace-pre-wrap" style={{ color: warningText }}>{account.attention}</div>
+                                        </div>
+                                      )}
+                                    </>
+                                  )}
+
+                                  {/* 微信/支付宝无二维码 */}
+                                  {(isWechat || isAlipay) && !account.qr_code_image && (
+                                    <>
+                                      <div>
+                                        <div className="text-xs" style={{ color: mutedColor }}>{text.account_holder}</div>
+                                        <div className="font-medium" style={{ color: pageText }}>{account.account_holder || '-'}</div>
+                                      </div>
+                                      {isAlipay && (
+                                        <div>
+                                          <div className="text-xs" style={{ color: mutedColor }}>{text.account_identifier}</div>
+                                          <div className="font-medium" style={{ color: pageText }}>{account.account_identifier || '-'}</div>
+                                        </div>
+                                      )}
+                                      <div>
+                                        <div className="text-xs" style={{ color: mutedColor }}>{text.currency}</div>
+                                        <div className="font-medium" style={{ color: pageText }}>{currencyDisplay}</div>
+                                      </div>
+                                    </>
+                                  )}
+
+                                  {/* PayPal */}
+                                  {isPayPal && (
+                                    <>
+                                      <div>
+                                        <div className="text-xs" style={{ color: mutedColor }}>{text.paypal_email}</div>
+                                        <div className="font-medium font-mono" style={{ color: pageText }}>{account.paypal_email || '-'}</div>
+                                      </div>
+                                      <div>
+                                        <div className="text-xs" style={{ color: mutedColor }}>{text.currency}</div>
+                                        <div className="font-medium" style={{ color: pageText }}>{currencyDisplay}</div>
+                                      </div>
+                                    </>
+                                  )}
+                                </div>
+                              </div>
+                            )}
                           </div>
                         );
                       })}
@@ -1577,7 +1556,7 @@ export default function ShareOrderPage({ params }: ShareOrderPageProps) {
               <CreditCard size={18} style={{ color: mutedColor }} />
               {text.payment_records}
             </h4>
-            
+
             <div className="mb-3">
               <div className="flex items-center justify-between mb-1">
                 <span className={`text-sm font-medium ${paymentRecords.isFullPaid ? 'text-emerald-600' : ''}`}
@@ -1586,11 +1565,11 @@ export default function ShareOrderPage({ params }: ShareOrderPageProps) {
                   {paymentRecords.isFullPaid ? text.fully_paid : `${paymentRecords.percent}%`}
                 </span>
                 <span className="text-sm font-medium" style={{ color: pageText }}>
-                  {paymentRecords.currency} {paymentRecords.paid.toFixed(2)} / {paymentRecords.currency} {paymentRecords.total.toFixed(2)}
+                  {paymentRecords.currency} {formatAmount(paymentRecords.paid)} / {paymentRecords.currency} {formatAmount(paymentRecords.total)}
                 </span>
               </div>
               <div className="w-full rounded-full h-2.5" style={{ backgroundColor: mutedBg }}>
-                <div 
+                <div
                   className={`h-2.5 rounded-full transition-all duration-500 ${paymentRecords.isFullPaid ? 'bg-emerald-500' : 'bg-blue-600'}`}
                   style={{
                     width: `${Math.min(paymentRecords.percent, 100)}%`,
@@ -1603,16 +1582,16 @@ export default function ShareOrderPage({ params }: ShareOrderPageProps) {
             <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-sm">
               <div>
                 <div className="text-xs" style={{ color: mutedColor }}>{text.total_amount_label}</div>
-                <div className="font-semibold" style={{ color: pageText }}>{paymentRecords.currency} {paymentRecords.total.toFixed(2)}</div>
+                <div className="font-semibold" style={{ color: pageText }}>{paymentRecords.currency} {formatAmount(paymentRecords.total)}</div>
               </div>
               <div>
                 <div className="text-xs" style={{ color: mutedColor }}>{text.paid_amount}</div>
-                <div className="font-semibold" style={{ color: successColor }}>{paymentRecords.currency} {paymentRecords.paid.toFixed(2)}</div>
+                <div className="font-semibold" style={{ color: successColor }}>{paymentRecords.currency} {formatAmount(paymentRecords.paid)}</div>
               </div>
               {paymentRecords.pending > 0 && (
                 <div>
                   <div className="text-xs" style={{ color: mutedColor }}>{text.pending_amount}</div>
-                  <div className="font-semibold" style={{ color: warningText }}>{paymentRecords.currency} {paymentRecords.pending.toFixed(2)}</div>
+                  <div className="font-semibold" style={{ color: warningText }}>{paymentRecords.currency} {formatAmount(paymentRecords.pending)}</div>
                 </div>
               )}
               <div>
@@ -1648,13 +1627,13 @@ export default function ShareOrderPage({ params }: ShareOrderPageProps) {
                 {logisticsData.records.map((record, index) => {
                   const carrierDisplayName = record.carrier_name_cn || record.carrier_name_en || record.carrier_key;
                   const isLatest = index === logisticsData.records.length - 1;
-                  const shippingMethodDisplay = record.shipping_method 
+                  const shippingMethodDisplay = record.shipping_method
                     ? (shippingMethodMap[lang][record.shipping_method] || record.shipping_method)
                     : '';
-                  
+
                   return (
-                    <div 
-                      key={record.id || index} 
+                    <div
+                      key={record.id || index}
                       className={`p-3 rounded-lg border ${isLatest ? 'border-blue-200' : 'border-gray-200'}`}
                       style={{
                         backgroundColor: isLatest ? infoBg : mutedBg,
@@ -1668,10 +1647,7 @@ export default function ShareOrderPage({ params }: ShareOrderPageProps) {
                           </span>
                           {isLatest && (
                             <span className="text-xs px-2 py-0.5 rounded"
-                              style={{
-                                backgroundColor: infoBg,
-                                color: infoText,
-                              }}
+                              style={{ backgroundColor: infoBg, color: infoText }}
                             >
                               {text.shipping_record_latest}
                             </span>
@@ -1696,8 +1672,8 @@ export default function ShareOrderPage({ params }: ShareOrderPageProps) {
                       </div>
                       {record.tracking_image && (
                         <div className="mt-2">
-                          <img 
-                            src={record.tracking_image} 
+                          <img
+                            src={record.tracking_image}
                             alt="物流凭证"
                             className="w-20 h-20 object-cover rounded border cursor-pointer hover:opacity-80 transition-opacity"
                             style={{ borderColor: borderColor }}

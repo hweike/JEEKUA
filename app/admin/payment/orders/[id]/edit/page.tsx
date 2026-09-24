@@ -13,7 +13,7 @@ import ShippingInfo from '../../create/components/ShippingInfo';
 import OtherInfo from '../../create/components/OtherInfo';
 import RemarkInfo from '../../create/components/RemarkInfo';
 import type { PaymentMethodType, PaymentAccount } from '@/lib/payment/types/account';
-import { accountService } from '@/lib/payment/services/account.service';
+// ❌ 移除：import { accountService } from '@/lib/payment/services/account.service';
 
 // ============================================================
 // 类型定义
@@ -119,11 +119,19 @@ export default function EditOrderPage() {
   const loadData = async () => {
     setLoading(true);
     try {
-      // 1. 加载所有收款账号
-      const accounts = await accountService.getAllActive(siteId);
-      setAllAccounts(accounts);
+      // ✅ 1. 通过 API 加载所有收款账号（替代 accountService）
+      const accountsRes = await fetch(`/api/admin/payment/accounts?site_id=${siteId}&is_active=true`);
+      const accountsResult = await accountsRes.json();
+      
+      let accounts: PaymentAccount[] = [];
+      if (accountsResult.success && accountsResult.data) {
+        accounts = accountsResult.data;
+        setAllAccounts(accounts);
+      } else {
+        console.warn('获取账号列表失败:', accountsResult.error);
+      }
 
-      // 2. 加载订单
+      // ✅ 2. 加载订单
       const res = await fetch(`/api/admin/payment/orders/${orderId}`);
       const result = await res.json();
       
@@ -155,7 +163,7 @@ export default function EditOrderPage() {
         
         setOrder(orderData);
         
-        // 3. 恢复选中的支付账号
+        // ✅ 3. 恢复选中的支付账号
         if (orderData.selected_account_ids && orderData.selected_account_ids.length > 0) {
           const selected = accounts.filter((a: PaymentAccount) => 
             orderData.selected_account_ids.includes(a.id)

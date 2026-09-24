@@ -1,5 +1,5 @@
 // lib/menus/menu-service.ts
-import { supabase } from '@/lib/supabase/client';
+import sql from '@/lib/db/admin';
 
 const DEFAULT_SITE_ID = '000001';
 
@@ -8,19 +8,19 @@ export class MenuService {
    * 获取单个菜单（导航/底部/自定义）—— 无记录时返回 null
    */
   async getMenu(menuId: string, locale: string): Promise<any> {
-    const { data, error } = await supabase
-      .from('site_configs')
-      .select('config')
-      .eq('id', menuId)
-      .eq('site_id', DEFAULT_SITE_ID)
-      .eq('locale', locale)
-      .maybeSingle();
-
-    if (error) {
+    try {
+      const rows = await sql<{ config: any }[]>`
+        SELECT config FROM site_configs
+        WHERE id = ${menuId}
+          AND site_id = ${DEFAULT_SITE_ID}
+          AND locale = ${locale}
+        LIMIT 1
+      `;
+      return rows[0]?.config ?? null;
+    } catch (error) {
       console.error(`[MenuService] getMenu error for ${menuId}, ${locale}:`, error);
       return null;
     }
-    return data?.config ?? null;
   }
 
   /**
@@ -30,14 +30,14 @@ export class MenuService {
   async saveMenu(menuId: string, locale: string, data: any): Promise<void> {
     // 如果 data 为 null，执行删除操作
     if (data === null) {
-      const { error } = await supabase
-        .from('site_configs')
-        .delete()
-        .eq('id', menuId)
-        .eq('site_id', DEFAULT_SITE_ID)
-        .eq('locale', locale);
-
-      if (error) {
+      try {
+        await sql`
+          DELETE FROM site_configs
+          WHERE id = ${menuId}
+            AND site_id = ${DEFAULT_SITE_ID}
+            AND locale = ${locale}
+        `;
+      } catch (error: any) {
         console.error(`[MenuService] deleteMenu error for ${menuId}, ${locale}:`, error);
         throw new Error(`删除菜单失败: ${error.message}`);
       }
@@ -48,18 +48,17 @@ export class MenuService {
       console.error('[MenuService] saveMenu failed: data is empty');
       throw new Error('保存菜单失败: 数据不能为空');
     }
-    const payload = {
-      id: menuId,
-      site_id: DEFAULT_SITE_ID,
-      locale,
-      config: data,
-      updatedAt: new Date().toISOString(),
-    };
-    const { error } = await supabase
-      .from('site_configs')
-      .upsert(payload, { onConflict: 'id, site_id, locale' });
 
-    if (error) {
+    try {
+      await sql`
+        INSERT INTO site_configs (id, site_id, locale, config, "updatedAt")
+        VALUES (${menuId}, ${DEFAULT_SITE_ID}, ${locale}, ${sql.json(data)}, ${new Date().toISOString()})
+        ON CONFLICT (id, site_id, locale)
+        DO UPDATE SET
+          config = ${sql.json(data)},
+          "updatedAt" = ${new Date().toISOString()}
+      `;
+    } catch (error: any) {
       console.error(`[MenuService] saveMenu error for ${menuId}, ${locale}:`, error);
       throw new Error(`保存菜单失败: ${error.message}`);
     }
@@ -69,18 +68,20 @@ export class MenuService {
    * 获取自定义菜单列表 —— 无记录时返回 null
    */
   async getCustomMenus(locale: string): Promise<any[] | null> {
-    const { data, error } = await supabase
-      .from('site_configs')
-      .select('config')
-      .eq('id', 'custom_menus')
-      .eq('site_id', DEFAULT_SITE_ID)
-      .eq('locale', locale)
-      .maybeSingle();
-
-    if (error || !data?.config) {
+    try {
+      const rows = await sql<{ config: any }[]>`
+        SELECT config FROM site_configs
+        WHERE id = 'custom_menus'
+          AND site_id = ${DEFAULT_SITE_ID}
+          AND locale = ${locale}
+        LIMIT 1
+      `;
+      const config = rows[0]?.config;
+      if (!config) return null;
+      return Array.isArray(config) ? config : null;
+    } catch {
       return null;
     }
-    return Array.isArray(data.config) ? data.config : null;
   }
 
   /**
@@ -98,21 +99,24 @@ export class MenuService {
    * 获取所有已存在的语言（从菜单配置中）
    */
   async getAvailableMenuLocales(): Promise<string[]> {
-    const { data } = await supabase
-      .from('site_configs')
-      .select('locale')
-      .eq('site_id', DEFAULT_SITE_ID)
-      .in('id', ['navigation', 'footer-menu', 'custom_menus']);
-
-    const locales = new Set<string>();
-    if (data) {
-      data.forEach(row => locales.add(row.locale));
+    try {
+      const rows = await sql<{ locale: string }[]>`
+        SELECT locale FROM site_configs
+        WHERE site_id = ${DEFAULT_SITE_ID}
+          AND id IN ('navigation', 'footer-menu', 'custom_menus')
+      `;
+      const locales = new Set<string>();
+      for (const row of rows) {
+        if (row.locale) locales.add(row.locale);
+      }
+      return locales.size ? Array.from(locales).sort() : ['zh', 'en'];
+    } catch {
+      return ['zh', 'en'];
     }
-    return locales.size ? Array.from(locales).sort() : ['zh', 'en'];
   }
 
   /**
-   * 获取默认菜单结构（仅供上层使用，不直接返回给前端）
+   * 获取默认菜单结构
    */
   getDefaultMenu(menuId: string): any {
     if (menuId === 'custom_menus') return [];

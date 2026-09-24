@@ -57,7 +57,17 @@ export async function generateMetadata({
 }: {
   params: Promise<{ locale: string; productlineSlug: string; categorySlug: string }>;
 }) {
-  const { locale, productlineSlug, categorySlug } = await params;
+  // ✅ 防御性检查：构建时 Next.js 可能传入 undefined
+  const resolvedParams = await params;
+  if (!resolvedParams?.locale) {
+    return {
+      title: 'Category',
+      robots: 'noindex, follow',
+    };
+  }
+
+  const { locale, productlineSlug, categorySlug } = resolvedParams;
+
   const settings = await getSiteSettings();
   const baseUrl = (settings.websiteUrl || process.env.NEXT_PUBLIC_BASE_URL || '').replace(
     /\/+$/,
@@ -144,7 +154,6 @@ async function CategoryContent({
   const templateId =
     runtimeData.productLine?.templateId || DEFAULT_PRODUCT_LINE_TEMPLATE_ID;
 
-  // ✅ 用 getLayoutPageByTemplate 替代本地 getCachedLayout
   let layoutPage = await getLayoutPageByTemplate('base', templateId);
 
   if (!layoutPage && templateId !== DEFAULT_PRODUCT_LINE_TEMPLATE_ID) {
@@ -152,7 +161,7 @@ async function CategoryContent({
     layoutPage = await getLayoutPageByTemplate('base', DEFAULT_PRODUCT_LINE_TEMPLATE_ID);
   }
 
-  const templateData = layoutPage?.templateData; // ✅ 驼峰
+  const templateData = layoutPage?.templateData;
   const hasValidTemplate =
     templateData && Array.isArray(templateData.content) && templateData.content.length > 0;
 
@@ -200,7 +209,6 @@ async function CategoryContent({
     );
   }
 
-  // ✅ 移除 texts 相关
   const finalRuntime = { ...runtimeData, locale, seoTitle };
 
   let finalData = injectRuntimeDataSafe(templateData, finalRuntime);
@@ -236,8 +244,15 @@ interface Props {
 }
 
 async function CategoryPage({ params, searchParams }: Props) {
-  const { locale, productlineSlug, categorySlug } = await params;
-  const { page } = await searchParams;
+  // ✅ 防御性检查：构建时 Next.js 可能传入 undefined
+  const resolvedParams = await params;
+  if (!resolvedParams?.locale) {
+    notFound();
+  }
+
+  const { locale, productlineSlug, categorySlug } = resolvedParams;
+  const resolvedSearchParams = await searchParams;
+  const { page } = resolvedSearchParams || {};
   const currentPage = page ? parseInt(page, 10) || 1 : 1;
 
   return (
@@ -252,7 +267,6 @@ async function CategoryPage({ params, searchParams }: Props) {
   );
 }
 
-// 保持现有策略：不预生成，依赖 ISR
 export async function generateStaticParams() {
   return [];
 }

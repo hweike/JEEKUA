@@ -11,11 +11,13 @@ export async function crawlCategoryTree(page: Page, rule: CrawlerRule, taskId?: 
 
   // 描述选择器（支持多个备选）
   const descriptionSelectors = rule.categoryTree?.descriptionSelector
-    ? (Array.isArray(rule.categoryTree.descriptionSelector) ? rule.categoryTree.descriptionSelector : [rule.categoryTree.descriptionSelector])
+    ? (Array.isArray(rule.categoryTree.descriptionSelector)
+        ? rule.categoryTree.descriptionSelector
+        : [rule.categoryTree.descriptionSelector])
     : ['.description .left-con', '.description .scroll-con'];
 
   return await waitWithRetry(async () => {
-    // 1. 加载起始页，提取分类树（所有分类的 id, name, url, parentId，一级分类的描述暂留空）
+    // 1. 加载起始页
     await page.goto(rule.startUrl!, { waitUntil: 'domcontentloaded', timeout: 60000 });
 
     let successfulSelector: string | null = null;
@@ -33,18 +35,17 @@ export async function crawlCategoryTree(page: Page, rule: CrawlerRule, taskId?: 
 
     const useTwoLevel = !!(rule.categoryTree?.level1 && rule.categoryTree?.level2);
 
-    // 提取分类树（暂不填充描述，后续单独处理二级分类）
+    // 提取分类树
     const categories = await page.evaluate(({ rule, containerSelector, useTwoLevel }) => {
       const root = document.querySelector(containerSelector);
       if (!root) return [];
 
-      // 辅助：获取当前页面的描述（供一级分类使用）
       const getCurrentPageDescription = () => {
-        // 在起始页中提取一级分类的共同描述（如果规则配置了 descriptionSelector）
         try {
           const descSelector = rule.categoryTree?.descriptionSelector;
           if (descSelector) {
-            const el = document.querySelector(descSelector);
+            const sel = Array.isArray(descSelector) ? descSelector[0] : descSelector;
+            const el = document.querySelector(sel) as HTMLElement | null;
             if (el) return (el.innerText || el.textContent || '').trim();
           }
         } catch {}
@@ -58,8 +59,8 @@ export async function crawlCategoryTree(page: Page, rule: CrawlerRule, taskId?: 
         const result: any[] = [];
         let autoId = 1;
         items.forEach((item) => {
-          const nameEl = item.querySelector(rule.categoryTree!.nameSelector!);
-          const urlEl = item.querySelector(rule.categoryTree!.urlSelector!);
+          const nameEl = item.querySelector(rule.categoryTree!.nameSelector!) as HTMLElement | null;
+          const urlEl = item.querySelector(rule.categoryTree!.urlSelector!) as HTMLAnchorElement | null;
           if (!nameEl || !urlEl) return;
           let url = urlEl.getAttribute('href') || '';
           if (rule.categoryTree?.urlPrefix && !url.startsWith('http')) {
@@ -83,8 +84,8 @@ export async function crawlCategoryTree(page: Page, rule: CrawlerRule, taskId?: 
         const result: any[] = [];
 
         level1Items.forEach((level1El) => {
-          const name1El = level1El.querySelector(rule.categoryTree!.level1!.nameSelector);
-          const url1El = level1El.querySelector(rule.categoryTree!.level1!.urlSelector);
+          const name1El = level1El.querySelector(rule.categoryTree!.level1!.nameSelector) as HTMLElement | null;
+          const url1El = level1El.querySelector(rule.categoryTree!.level1!.urlSelector) as HTMLAnchorElement | null;
           if (!name1El || !url1El) return;
           let url1 = url1El.getAttribute('href') || '';
           if (rule.categoryTree?.urlPrefix && !url1.startsWith('http')) {
@@ -96,15 +97,15 @@ export async function crawlCategoryTree(page: Page, rule: CrawlerRule, taskId?: 
             name: name1El.textContent?.trim() || '',
             url: url1,
             parentId: null,
-            description: commonDesc, // 一级分类使用起始页的描述（可能不精确，但通常够用）
+            description: commonDesc,
           });
 
           const level2Container = level1El.querySelector(rule.categoryTree!.level2!.containerSelector);
           if (level2Container) {
             const level2Items = level2Container.querySelectorAll(rule.categoryTree!.level2!.itemSelector);
             level2Items.forEach((level2El) => {
-              const name2El = level2El.querySelector(rule.categoryTree!.level2!.nameSelector);
-              const url2El = level2El.querySelector(rule.categoryTree!.level2!.urlSelector);
+              const name2El = level2El.querySelector(rule.categoryTree!.level2!.nameSelector) as HTMLElement | null;
+              const url2El = level2El.querySelector(rule.categoryTree!.level2!.urlSelector) as HTMLAnchorElement | null;
               if (!name2El || !url2El) return;
               let url2 = url2El.getAttribute('href') || '';
               if (rule.categoryTree?.urlPrefix && !url2.startsWith('http')) {
@@ -115,7 +116,7 @@ export async function crawlCategoryTree(page: Page, rule: CrawlerRule, taskId?: 
                 name: name2El.textContent?.trim() || '',
                 url: url2,
                 parentId: level1Id,
-                description: '', // 二级描述稍后单独抓取
+                description: '',
               });
             });
           }
@@ -127,8 +128,8 @@ export async function crawlCategoryTree(page: Page, rule: CrawlerRule, taskId?: 
 
     if (categories.length === 0) throw new Error('No categories extracted');
 
-    // 2. 只对二级分类（parentId !== null）单独抓取描述
-    const shouldFetch = rule.categoryTree?.fetchAllDescriptions !== false; // 默认开启
+    // 2. 只对二级分类单独抓取描述
+    const shouldFetch = rule.categoryTree?.fetchAllDescriptions !== false;
     if (shouldFetch) {
       const level2Nodes = categories.filter(cat => cat.parentId !== null);
       console.log(`正在为 ${level2Nodes.length} 个二级分类单独抓取描述...`);
@@ -142,7 +143,7 @@ export async function crawlCategoryTree(page: Page, rule: CrawlerRule, taskId?: 
             await page.goto(cat.url, { waitUntil: 'domcontentloaded', timeout: 30000 });
             await page.waitForSelector(descSelector, { timeout: 10000 });
             const desc = await page.evaluate((sel) => {
-              const el = document.querySelector(sel);
+              const el = document.querySelector(sel) as HTMLElement | null;
               if (!el) return '';
               let text = (el.innerText || el.textContent || '').trim();
               if (text.endsWith('展开查看更多')) text = text.slice(0, -6).trim();

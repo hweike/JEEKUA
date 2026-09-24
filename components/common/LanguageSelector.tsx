@@ -5,10 +5,26 @@ import { getLanguageDisplayName } from '@/lib/languages/config';
 
 // ---------- 模块级缓存 ----------
 let cachedLanguages: any[] | null = null;
+let cachedAt = 0;
+const CACHE_TTL = 5 * 60 * 1000; // 5 分钟兜底（正常情况下会被主动清）
 let fetchPromise: Promise<any[]> | null = null;
 
+/** ✅ 导出：清空缓存（保存语言设置后调用） */
+export function clearLanguagesCache() {
+  cachedLanguages = null;
+  cachedAt = 0;
+  console.log('[LanguageSelector] 语言缓存已清空');
+}
+
 async function fetchEnabledLanguages(): Promise<any[]> {
-  if (cachedLanguages) return cachedLanguages;
+  const now = Date.now();
+
+  // ✅ 有缓存且未过期
+  if (cachedLanguages && now - cachedAt < CACHE_TTL) {
+    return cachedLanguages;
+  }
+
+  // ✅ 已有进行中的请求，复用
   if (fetchPromise) return fetchPromise;
 
   fetchPromise = fetch('/api/languages/enabled')
@@ -18,17 +34,18 @@ async function fetchEnabledLanguages(): Promise<any[]> {
     })
     .then((data) => {
       cachedLanguages = data;
+      cachedAt = Date.now();
       return data;
     })
     .catch(() => {
-      // 降级：返回全部语言（从 config 导入）
       const { LANGUAGES } = require('@/lib/languages/config');
       cachedLanguages = LANGUAGES.map((lang: any) => ({
         code: lang.code,
         nativeName: lang.nativeName,
         zhName: lang.zhName,
       }));
-      return cachedLanguages;
+      cachedAt = Date.now();
+      return cachedLanguages!;
     })
     .finally(() => {
       fetchPromise = null;

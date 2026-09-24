@@ -6,8 +6,6 @@ import { getSiteId } from '@/lib/utils/request';
 import { renderToBuffer } from '@react-pdf/renderer';
 import OrderPDF from '@/lib/payment/pdf-templates/order-pdf';
 import { getSettings } from '@/lib/Basicsettings/settings';
-import fs from 'fs';
-import path from 'path';
 
 // ============================================================
 // ✅ 图片处理辅助函数
@@ -50,13 +48,13 @@ function detectImageFormat(buffer: Buffer): string {
 
 async function fetchImageAsBase64(url: string): Promise<string> {
   try {
-    console.log('[PDF] 正在获取网络图片:', url);
+    console.log('[PDF] 正在获取图片:', url);
     const response = await fetch(url, {
       signal: AbortSignal.timeout(15000),
     });
     
     if (!response.ok) {
-      console.warn('[PDF] 获取网络图片失败:', response.status, url);
+      console.warn('[PDF] 获取图片失败:', response.status, url);
       return '';
     }
     
@@ -67,56 +65,38 @@ async function fetchImageAsBase64(url: string): Promise<string> {
     console.log('[PDF] 图片处理成功, 格式:', mimeType, '大小:', buffer.length, 'bytes');
     return `data:${mimeType};base64,${base64}`;
   } catch (error) {
-    console.error('[PDF] 获取网络图片失败:', url, error);
+    console.error('[PDF] 获取图片失败:', url, error);
     return '';
   }
 }
 
-function getLocalImageAsBase64(imagePath: string): string {
+/**
+ * ✅ 将图片（本地或网络）转换为 Base64 Data URL
+ * 统一使用 HTTP 请求，避免 fs 动态路径追踪问题
+ * 
+ * @param imagePath 图片路径（网络 URL 或本地路径）
+ * @param baseUrl 当前请求的 origin（可选，用于本地图片转 HTTP）
+ */
+async function getImageAsBase64(imagePath: string, baseUrl?: string): Promise<string> {
   if (!imagePath) return '';
   
-  try {
-    let fullPath: string;
-    if (imagePath.startsWith('/')) {
-      fullPath = path.join(process.cwd(), 'public', imagePath);
-    } else {
-      fullPath = path.join(process.cwd(), 'public', imagePath);
-    }
-    
-    if (!fs.existsSync(fullPath)) {
-      console.warn('[PDF] 本地图片不存在:', fullPath);
-      return '';
-    }
-    
-    const buffer = fs.readFileSync(fullPath);
-    const base64 = buffer.toString('base64');
-    
-    const ext = path.extname(fullPath).toLowerCase();
-    const mimeTypes: Record<string, string> = {
-      '.png': 'image/png',
-      '.jpg': 'image/jpeg',
-      '.jpeg': 'image/jpeg',
-      '.gif': 'image/gif',
-      '.svg': 'image/svg+xml',
-      '.webp': 'image/webp',
-    };
-    const mimeType = mimeTypes[ext] || 'image/png';
-    
-    return `data:${mimeType};base64,${base64}`;
-  } catch (error) {
-    console.error('[PDF] 读取本地图片失败:', error);
-    return '';
-  }
-}
-
-async function getImageAsBase64(imagePath: string): Promise<string> {
-  if (!imagePath) return '';
-  
+  // ✅ 网络 URL 直接请求
   if (isNetworkUrl(imagePath)) {
     return await fetchImageAsBase64(imagePath);
   }
   
-  return getLocalImageAsBase64(imagePath);
+  // ✅ 本地路径转成绝对 URL，通过 HTTP 请求获取
+  // 优先使用传入的 baseUrl（当前请求的 origin），其次环境变量，最后 fallback
+  const origin = baseUrl 
+    || process.env.NEXT_PUBLIC_SITE_URL 
+    || 'http://localhost:3000';
+  
+  const absoluteUrl = imagePath.startsWith('/') 
+    ? `${origin}${imagePath}`
+    : `${origin}/${imagePath}`;
+  
+  console.log('[PDF] 本地图片转为 HTTP 请求:', absoluteUrl);
+  return await fetchImageAsBase64(absoluteUrl);
 }
 
 // ============================================================
@@ -146,13 +126,9 @@ function generateOrderPDFFileName(order: {
   contract_no?: string;
   order_no: string;
 }): string {
-  // 优先使用客户公司名称，如果没有则使用客户名称
   const customerName = order.buyer_company || order.buyer_name || 'Customer';
   const cleanCustomerName = sanitizeFileName(customerName) || 'Customer';
-  
-  // 使用 contract_no，如果没有则使用 order_no
   const orderRef = order.contract_no || order.order_no || 'PI';
-  
   return `${cleanCustomerName}-${orderRef}.pdf`;
 }
 
@@ -161,6 +137,11 @@ export async function GET(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
+    // ✅ 从当前请求中动态获取 origin（无需环境变量）
+    const requestUrl = new URL(request.url);
+    const origin = `${requestUrl.protocol}//${requestUrl.host}`;
+    console.log('[PDF] 当前请求 origin:', origin);
+
     const { id } = await params;
     const siteId = await getSiteId(request);
     const order = await orderService.getById(siteId, id);
@@ -179,8 +160,8 @@ export async function GET(
     
     console.log('[PDF] 企业Logo路径:', companyLogo || '(空)');
 
-    // ✅ 获取企业 Logo Base64
-    const companyLogoBase64 = await getImageAsBase64(companyLogo);
+    // ✅ 获取企业 Logo Base64（传入当前请求的 origin）
+    const companyLogoBase64 = await getImageAsBase64(companyLogo, origin);
 
     // ✅ 获取卖家信息 - 从 settings 动态获取
     const sellerInfo = {
@@ -244,7 +225,7 @@ export async function GET(
     console.log('[PDF] 支付账户数量:', paymentAccounts.length);
     console.log('[PDF] 支付账户IDs:', paymentAccounts.map(a => a.id).join(', ') || '无');
 
-    // ✅ 生成文件名：{客户公司名称}-PI-{日期}-{序号}.pdf
+    // ✅ 生成文件名
     const fileName = generateOrderPDFFileName({
       buyer_company: order.buyer_company,
       buyer_name: order.buyer_name,
@@ -254,13 +235,13 @@ export async function GET(
 
     console.log('[PDF] 生成文件名:', fileName);
 
-    // ✅ 渲染 PDF - 传递 paymentAccounts 数组
+    // ✅ 渲染 PDF
     const pdfBuffer = await renderToBuffer(
       OrderPDF({ 
         order, 
         siteName,
         sellerInfo,
-        paymentAccounts,      // ✅ 传递数组
+        paymentAccounts,
         companyLogoBase64,
       })
     );

@@ -1,39 +1,13 @@
 // app/api/admin/litechat/quick-replies/route.ts
 import { NextRequest, NextResponse } from 'next/server';
 import { getQuickReplies, createQuickReply } from '@/lib/litechat/services/quick-reply.service';
-import { getCurrentUser } from '@/lib/auth/jwt';
-import { supabase } from '@/lib/supabase/client';
+import { verifyAdminAuth, isAdminAuthSuccess } from '@/lib/auth/admin-check';
 
 const DEFAULT_SITE_ID = process.env.NEXT_PUBLIC_SITE_ID || '000001';
 
-/**
- * 验证管理员身份并返回 admin 信息
- */
-async function verifyAdmin(request: Request) {
-  const user = await getCurrentUser();
-  if (!user) {
-    return { error: '未登录', status: 401 };
-  }
-
-  const { data: admin, error } = await supabase
-    .from('admin_users')
-    .select('id')
-    .eq('id', user.id)
-    .maybeSingle();
-
-  if (error || !admin) {
-    return { error: '无权访问，需要管理员权限', status: 403 };
-  }
-
-  return { admin };
-}
-
-// ============================================================
-// GET - 获取常用语列表
-// ============================================================
-export async function GET(request: Request) {
-  const auth = await verifyAdmin(request);
-  if ('error' in auth) {
+export async function GET() {
+  const auth = await verifyAdminAuth();
+  if (!isAdminAuthSuccess(auth)) {
     return NextResponse.json({ error: auth.error }, { status: auth.status });
   }
 
@@ -46,12 +20,9 @@ export async function GET(request: Request) {
   }
 }
 
-// ============================================================
-// POST - 创建常用语
-// ============================================================
 export async function POST(request: NextRequest) {
-  const auth = await verifyAdmin(request);
-  if ('error' in auth) {
+  const auth = await verifyAdminAuth();
+  if (!isAdminAuthSuccess(auth)) {
     return NextResponse.json({ error: auth.error }, { status: auth.status });
   }
 

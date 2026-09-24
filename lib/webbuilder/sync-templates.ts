@@ -1,6 +1,7 @@
 // lib/webbuilder/sync-templates.ts
-import { supabase } from '@/lib/supabase/client';
+import sql from '@/lib/db/admin';
 import { createHash } from 'crypto';
+import { bumpVersion } from '@/lib/cache/cache-version';
 
 const SITE_ID = '000001';
 
@@ -40,71 +41,74 @@ export async function syncTemplateToPages(
   newHash: string,
   category?: string,
   targetLayoutId?: string
-): Promise<{ updated: number; skipped: number; failed: number }> {
+): Promise<{
+  updated: number;
+  skipped: number;
+  failed: number;
+  affectedPages: Array<{ locale: string; slug: string }>;
+}> {
   console.log(`[sync] 开始同步模板 ${templateId}，哈希 ${newHash}`);
 
   // ========== 1. 查询所有引用该模板的页面 ==========
-  const { data: pages, error } = await supabase
-    .from('site_pages')
-    .select('id, locale, template_hash')
-    .eq('site_id', SITE_ID)
-    .eq('template', templateId);
-
-  if (error) {
+  let pages: Array<{ id: string; locale: string; slug: string; template_hash: string | null }> = [];
+  try {
+    pages = await sql<{ id: string; locale: string; slug: string; template_hash: string | null }[]>`
+      SELECT id, locale, slug, template_hash FROM public.site_pages
+      WHERE site_id = ${SITE_ID}
+        AND template = ${templateId}
+    `;
+  } catch (error) {
     console.error(`[sync] 查询页面失败:`, error);
     throw error;
   }
 
-  // ========== 2. 有引用页面：一次批量 UPDATE ==========
+  // ========== 2. 有引用页面：批量 UPDATE ==========
   if (pages && pages.length > 0) {
     console.log(`[sync] 找到 ${pages.length} 个引用页面`);
 
-    // 计算需要更新的数量（包含 NULL）
-    const staleCount = pages.filter(
+    const stalePages = pages.filter(
       row => row.template_hash === null || row.template_hash !== newHash
-    ).length;
-    const skippedCount = pages.length - staleCount;
+    );
+    const skippedCount = pages.length - stalePages.length;
 
-    if (staleCount === 0) {
+    if (stalePages.length === 0) {
       console.log(`[sync] 所有页面哈希一致，无需更新`);
-      return { updated: 0, skipped: skippedCount, failed: 0 };
+      return { updated: 0, skipped: skippedCount, failed: 0, affectedPages: [] };
     }
 
     const now = new Date().toISOString();
+    let updatedCount = 0;
 
-    // ✅ 一次 UPDATE，更新所有哈希不同或为 NULL 的记录
-    const { error: updateError, count } = await supabase
-      .from('site_pages')
-      .update(
-        {
-          template_data: templateData,
-          template_hash: newHash,
-          updated_at: now,
-        },
-        { count: 'exact' }  // 显式请求 count
-      )
-      .eq('site_id', SITE_ID)
-      .eq('template', templateId)
-      .or(`template_hash.is.null,template_hash.neq.${newHash}`);  // ✅ 包含 NULL
-
-    if (updateError) {
-      console.error(`[sync] 批量更新失败:`, updateError);
-      return { updated: 0, skipped: skippedCount, failed: staleCount };
+    try {
+      const result = await sql`
+        UPDATE public.site_pages
+        SET template_data = ${sql.json(templateData)},
+            template_hash = ${newHash},
+            updated_at = ${now}
+        WHERE site_id = ${SITE_ID}
+          AND template = ${templateId}
+          AND (template_hash IS NULL OR template_hash != ${newHash})
+      `;
+      updatedCount = result.count;
+    } catch (error: any) {
+      console.error(`[sync] 批量更新失败:`, error);
+      return { updated: 0, skipped: skippedCount, failed: stalePages.length, affectedPages: [] };
     }
 
-    const updatedCount = count ?? staleCount;
-    console.log(
-      `[sync] 同步完成: 更新 ${updatedCount} 项，跳过 ${skippedCount} 项`
-    );
-    return { updated: updatedCount, skipped: skippedCount, failed: 0 };
+    console.log(`[sync] 同步完成: 更新 ${updatedCount} 项，跳过 ${skippedCount} 项`);
+    await bumpVersion('pages');
+    console.log(`[sync] ✅ 已递增 pages 版本号`);
+
+    const affectedPages = stalePages.map(p => ({ locale: p.locale, slug: p.slug }));
+    return { updated: updatedCount, skipped: skippedCount, failed: 0, affectedPages };
   }
 
-  // ========== 3. 无引用页面：仅对需要布局的分类自动创建 ==========
+  // ========== 3. 无引用页面：自动创建布局 ==========
   if (!category || !LAYOUT_CATEGORIES.includes(category as any)) {
     console.log(
       `[sync] 模板 ${templateId} 未被任何页面引用，分类 ${category} 不需要自动创建布局，跳过`
     );
-    return { updated: 0, skipped: 0, failed: 0 };
+    return { updated: 0, skipped: 0, failed: 0, affectedPages: [] };
   }
 
   console.log(`[sync] 未找到引用页面，尝试自动创建布局记录 (category: ${category})`);
@@ -112,63 +116,78 @@ export async function syncTemplateToPages(
   const layoutId = targetLayoutId || generateStableLayoutId(templateId, category);
   console.log(`[sync] 使用布局 ID: ${layoutId}`);
 
-  const { data: existingLayout } = await supabase
-    .from('site_pages')
-    .select('id')
-    .eq('site_id', SITE_ID)
-    .eq('id', layoutId)
-    .eq('locale', 'base')
-    .maybeSingle();
+  // 检查布局是否存在
+  let existingLayout: { id: string; slug: string } | undefined;
+  try {
+    const rows = await sql<{ id: string; slug: string }[]>`
+      SELECT id, slug FROM public.site_pages
+      WHERE site_id = ${SITE_ID}
+        AND id = ${layoutId}
+        AND locale = 'base'
+      LIMIT 1
+    `;
+    existingLayout = rows[0];
+  } catch (error) {
+    console.error(`[sync] 查询布局失败:`, error);
+  }
 
   const now = new Date().toISOString();
 
   if (existingLayout) {
     console.log(`[sync] 布局 ${layoutId} 已存在，更新 template 关联及数据`);
-    const { error: updateError } = await supabase
-      .from('site_pages')
-      .update({
-        template: templateId,
-        template_data: templateData,
-        template_hash: newHash,
-        updated_at: now,
-      })
-      .eq('site_id', SITE_ID)
-      .eq('id', layoutId)
-      .eq('locale', 'base');
-
-    if (updateError) {
-      console.error(`[sync] 更新布局 ${layoutId} 失败:`, updateError);
-      return { updated: 0, skipped: 0, failed: 1 };
+    try {
+      await sql`
+        UPDATE public.site_pages
+        SET template = ${templateId},
+            template_data = ${sql.json(templateData)},
+            template_hash = ${newHash},
+            updated_at = ${now}
+        WHERE site_id = ${SITE_ID}
+          AND id = ${layoutId}
+          AND locale = 'base'
+      `;
+    } catch (error: any) {
+      console.error(`[sync] 更新布局 ${layoutId} 失败:`, error);
+      return { updated: 0, skipped: 0, failed: 1, affectedPages: [] };
     }
 
-    console.log(`[sync] 已更新布局 ${layoutId}`);
-    return { updated: 1, skipped: 0, failed: 0 };
+    await bumpVersion('pages');
+    console.log(`[sync] ✅ 已更新布局 ${layoutId}，递增 pages 版本号`);
+
+    return {
+      updated: 1,
+      skipped: 0,
+      failed: 0,
+      affectedPages: existingLayout.slug ? [{ locale: 'base', slug: existingLayout.slug }] : [],
+    };
   }
 
   // 新建布局记录
-  const { error: insertError } = await supabase
-    .from('site_pages')
-    .insert({
-      site_id: SITE_ID,
-      id: layoutId,
-      locale: 'base',
-      title: `${category} 布局 (${templateId})`,
-      type: category,
-      preset: true,
-      visible: 'visible',
-      template: templateId,
-      template_data: templateData,
-      template_hash: newHash,
-      slug: layoutId,
-      created_at: now,
-      updated_at: now,
-    });
-
-  if (insertError) {
-    console.error(`[sync] 自动创建布局 ${layoutId} 失败:`, insertError);
-    return { updated: 0, skipped: 0, failed: 1 };
+  try {
+    await sql`
+      INSERT INTO public.site_pages (
+        site_id, id, locale, title, type, preset, visible,
+        template, template_data, template_hash, slug, created_at, updated_at
+      ) VALUES (
+        ${SITE_ID}, ${layoutId}, 'base',
+        ${`${category} 布局 (${templateId})`},
+        ${category}, true, 'visible',
+        ${templateId}, ${sql.json(templateData)}, ${newHash},
+        ${layoutId}, ${now}, ${now}
+      )
+    `;
+  } catch (error: any) {
+    console.error(`[sync] 自动创建布局 ${layoutId} 失败:`, error);
+    return { updated: 0, skipped: 0, failed: 1, affectedPages: [] };
   }
 
-  console.log(`[sync] 已自动创建布局 ${layoutId}`);
-  return { updated: 1, skipped: 0, failed: 0 };
+  await bumpVersion('pages');
+  console.log(`[sync] ✅ 已自动创建布局 ${layoutId}，递增 pages 版本号`);
+
+  return {
+    updated: 1,
+    skipped: 0,
+    failed: 0,
+    affectedPages: [{ locale: 'base', slug: layoutId }],
+  };
 }

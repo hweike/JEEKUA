@@ -1,6 +1,6 @@
 // lib/discovery/scanners/static-page.scanner.ts
 import matter from 'gray-matter';
-import { supabase } from '@/lib/supabase/client';
+import sql from '@/lib/db/admin';
 import { upsertPage, SITE_ID } from '../register';
 import { getPrivateStorage } from '@/lib/storage/factory';
 import { mapStaticPageToPageData } from '../mappers/static-page.mapper';
@@ -8,13 +8,6 @@ import type { ProgressCallback } from './types';
 
 const storage = getPrivateStorage();
 
-/**
- * 扫描静态页面（site_pages 表 + MD 文件）
- * 数据源：
- * - 元数据：数据库 site_pages 表
- * - 内容：R2 pages/${locale}/${id}.md
- * 注册类型：page 或 policy
- */
 export async function scanStaticPages(locale: string, onProgress?: ProgressCallback): Promise<void> {
   onProgress?.(`📁 从数据库分页获取静态页面列表 (locale=${locale})`, 'info');
 
@@ -26,28 +19,30 @@ export async function scanStaticPages(locale: string, onProgress?: ProgressCallb
     totalSkipped = 0;
 
   // 获取总数
-  const { count: totalCount, error: countError } = await supabase
-    .from('site_pages')
-    .select('*', { count: 'exact', head: true })
-    .eq('site_id', SITE_ID)
-    .eq('locale', locale);
-
-  if (countError) {
+  let totalCount = 0;
+  try {
+    const countRows = await sql<{ count: string }[]>`
+      SELECT COUNT(*)::text AS count FROM public.site_pages
+      WHERE site_id = ${SITE_ID} AND locale = ${locale}
+    `;
+    totalCount = parseInt(countRows[0]?.count || '0', 10);
+  } catch (countError: any) {
     onProgress?.(`❌ 获取静态页面总数失败: ${countError.message}`, 'error');
     throw countError;
   }
-  onProgress?.(`📊 总共 ${totalCount || 0} 个静态页面，分页处理中`, 'info');
+  onProgress?.(`📊 总共 ${totalCount} 个静态页面，分页处理中`, 'info');
 
   while (true) {
-    const { data: pages, error } = await supabase
-      .from('site_pages')
-      .select('*')
-      .eq('site_id', SITE_ID)
-      .eq('locale', locale)
-      .range(page * PAGE_SIZE, (page + 1) * PAGE_SIZE - 1)
-      .order('updated_at', { ascending: false });
-
-    if (error) {
+    let pages: any[];
+    try {
+      pages = await sql<any[]>`
+        SELECT * FROM public.site_pages
+        WHERE site_id = ${SITE_ID}
+          AND locale = ${locale}
+        ORDER BY updated_at DESC
+        LIMIT ${PAGE_SIZE} OFFSET ${page * PAGE_SIZE}
+      `;
+    } catch (error: any) {
       onProgress?.(`❌ 查询 site_pages 表失败: ${error.message}`, 'error');
       throw error;
     }
@@ -55,19 +50,18 @@ export async function scanStaticPages(locale: string, onProgress?: ProgressCallb
 
     // 查询当前批次已存在的 pages
     const pageIds = pages.map(p => `page:${p.id}`);
-    const { data: existingPages, error: pagesError } = await supabase
-      .from('pages')
-      .select('id, updatedAt, content_hash')
-      .in('id', pageIds)
-      .eq('site_id', SITE_ID)
-      .eq('locale', locale);
-
-    const pageMap = new Map<string, { updatedAt: string; content_hash: string }>();
-    if (!pagesError && existingPages) {
+    let pageMap = new Map<string, { updatedAt: string; content_hash: string }>();
+    try {
+      const existingPages = await sql<{ id: string; updatedAt: string; content_hash: string }[]>`
+        SELECT id, "updatedAt", content_hash FROM public.pages
+        WHERE id IN ${sql(pageIds)}
+          AND site_id = ${SITE_ID}
+          AND locale = ${locale}
+      `;
       for (const p of existingPages) {
         pageMap.set(p.id, { updatedAt: p.updatedAt, content_hash: p.content_hash });
       }
-    } else if (pagesError) {
+    } catch (pagesError: any) {
       onProgress?.(`⚠️ 查询现有页面失败: ${pagesError.message}，将强制全部重新处理`, 'warning');
     }
 
@@ -89,7 +83,6 @@ export async function scanStaticPages(locale: string, onProgress?: ProgressCallb
       const pageId = `page:${id}`;
       const pageUpdatedAt = sp.updated_at || new Date().toISOString();
 
-      // 跳过逻辑
       const existing = pageMap.get(pageId);
       if (existing && existing.updatedAt >= pageUpdatedAt) {
         skipped++;
@@ -98,7 +91,6 @@ export async function scanStaticPages(locale: string, onProgress?: ProgressCallb
         continue;
       }
 
-      // 读取 MD 内容
       const mdKey = `pages/${locale}/${id}.md`;
       let mdContent = '';
       let mdData: any = {};
@@ -119,7 +111,6 @@ export async function scanStaticPages(locale: string, onProgress?: ProgressCallb
       }
 
       try {
-        // 使用 mapper 构建 PageData，传入数据库记录、MD 元数据和内容
         const pageData = mapStaticPageToPageData(sp, mdData, mdContent);
         await upsertPage(pageData, locale);
         success++;

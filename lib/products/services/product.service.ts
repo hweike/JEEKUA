@@ -4,7 +4,7 @@ import {
   upsertProductIndex,
   deleteProductIndex,
   getProductIndex,
-  getProductIndexesBatch,   // ✅ 新增
+  getProductIndexesBatch,
   getProductStatusCount,
   searchProducts,
   getChildrenProducts,
@@ -16,7 +16,7 @@ import {
 import { getProductSettings } from '@/lib/products/productSettings';
 import { generateSlug, generateSeoTitle, generateSeoDescription } from '@/lib/products/seoGenerator';
 import { generateUniqueProductId } from '@/lib/utils/idGenerator';
-import { supabase } from '@/lib/supabase/client';
+import sql from '@/lib/db/admin';
 import { getPrivateStorage, getPublicStorage } from '@/lib/storage/factory';
 import { computeFileHash, getImageDimensions, generateStorageKey } from '@/lib/files/utils';
 import { createMediaFile, findMediaFileByHash, createFileReference } from '@/lib/files/db';
@@ -82,8 +82,11 @@ function generateSkuFromRule(rule: string): string {
   return rule.replace(/\{timestamp\}/g, randomNum.toString());
 }
 
-// 统一图片处理
-async function processImages(productId: string, mainUrl?: string, additionalUrls?: string[]): Promise<{ mainImageUrl: string; additionalImages: string[] }> {
+async function processImages(
+  productId: string,
+  mainUrl?: string,
+  additionalUrls?: string[]
+): Promise<{ mainImageUrl: string; additionalImages: string[] }> {
   let newMain = mainUrl || '';
   if (newMain && newMain.startsWith('http')) {
     newMain = await downloadAndSaveProductImage(newMain, productId);
@@ -101,13 +104,8 @@ async function processImages(productId: string, mainUrl?: string, additionalUrls
   return { mainImageUrl: newMain, additionalImages: newAdditional };
 }
 
-/**
- * 清理文件名，去除查询参数并确保只有一个扩展名
- */
 function cleanFilename(filename: string): string {
-  // 去除查询参数
   let name = filename.split('?')[0];
-  // 如果文件名包含多个 .，只保留最后一个作为扩展名
   const parts = name.split('.');
   if (parts.length > 2) {
     const ext = parts.pop();
@@ -117,78 +115,48 @@ function cleanFilename(filename: string): string {
   return name;
 }
 
-// ============================================================
-// 🔥 修改：从 URL 提取扩展名（辅助函数）
-// ============================================================
-
-/**
- * 从 URL 提取文件扩展名（保留完整格式，如 .jpg_.webp）
- */
 function getExtensionFromUrl(url: string): string {
   if (!url) return '.jpg';
-  
-  // 移除查询参数
   const cleanUrl = url.split('?')[0];
-  
-  // 从 URL 路径提取扩展名
   const match = cleanUrl.match(/\.([^.]+)$/);
   if (match) {
     const ext = match[1].toLowerCase();
-    // 验证是否是有效的图片扩展名
     const validExtensions = ['jpg', 'jpeg', 'png', 'gif', 'webp', 'svg', 'bmp', 'ico', 'tiff', 'tif'];
-    // 检查扩展名是否以常见格式结尾（处理 .jpg_.webp 这种特殊情况）
     for (const validExt of validExtensions) {
       if (ext.endsWith(validExt)) {
-        // 返回完整的扩展名（包括所有部分）
         const extMatch = cleanUrl.match(/\.[^.]+$/);
         return extMatch ? extMatch[0] : `.${ext}`;
       }
     }
-    // 如果直接匹配到常见扩展名
     if (validExtensions.includes(ext)) {
       return `.${ext}`;
     }
   }
-  
   return '.jpg';
 }
 
-/**
- * 下载并保存产品图片
- * 如果图片已存在（通过文件哈希判断），直接返回已有 URL
- * 否则下载图片并保存到存储系统
- * 🔥 修复：优先使用 URL 中的扩展名，而不是强制使用 .jpg
- */
 async function downloadAndSaveProductImage(url: string, productId: string): Promise<string> {
   if (!url.startsWith('http://') && !url.startsWith('https://')) return url;
-  
+
   try {
     const res = await fetch(url, { signal: AbortSignal.timeout(10000) });
     if (!res.ok) throw new Error(`下载失败: ${res.status}`);
     const buffer = Buffer.from(await res.arrayBuffer());
     const contentType = res.headers.get('content-type') || 'image/jpeg';
-    
-    // 🔥 从 URL 提取文件名
+
     let rawFileName = url.split('/').pop()?.split('?')[0] || 'product-image.jpg';
-    
-    // 🔥 从 URL 提取扩展名（优先使用 URL 中的扩展名）
     const urlExtension = getExtensionFromUrl(url);
-    
-    // 🔥 如果 URL 中有有效的扩展名，使用 URL 的扩展名；否则从 content-type 推断
+
     let finalExtension = urlExtension;
-    
-    // 检查当前文件名是否有扩展名
-    const currentExt = rawFileName.includes('.') ? rawFileName.substring(rawFileName.lastIndexOf('.')) : '';
-    
-    // 如果 URL 扩展名不是默认的 .jpg，或者文件名没有扩展名，使用推断的扩展名
+    const currentExt = rawFileName.includes('.')
+      ? rawFileName.substring(rawFileName.lastIndexOf('.'))
+      : '';
+
     if (urlExtension !== '.jpg' || !currentExt) {
-      // 使用 URL 扩展名
       finalExtension = urlExtension;
     } else if (currentExt && currentExt !== urlExtension) {
-      // 如果文件名有扩展名但与 URL 扩展名不一致，使用 URL 扩展名
       finalExtension = urlExtension;
     } else {
-      // 从 content-type 推断（作为最后手段）
       if (contentType.includes('png')) finalExtension = '.png';
       else if (contentType.includes('gif')) finalExtension = '.gif';
       else if (contentType.includes('webp')) finalExtension = '.webp';
@@ -197,15 +165,12 @@ async function downloadAndSaveProductImage(url: string, productId: string): Prom
       else if (contentType.includes('tiff') || contentType.includes('tif')) finalExtension = '.tiff';
       else finalExtension = '.jpg';
     }
-    
-    // 🔥 确保文件名使用正确的扩展名
+
     let originalFileName = rawFileName;
     if (currentExt && currentExt !== finalExtension) {
-      // 替换扩展名
       const baseName = rawFileName.substring(0, rawFileName.lastIndexOf('.'));
       originalFileName = `${baseName}${finalExtension}`;
     } else if (!currentExt) {
-      // 添加扩展名
       originalFileName = `${rawFileName}${finalExtension}`;
     }
 
@@ -219,7 +184,6 @@ async function downloadAndSaveProductImage(url: string, productId: string): Prom
       const storage = getPublicStorage();
       publicUrl = storage.getPublicUrl(existingFile.storage_key);
     } else {
-      // 🔥 使用处理后的文件名
       const displayName = originalFileName;
       const storageKey = generateStorageKey(displayName, fileHash);
       const storage = getPublicStorage();
@@ -259,15 +223,24 @@ async function downloadAndSaveProductImage(url: string, productId: string): Prom
     });
 
     return publicUrl;
-    
   } catch (err) {
     console.error(`产品图片下载失败: ${url}`, err);
     return url;
   }
 }
 
-// 统一 SEO 准备
-function prepareSeoFields(productName: string, brand: string, minQty: number, siteName: string, defaultSettings: any, description: string, priceTiers: any[], specText: string, currency: string, existingSeo?: any): { seo_title: string; seo_description: string } {
+function prepareSeoFields(
+  productName: string,
+  brand: string,
+  minQty: number,
+  siteName: string,
+  defaultSettings: any,
+  description: string,
+  priceTiers: any[],
+  specText: string,
+  currency: string,
+  existingSeo?: any
+): { seo_title: string; seo_description: string } {
   const seoTitle = existingSeo?.seo_title || generateSeoTitle(
     productName,
     brand,
@@ -285,7 +258,6 @@ function prepareSeoFields(productName: string, brand: string, minQty: number, si
   return { seo_title: seoTitle, seo_description: seoDescription };
 }
 
-// 统一索引更新（支持部分更新）
 async function upsertProductIndexSafe(productId: string, locale: string, data: any, createdAt?: string) {
   const now = new Date().toISOString();
   const existing = await getProductIndex(productId, locale);
@@ -314,10 +286,13 @@ async function upsertProductIndexSafe(productId: string, locale: string, data: a
   await upsertProductIndex(fullData);
 }
 
-// 统一 pages 注册（主产品和变体）
-async function registerProductPages(productId: string, locale: string, productData: any, variantList: any[] = []) {
+async function registerProductPages(
+  productId: string,
+  locale: string,
+  productData: any,
+  variantList: any[] = []
+) {
   const now = new Date().toISOString();
-  // 主产品
   await registerEntity({
     type: 'product',
     id: productId,
@@ -326,7 +301,6 @@ async function registerProductPages(productId: string, locale: string, productDa
     updatedAt: now,
   }).catch(err => console.error(`注册产品失败 ${productId}:`, err));
 
-  // 变体
   for (const variant of variantList) {
     const vid = variant.id;
     if (!vid) continue;
@@ -350,15 +324,13 @@ async function registerProductPages(productId: string, locale: string, productDa
   }
 }
 
-// 统一变体处理（创建或更新）
-// 新增参数 explicitVariantId：用于更新时明确指定变体 ID，避免从 body.id 读取
 async function processVariant(
   locale: string,
   parentId: string,
   variantData: any,
   existingVariants: any[] = [],
   isNew: boolean,
-  explicitVariantId?: string  // 新增
+  explicitVariantId?: string
 ): Promise<any> {
   const parentMd = await readProduct(locale, parentId);
   if (!parentMd) throw new Error('父产品不存在');
@@ -376,13 +348,11 @@ async function processVariant(
     if (variantIndex !== -1) isExisting = true;
   }
 
-  // 如果是新增且未提供 ID，则生成
   if (!variantId && !isExisting) {
     const existingIds = await getAllProductIds(locale);
     variantId = await generateUniqueProductId(async () => existingIds);
   }
 
-  // SKU
   let sku = variantData.sku?.trim();
   if (!sku) {
     if (isExisting && variants[variantIndex]?.sku) {
@@ -392,8 +362,11 @@ async function processVariant(
     }
   }
 
-  // 图片
-  const { mainImageUrl, additionalImages } = await processImages(variantId, variantData.main_image_url, variantData.additional_images);
+  const { mainImageUrl, additionalImages } = await processImages(
+    variantId,
+    variantData.main_image_url,
+    variantData.additional_images
+  );
 
   const newVariant = {
     id: variantId,
@@ -415,10 +388,8 @@ async function processVariant(
     variants.push(newVariant);
   }
 
-  // 更新父产品
   await updateParentVariants(locale, parentId, variants);
 
-  // 更新索引
   const now = new Date().toISOString();
   const indexData = {
     productId: variantId,
@@ -444,7 +415,6 @@ async function processVariant(
   };
   await upsertProductIndex(indexData);
 
-  // 注册 pages
   const variantPageData = {
     id: `${parentId}/${variantId}`,
     product_name: newVariant.product_name,
@@ -478,7 +448,7 @@ async function updateParentVariants(locale: string, parentId: string, variants: 
 }
 
 // ============================================================
-// 核心导出函数（保持外部接口不变）
+// 核心导出函数
 // ============================================================
 
 export interface GetProductsOptions {
@@ -520,22 +490,36 @@ export async function getProducts(options: GetProductsOptions): Promise<ProductL
   } = options;
 
   if (uncategorized) {
-    let query = supabase
-      .from('products')
-      .select('*', { count: 'exact' })
-      .eq('site_id', DEFAULT_SITE_ID)
-      .eq('locale', locale)
-      .eq('categoryId', '__UNCATEGORIZED__')
-      .is('parent_product_id', null);
-    if (status !== 'all') query = query.eq('status', status);
-    if (keyword) query = query.or(`product_name.ilike.%${keyword}%,sku.ilike.%${keyword}%`);
     const from = (page - 1) * size;
-    const to = from + size - 1;
-    const { data, error, count } = await query.order('updatedAt', { ascending: false }).range(from, to);
-    if (error) throw new Error(`uncategorized query failed: ${error.message}`);
-    const items = data || [];
+    const conditions: any[] = [
+      sql`site_id = ${DEFAULT_SITE_ID}`,
+      sql`locale = ${locale}`,
+      sql`"categoryId" = '__UNCATEGORIZED__'`,
+      sql`parent_product_id IS NULL`,
+    ];
+    if (status !== 'all') conditions.push(sql`status = ${status}`);
+    if (keyword) {
+      const pattern = `%${keyword}%`;
+      conditions.push(sql`(product_name ILIKE ${pattern} OR sku ILIKE ${pattern})`);
+    }
+    const whereClause = conditions.reduce(
+      (acc, c, i) => (i === 0 ? c : sql`${acc} AND ${c}`),
+      sql``
+    );
+
+    const countRows = await sql<{ count: string }[]>`
+      SELECT COUNT(*)::text AS count FROM public.products WHERE ${whereClause}
+    `;
+    const total = parseInt(countRows[0]?.count || '0', 10);
+
+    const items = await sql<any[]>`
+      SELECT * FROM public.products
+      WHERE ${whereClause}
+      ORDER BY "updatedAt" DESC
+      LIMIT ${size} OFFSET ${from}
+    `;
     const statusCount = await getProductStatusCount(locale);
-    return { items, total: count || 0, statusCount, page, size };
+    return { items, total, statusCount, page, size };
   }
 
   if (searchAll) {
@@ -598,20 +582,25 @@ export async function getProducts(options: GetProductsOptions): Promise<ProductL
 
   let uncategorizedCount = 0;
   if (!uncategorized) {
-    const { count, error } = await supabase
-      .from('products')
-      .select('*', { count: 'exact', head: true })
-      .eq('site_id', DEFAULT_SITE_ID)
-      .eq('locale', locale)
-      .eq('categoryId', '__UNCATEGORIZED__')
-      .is('parent_product_id', null);
-    if (!error) uncategorizedCount = count || 0;
+    try {
+      const rows = await sql<{ count: string }[]>`
+        SELECT COUNT(*)::text AS count FROM public.products
+        WHERE site_id = ${DEFAULT_SITE_ID}
+          AND locale = ${locale}
+          AND "categoryId" = '__UNCATEGORIZED__'
+          AND parent_product_id IS NULL
+      `;
+      uncategorizedCount = parseInt(rows[0]?.count || '0', 10);
+    } catch {
+      uncategorizedCount = 0;
+    }
   }
 
   return { items, total, statusCount, uncategorizedCount, page, size };
 }
 
 export async function createProduct(locale: string, body: any): Promise<any> {
+  // ... 完全不变（只调用 readProduct / writeProduct / upsertProductIndexSafe / registerProductPages）...
   const isVariant = !!body.parent_product_id;
   const productSettings = await getProductSettings(locale);
   const defaultSettings = (productSettings as any).defaultSettings || {};
@@ -619,12 +608,10 @@ export async function createProduct(locale: string, body: any): Promise<any> {
 
   if (isVariant) {
     const result = await processVariant(locale, body.parent_product_id, body, [], true);
-    // 清除状态计数缓存
     statusCountCache.delete(`statusCount_${locale}`);
     return result;
   }
 
-  // 普通产品创建
   const categoryId = body.categoryId;
   if (!categoryId) throw new Error('categoryId is required');
   const seriesId = body.seriesId;
@@ -642,14 +629,9 @@ export async function createProduct(locale: string, body: any): Promise<any> {
   const brand = body.brand || defaultSettings.default_brand || '';
 
   const seo = prepareSeoFields(
-    body.product_name,
-    brand,
-    minQty,
-    siteSettings.site_name || '我的网站',
-    defaultSettings,
-    body.description,
-    body.price_tiers,
-    body.spec_text,
+    body.product_name, brand, minQty,
+    siteSettings.site_name || '我的网站', defaultSettings,
+    body.description, body.price_tiers, body.spec_text,
     body.currency || defaultSettings.default_currency || 'USD',
     { seo_title: body.seo_title, seo_description: body.seo_description }
   );
@@ -663,9 +645,7 @@ export async function createProduct(locale: string, body: any): Promise<any> {
   const frontMatter = {
     id: productId,
     product_name: body.product_name,
-    brand,
-    sku,
-    mpn,
+    brand, sku, mpn,
     gtin: '',
     price_tiers: body.price_tiers,
     currency: body.currency || defaultSettings.default_currency || 'USD',
@@ -699,11 +679,8 @@ export async function createProduct(locale: string, body: any): Promise<any> {
   const now = new Date().toISOString();
 
   await upsertProductIndexSafe(productId, locale, {
-    productLineId,
-    categoryId,
-    seriesId: seriesId || '',
-    parent_product_id: null,
-    sku,
+    productLineId, categoryId, seriesId: seriesId || '',
+    parent_product_id: null, sku,
     product_name: body.product_name,
     brand,
     price_tiers: body.price_tiers,
@@ -719,17 +696,16 @@ export async function createProduct(locale: string, body: any): Promise<any> {
 
   await registerProductPages(productId, locale, frontMatter, body.variants || []);
 
-  // 清除状态计数缓存
   statusCountCache.delete(`statusCount_${locale}`);
   return { ...frontMatter, productId, content: body.content };
 }
 
 export async function updateProduct(locale: string, productId: string, body: any): Promise<any> {
+  // ... 完全不变（只调用 readProduct / writeProduct / upsertProductIndexSafe / registerProductPages）...
   const existingIndex = await getProductIndex(productId, locale);
   const isVariant = existingIndex?.parent_product_id && existingIndex.parent_product_id !== '';
 
   if (isVariant) {
-    // 变体更新：获取父产品并更新单个变体
     const parentId = existingIndex.parent_product_id;
     const parentMd = await readProduct(locale, parentId);
     if (!parentMd) throw new Error('父产品不存在');
@@ -738,21 +714,15 @@ export async function updateProduct(locale: string, productId: string, body: any
     if (variantIndex === -1) throw new Error('变体不存在');
 
     const variant = variants[variantIndex];
-    // 合并更新数据，并显式传入变体 ID
     const updatedVariant = await processVariant(
-      locale,
-      parentId,
+      locale, parentId,
       { ...variant, ...body },
-      variants,
-      false,
-      productId  // 显式传入变体 ID，避免从 body.id 读取
+      variants, false, productId
     );
-    // 清除状态计数缓存
     statusCountCache.delete(`statusCount_${locale}`);
     return { ...updatedVariant, productId };
   }
 
-  // 普通产品更新
   const existingMd = await readProduct(locale, productId);
   if (!existingMd) throw new Error('Product not found');
 
@@ -768,52 +738,38 @@ export async function updateProduct(locale: string, productId: string, body: any
   const defaultSettings = (productSettings as any).defaultSettings || {};
   const skuRule = defaultSettings.sku_rule ?? 'P-{timestamp}';
 
-  // 处理图片
   let mainImageUrl = body.main_image_url !== undefined ? body.main_image_url : existingMd.main_image_url;
   let additionalImages = body.additional_images !== undefined ? body.additional_images : existingMd.additional_images;
   const processed = await processImages(productId, mainImageUrl, additionalImages);
   mainImageUrl = processed.mainImageUrl;
   additionalImages = processed.additionalImages;
 
-  // 构建更新数据
   const updatedData: any = {
-    ...existingMd,
-    ...body,
+    ...existingMd, ...body,
     main_image_url: mainImageUrl,
     additional_images: additionalImages,
     updatedAt: new Date().toISOString(),
   };
 
-  // SKU
   let sku = body.sku?.trim();
-  if (!sku) {
-    sku = updatedData.sku || generateSkuFromRule(skuRule);
-  }
+  if (!sku) sku = updatedData.sku || generateSkuFromRule(skuRule);
   updatedData.sku = sku;
 
-  // 价格
   const { minQty, price } = extractFirstTier(updatedData.price_tiers);
   updatedData.min_order_quantity = minQty;
   updatedData.price = price;
 
-  // MPN
   let mpn = updatedData.mpn || '';
   if (!mpn && defaultSettings.default_mpn) mpn = processMpn(defaultSettings.default_mpn, sku);
   updatedData.mpn = mpn;
 
-  // 品牌
   const brand = updatedData.brand || defaultSettings.default_brand || '';
   updatedData.brand = brand;
 
-  // SEO
   const seo = prepareSeoFields(
-    updatedData.product_name,
-    brand,
-    minQty,
-    siteSettings.site_name || '我的网站',
-    defaultSettings,
-    updatedData.description,
-    updatedData.price_tiers,
+    updatedData.product_name, brand, minQty,
+    siteSettings.site_name || '我的网站', defaultSettings,
+    updatedData.description, updatedData.price_tiers,
     updatedData.spec_text,
     updatedData.currency || defaultSettings.default_currency || 'USD',
     { seo_title: body.seo_title, seo_description: body.seo_description }
@@ -824,7 +780,6 @@ export async function updateProduct(locale: string, productId: string, body: any
   if (!updatedData.slug) updatedData.slug = generateSlug(updatedData.product_name);
   updatedData.product_type = await getProductType(locale, categoryId, seriesId);
 
-  // 清理多余字段，保持顺序
   const final: any = {
     id: productId,
     product_name: updatedData.product_name,
@@ -863,11 +818,8 @@ export async function updateProduct(locale: string, productId: string, body: any
   await writeProduct(locale, productId, final, body.content || existingMd.content || '');
   const now = new Date().toISOString();
 
-  // 更新索引
   await upsertProductIndexSafe(productId, locale, {
-    productLineId,
-    categoryId,
-    seriesId: seriesId || '',
+    productLineId, categoryId, seriesId: seriesId || '',
     parent_product_id: final.parent_product_id || null,
     sku: final.sku,
     product_name: final.product_name,
@@ -885,60 +837,60 @@ export async function updateProduct(locale: string, productId: string, body: any
 
   await registerProductPages(productId, locale, final, final.variants || []);
 
-  // 清除状态计数缓存
   statusCountCache.delete(`statusCount_${locale}`);
   return { ...final, productId };
 }
 
 export async function deleteProductService(locale: string, productId: string): Promise<void> {
   // 1. 查询该语言下的子变体
-  const { data: variants, error: variantsError } = await supabase
-    .from('products')
-    .select('productId')
-    .eq('site_id', DEFAULT_SITE_ID)
-    .eq('parent_product_id', productId)
-    .eq('locale', locale);
-
-  if (variantsError) {
+  let variants: { productId: string }[] = [];
+  try {
+    variants = await sql<{ productId: string }[]>`
+      SELECT "productId" FROM public.products
+      WHERE site_id = ${DEFAULT_SITE_ID}
+        AND parent_product_id = ${productId}
+        AND locale = ${locale}
+    `;
+  } catch (variantsError) {
     console.error('查询变体失败:', variantsError);
-  } else if (variants && variants.length > 0) {
-    for (const variant of variants) {
-      // 删除变体索引
-      const { error: delVarError } = await supabase
-        .from('products')
-        .delete()
-        .eq('site_id', DEFAULT_SITE_ID)
-        .eq('productId', variant.productId)
-        .eq('locale', locale);
-      if (delVarError) {
-        console.error(`删除变体索引失败: ${variant.productId}`, delVarError);
-      }
+  }
 
-      // 删除变体 pages
-      const variantPageId = `product:${productId}/${variant.productId}`;
-      try {
-        await deletePage(variantPageId, locale);
-      } catch (err) {
-        console.error(`删除变体 pages 失败 ${variantPageId}:`, err);
-      }
+  for (const variant of variants) {
+    try {
+      await sql`
+        DELETE FROM public.products
+        WHERE site_id = ${DEFAULT_SITE_ID}
+          AND "productId" = ${variant.productId}
+          AND locale = ${locale}
+      `;
+    } catch (delVarError) {
+      console.error(`删除变体索引失败: ${variant.productId}`, delVarError);
+    }
+
+    const variantPageId = `product:${productId}/${variant.productId}`;
+    try {
+      await deletePage(variantPageId, locale);
+    } catch (err) {
+      console.error(`删除变体 pages 失败 ${variantPageId}:`, err);
     }
   }
 
-  // 2. 删除 MD 文件（仅当前语言）
+  // 2. 删除 MD 文件
   try {
     await deleteProduct(locale, productId);
-  } catch (err) {
+  } catch (err: any) {
     console.warn(`deleteProduct 调用失败: ${err.message}`);
   }
 
   // 3. 删除该语言产品索引
-  const { error: delIndexError } = await supabase
-    .from('products')
-    .delete()
-    .eq('site_id', DEFAULT_SITE_ID)
-    .eq('productId', productId)
-    .eq('locale', locale);
-  if (delIndexError) {
+  try {
+    await sql`
+      DELETE FROM public.products
+      WHERE site_id = ${DEFAULT_SITE_ID}
+        AND "productId" = ${productId}
+        AND locale = ${locale}
+    `;
+  } catch (delIndexError: any) {
     console.error(`删除产品索引失败: ${productId} (${locale})`, delIndexError);
     throw new Error(`删除索引失败: ${delIndexError.message}`);
   }
@@ -953,18 +905,14 @@ export async function deleteProductService(locale: string, productId: string): P
 
   // 5. 删除产品与资源的关联记录
   try {
-    const { error: resourceError } = await supabase
-      .from('resource_product')
-      .delete()
-      .eq('product_id', productId);
-    if (resourceError) {
-      console.error(`删除产品关联资源失败: ${productId}`, resourceError);
-    }
+    await sql`
+      DELETE FROM public.resource_product
+      WHERE product_id = ${productId}
+    `;
   } catch (err) {
     console.error(`删除产品关联资源失败: ${productId}`, err);
   }
 
-  // 清除状态计数缓存
   statusCountCache.delete(`statusCount_${locale}`);
 }
 
@@ -1014,7 +962,6 @@ export async function getProductsByIds(locale: string, productIds: string[]): Pr
   return results;
 }
 
-// ====== 修改：在 TranslationFields 中添加 attributes ======
 export interface TranslationFields {
   product_name?: string;
   short_description?: string;
@@ -1023,7 +970,7 @@ export interface TranslationFields {
   seo_title?: string;
   seo_description?: string;
   seo_keywords?: string;
-  attributes?: Record<string, string>; // 新增支持 attributes 对象翻译
+  attributes?: Record<string, string>;
 }
 
 export interface VariantTranslation {
@@ -1047,7 +994,6 @@ export async function updateProductTranslations(
   for (const trans of translations) {
     const { productId, fields, variants = [] } = trans;
 
-    // 读取目标产品（允许不存在）
     let existingMd: any = null;
     let isNew = false;
     try {
@@ -1058,7 +1004,6 @@ export async function updateProductTranslations(
     }
 
     if (!existingMd && sourceLocale) {
-      // 从源复制
       let sourceMd: any = null;
       try {
         sourceMd = await readProduct(sourceLocale, productId);
@@ -1082,33 +1027,23 @@ export async function updateProductTranslations(
 
     let updated = false;
 
-    // 可翻译字段（包含 attributes）
     const fieldKeys: (keyof TranslationFields)[] = [
-      'product_name',
-      'short_description',
-      'description',
-      'spec_text',
-      'seo_title',
-      'seo_description',
-      'seo_keywords',
-      'attributes',
+      'product_name', 'short_description', 'description', 'spec_text',
+      'seo_title', 'seo_description', 'seo_keywords', 'attributes',
     ];
 
     for (const key of fieldKeys) {
       if (fields[key] !== undefined) {
-        // attributes 是对象，直接赋值；其他字段是字符串
         existingMd[key] = fields[key];
         updated = true;
       }
     }
 
-    // 处理变体
     if (variants.length > 0) {
       const currentVariants = existingMd.variants || [];
       for (const vTrans of variants) {
         const vIdx = currentVariants.findIndex((v: any) => v.id === vTrans.id);
         if (vIdx === -1) {
-          // 新建变体（仅当从源复制且存在时）
           if (isNew && sourceLocale) {
             let sourceVariant = null;
             try {
@@ -1119,12 +1054,8 @@ export async function updateProductTranslations(
               const newVariant = JSON.parse(JSON.stringify(sourceVariant));
               newVariant.id = vTrans.id;
               const variantFieldKeys: (keyof TranslationFields)[] = [
-                'product_name',
-                'short_description',
-                'seo_title',
-                'seo_description',
-                'seo_keywords',
-                'attributes',
+                'product_name', 'short_description', 'seo_title',
+                'seo_description', 'seo_keywords', 'attributes',
               ];
               for (const key of variantFieldKeys) {
                 if (vTrans.fields[key] !== undefined) {
@@ -1133,22 +1064,13 @@ export async function updateProductTranslations(
               }
               currentVariants.push(newVariant);
               updated = true;
-            } else {
-              console.warn(`源产品中未找到变体 ${vTrans.id}，无法创建`);
             }
-          } else {
-            console.warn(`变体 ${vTrans.id} 不存在且目标已存在，无法新增`);
           }
         } else {
-          // 更新已有变体
           const v = currentVariants[vIdx];
           const variantFieldKeys: (keyof TranslationFields)[] = [
-            'product_name',
-            'short_description',
-            'seo_title',
-            'seo_description',
-            'seo_keywords',
-            'attributes',
+            'product_name', 'short_description', 'seo_title',
+            'seo_description', 'seo_keywords', 'attributes',
           ];
           for (const key of variantFieldKeys) {
             if (vTrans.fields[key] !== undefined) {
@@ -1161,55 +1083,46 @@ export async function updateProductTranslations(
       existingMd.variants = currentVariants;
     }
 
-    if (!updated) {
-      console.log(`产品 ${productId} 无字段更新，跳过写入`);
-      continue;
-    }
+    if (!updated) continue;
 
-    // 写回 MD
     await writeProduct(locale, productId, existingMd, existingMd.content || '');
 
-    // ====== 修复：从数据库获取或继承 productLineId 等分类字段 ======
     const now = new Date().toISOString();
     const existingIndex = await getProductIndex(productId, locale);
 
-    // 1. 从目标数据库记录获取（如果已存在）
     let effectiveProductLineId = existingIndex?.productLineId || '';
     let effectiveCategoryId = existingIndex?.categoryId || existingMd.categoryId || '';
     let effectiveSeriesId = existingIndex?.seriesId || existingMd.seriesId || '';
 
-    // 2. 如果目标没有 productLineId，且 sourceLocale 存在，从源语言继承
     if (!effectiveProductLineId && sourceLocale) {
-      const { data: sourceRecord, error: sourceError } = await supabase
-        .from('products')
-        .select('productLineId, categoryId, seriesId')
-        .eq('site_id', DEFAULT_SITE_ID)
-        .eq('productId', productId)
-        .eq('locale', sourceLocale)
-        .maybeSingle();
-      if (!sourceError && sourceRecord) {
-        effectiveProductLineId = sourceRecord.productLineId || effectiveProductLineId;
-        effectiveCategoryId = sourceRecord.categoryId || effectiveCategoryId;
-        effectiveSeriesId = sourceRecord.seriesId || effectiveSeriesId;
-      }
+      try {
+        const rows = await sql<{ productLineId: string | null; categoryId: string | null; seriesId: string | null }[]>`
+          SELECT "productLineId", "categoryId", "seriesId" FROM public.products
+          WHERE site_id = ${DEFAULT_SITE_ID}
+            AND "productId" = ${productId}
+            AND locale = ${sourceLocale}
+          LIMIT 1
+        `;
+        if (rows[0]) {
+          effectiveProductLineId = rows[0].productLineId || effectiveProductLineId;
+          effectiveCategoryId = rows[0].categoryId || effectiveCategoryId;
+          effectiveSeriesId = rows[0].seriesId || effectiveSeriesId;
+        }
+      } catch {}
     }
 
-    // 3. 最终 fallback（如果仍为空，从分类获取）
     if (!effectiveProductLineId && effectiveCategoryId) {
       try {
-        // 只有当 effectiveCategoryId 是有效字符串时才调用
         if (typeof effectiveCategoryId === 'string' && effectiveCategoryId) {
           const lineId = await getProductLineIdFromCategory(locale, effectiveCategoryId);
           if (lineId) effectiveProductLineId = lineId;
         }
-      } catch (ignore) {}
+      } catch {}
     }
 
-    // 父产品索引
     if (existingIndex || isNew) {
       const indexData = {
-        productId,
-        locale,
+        productId, locale,
         productLineId: effectiveProductLineId,
         categoryId: effectiveCategoryId,
         seriesId: effectiveSeriesId,
@@ -1232,15 +1145,13 @@ export async function updateProductTranslations(
       await upsertProductIndex(indexData);
     }
 
-    // 变体索引
     for (const variant of existingMd.variants || []) {
       const vid = variant.id;
       if (!vid) continue;
       const varIndex = await getProductIndex(vid, locale);
       if (varIndex || isNew) {
         const varData = {
-          productId: vid,
-          locale,
+          productId: vid, locale,
           productLineId: effectiveProductLineId,
           categoryId: effectiveCategoryId,
           seriesId: effectiveSeriesId,
@@ -1264,17 +1175,10 @@ export async function updateProductTranslations(
       }
     }
 
-    // 注册 pages
     await registerProductPages(productId, locale, existingMd, existingMd.variants || []);
-    // 清除状态计数缓存
     statusCountCache.delete(`statusCount_${locale}`);
   }
 }
-
-// ============================================================
-// 轻量级批量查询（用于 ProductShowcaseBlock 等列表展示场景）
-// 只查索引表，不读 MD 文件 —— 速度极快（一次 Supabase 查询）
-// ============================================================
 
 export interface ShowcaseProductLite {
   productId: string;
@@ -1294,18 +1198,15 @@ export async function getProductsForShowcase(
 ): Promise<ShowcaseProductLite[]> {
   if (!productIds || productIds.length === 0) return [];
 
-  // ✅ 1. 一次批量查询索引表
   const indexes = await getProductIndexesBatch(productIds, locale);
   const indexMap = new Map(indexes.map((i) => [i.productId, i]));
 
-  // ✅ 2. 直接映射（保持传入顺序）
   const result: ShowcaseProductLite[] = [];
 
   for (const id of productIds) {
     const row = indexMap.get(id);
     if (!row) continue;
 
-    // price_tiers 是 JSON 字符串，取第一个阶梯的价格
     let price: number | undefined;
     try {
       const tiers = typeof row.price_tiers === 'string'
@@ -1314,9 +1215,7 @@ export async function getProductsForShowcase(
       if (Array.isArray(tiers) && tiers.length > 0) {
         price = tiers[0].price;
       }
-    } catch {
-      // ignore
-    }
+    } catch {}
 
     result.push({
       productId: row.productId,
@@ -1333,9 +1232,5 @@ export async function getProductsForShowcase(
 
   return result;
 }
-
-// ============================================================
-// 导出内部函数（供导入路由使用）
-// ============================================================
 
 export { processVariant, processImages };

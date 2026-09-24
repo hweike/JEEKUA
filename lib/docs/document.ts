@@ -1,9 +1,10 @@
-import { supabase } from '@/lib/supabase/client';
+// lib/docs/document.ts
+import sql from '@/lib/db/admin';
 import { getPrivateStorage } from '@/lib/storage/factory';
 import type { Doc } from './types';
 import { registerEntity } from '@/lib/discovery/services/business-register-pages.service';
 import { deletePage } from '@/lib/discovery/register';
-import { getDocsLib } from './docs-lib';
+import { getDocsLib, getDocsLibs } from './docs-lib';
 
 const DEFAULT_SITE_ID = process.env.NEXT_PUBLIC_SITE_ID || '000001';
 
@@ -56,21 +57,22 @@ async function getLibSlug(libId: string): Promise<string> {
 }
 
 async function getNextOrderIndex(locale: string, libId: string, parentId: string | null): Promise<number> {
-  const { data: siblings } = await supabase
-    .from('documents')
-    .select('order_index')
-    .eq('site_id', DEFAULT_SITE_ID)
-    .eq('lib_id', libId)
-    .eq('locale', locale)
-    .eq('parent_id', parentId ?? null)
-    .order('order_index', { ascending: false })
-    .limit(1);
-  return (siblings && siblings.length > 0) ? siblings[0].order_index + 1 : 0;
+  try {
+    const rows = await sql<{ order_index: number }[]>`
+      SELECT order_index FROM public.documents
+      WHERE site_id = ${DEFAULT_SITE_ID}
+        AND lib_id = ${libId}
+        AND locale = ${locale}
+        AND parent_id ${parentId === null ? sql`IS NULL` : sql`= ${parentId}`}
+      ORDER BY order_index DESC
+      LIMIT 1
+    `;
+    return rows.length > 0 ? rows[0].order_index + 1 : 0;
+  } catch {
+    return 0;
+  }
 }
 
-/**
- * 注册文档到 pages 表（异步，不阻塞主流程）
- */
 async function registerDocToPages(
   doc: Doc,
   locale: string,
@@ -99,46 +101,47 @@ async function registerDocToPages(
   }).catch(err => console.error(`注册文档失败 (${doc.id}):`, err));
 }
 
-/**
- * 确保目标语言存在该文档，若不存在则从源复制
- * 返回 { libId, existed } 其中 existed 表示是否原本已存在
- */
 async function ensureDocExistsInTarget(
   targetLocale: string,
   docId: string,
   sourceLocale?: string
 ): Promise<{ libId: string; existed: boolean }> {
-  const { data: targetData, error: targetError } = await supabase
-    .from('documents')
-    .select('lib_id')
-    .eq('site_id', DEFAULT_SITE_ID)
-    .eq('id', docId)
-    .eq('locale', targetLocale)
-    .maybeSingle();
-
-  if (targetData) {
-    return { libId: targetData.lib_id, existed: true };
-  }
+  try {
+    const rows = await sql<{ lib_id: string }[]>`
+      SELECT lib_id FROM public.documents
+      WHERE site_id = ${DEFAULT_SITE_ID}
+        AND id = ${docId}
+        AND locale = ${targetLocale}
+      LIMIT 1
+    `;
+    if (rows[0]) {
+      return { libId: rows[0].lib_id, existed: true };
+    }
+  } catch {}
 
   if (!sourceLocale) {
     throw new Error(`文档 ${docId} 在目标语言中不存在且未提供源语言`);
   }
 
-  const { data: sourceData, error: sourceError } = await supabase
-    .from('documents')
-    .select('lib_id')
-    .eq('site_id', DEFAULT_SITE_ID)
-    .eq('id', docId)
-    .eq('locale', sourceLocale)
-    .maybeSingle();
-
-  if (sourceError || !sourceData) {
-    throw new Error(`无法从源语言获取文档 ${docId} 的信息: ${sourceError?.message || '不存在'}`);
+  let sourceLibId: string;
+  try {
+    const rows = await sql<{ lib_id: string }[]>`
+      SELECT lib_id FROM public.documents
+      WHERE site_id = ${DEFAULT_SITE_ID}
+        AND id = ${docId}
+        AND locale = ${sourceLocale}
+      LIMIT 1
+    `;
+    if (!rows[0]) {
+      throw new Error(`无法从源语言获取文档 ${docId} 的信息: 不存在`);
+    }
+    sourceLibId = rows[0].lib_id;
+  } catch (sourceError: any) {
+    throw new Error(`无法从源语言获取文档 ${docId} 的信息: ${sourceError.message}`);
   }
 
-  const libId = sourceData.lib_id;
-  await copyDocument(sourceLocale, targetLocale, libId, docId);
-  return { libId, existed: false };
+  await copyDocument(sourceLocale, targetLocale, sourceLibId, docId);
+  return { libId: sourceLibId, existed: false };
 }
 
 // ============================================================
@@ -146,53 +149,61 @@ async function ensureDocExistsInTarget(
 // ============================================================
 
 export async function getDocsByLib(locale: string, libId: string): Promise<Doc[]> {
-  const { data, error } = await supabase
-    .from('documents')
-    .select('*')
-    .eq('site_id', DEFAULT_SITE_ID)
-    .eq('lib_id', libId)
-    .eq('locale', locale)
-    .order('order_index', { ascending: true });
-
-  if (error) {
+  try {
+    const data = await sql<any[]>`
+      SELECT * FROM public.documents
+      WHERE site_id = ${DEFAULT_SITE_ID}
+        AND lib_id = ${libId}
+        AND locale = ${locale}
+      ORDER BY order_index ASC
+    `;
+    return data.map(mapRowToDoc);
+  } catch (error) {
     console.error('获取文档列表失败:', error);
     return [];
   }
-  return data.map(mapRowToDoc);
 }
 
 export async function getDocument(locale: string, libId: string, docId: string) {
-  const { data, error } = await supabase
-    .from('documents')
-    .select('*')
-    .eq('site_id', DEFAULT_SITE_ID)
-    .eq('lib_id', libId)
-    .eq('id', docId)
-    .eq('locale', locale)
-    .maybeSingle();
+  let row: any;
+  try {
+    const rows = await sql<any[]>`
+      SELECT * FROM public.documents
+      WHERE site_id = ${DEFAULT_SITE_ID}
+        AND lib_id = ${libId}
+        AND id = ${docId}
+        AND locale = ${locale}
+      LIMIT 1
+    `;
+    row = rows[0];
+  } catch {
+    return null;
+  }
+  if (!row) return null;
 
-  if (error || !data) return null;
-
-  const doc = mapRowToDoc(data);
+  const doc = mapRowToDoc(row);
   const content = await readMarkdown(locale, libId, doc.file);
   return { ...doc, content };
 }
 
-/**
- * 根据文档库 ID 和文档 slug 获取完整文档（含内容）
- */
 export async function getDocBySlug(locale: string, libId: string, slug: string) {
-  const { data, error } = await supabase
-    .from('documents')
-    .select('*')
-    .eq('site_id', DEFAULT_SITE_ID)
-    .eq('lib_id', libId)
-    .eq('locale', locale)
-    .eq('slug', slug)
-    .maybeSingle();
+  let row: any;
+  try {
+    const rows = await sql<any[]>`
+      SELECT * FROM public.documents
+      WHERE site_id = ${DEFAULT_SITE_ID}
+        AND lib_id = ${libId}
+        AND locale = ${locale}
+        AND slug = ${slug}
+      LIMIT 1
+    `;
+    row = rows[0];
+  } catch {
+    return null;
+  }
+  if (!row) return null;
 
-  if (error || !data) return null;
-  const doc = mapRowToDoc(data);
+  const doc = mapRowToDoc(row);
   const content = await readMarkdown(locale, libId, doc.file);
   return { doc, content };
 }
@@ -207,13 +218,17 @@ export async function saveDocument(
   const docId = docData.id || generateDocId();
   const file = docData.file || `${docId}.md`;
 
-  const { data: existing } = await supabase
-    .from('documents')
-    .select('*')
-    .eq('site_id', DEFAULT_SITE_ID)
-    .eq('id', docId)
-    .eq('locale', locale)
-    .maybeSingle();
+  let existing: any;
+  try {
+    const rows = await sql<any[]>`
+      SELECT * FROM public.documents
+      WHERE site_id = ${DEFAULT_SITE_ID}
+        AND id = ${docId}
+        AND locale = ${locale}
+      LIMIT 1
+    `;
+    existing = rows[0];
+  } catch {}
 
   const isNew = !existing;
 
@@ -243,26 +258,45 @@ export async function saveDocument(
   let createdAt = now;
 
   if (isNew) {
-    const { error } = await supabase
-      .from('documents')
-      .insert({
-        site_id: DEFAULT_SITE_ID,
-        ...docPayload,
-        created_at: now,
-      });
-    if (error) throw new Error('插入文档失败: ' + error.message);
+    try {
+      await sql`
+        INSERT INTO public.documents (
+          site_id, id, lib_id, locale, title, slug, parent_id, order_index,
+          file, template_id, seo_title, seo_description, seo_keywords,
+          created_at, updated_at
+        ) VALUES (
+          ${DEFAULT_SITE_ID}, ${docPayload.id}, ${docPayload.lib_id}, ${docPayload.locale},
+          ${docPayload.title}, ${docPayload.slug}, ${docPayload.parent_id}, ${docPayload.order_index},
+          ${docPayload.file}, ${docPayload.template_id},
+          ${docPayload.seo_title}, ${docPayload.seo_description}, ${docPayload.seo_keywords},
+          ${now}, ${now}
+        )
+      `;
+    } catch (error: any) {
+      throw new Error('插入文档失败: ' + error.message);
+    }
     createdAt = now;
   } else {
-    const { error } = await supabase
-      .from('documents')
-      .update({
-        ...docPayload,
-        created_at: existing.created_at,
-      })
-      .eq('site_id', DEFAULT_SITE_ID)
-      .eq('id', docId)
-      .eq('locale', locale);
-    if (error) throw new Error('更新文档失败: ' + error.message);
+    try {
+      await sql`
+        UPDATE public.documents
+        SET title = ${docPayload.title},
+            slug = ${docPayload.slug},
+            parent_id = ${docPayload.parent_id},
+            order_index = ${docPayload.order_index},
+            file = ${docPayload.file},
+            template_id = ${docPayload.template_id},
+            seo_title = ${docPayload.seo_title},
+            seo_description = ${docPayload.seo_description},
+            seo_keywords = ${docPayload.seo_keywords},
+            updated_at = ${now}
+        WHERE site_id = ${DEFAULT_SITE_ID}
+          AND id = ${docId}
+          AND locale = ${locale}
+      `;
+    } catch (error: any) {
+      throw new Error('更新文档失败: ' + error.message);
+    }
     createdAt = existing.created_at;
   }
 
@@ -285,6 +319,9 @@ export async function saveDocument(
   };
 
   await registerDocToPages(resultDoc, locale, libId, content);
+
+  // ✅ 新增：清空文档参数缓存
+  clearAllDocParamsCache();
 
   return resultDoc;
 }
@@ -316,47 +353,51 @@ export async function copyDocument(
   );
 }
 
-/**
- * 删除文档（仅删除当前文档，子文档保留并提升为顶级文档）
- */
 export async function deleteDocument(locale: string, libId: string, docId: string): Promise<void> {
-  // 1. 查找当前文档的直接子文档（parent_id == docId）
-  const { data: children, error: childError } = await supabase
-    .from('documents')
-    .select('id')
-    .eq('site_id', DEFAULT_SITE_ID)
-    .eq('lib_id', libId)
-    .eq('locale', locale)
-    .eq('parent_id', docId);
-
-  if (childError) {
+  // 1. 查找直接子文档
+  let children: { id: string }[] = [];
+  try {
+    children = await sql<{ id: string }[]>`
+      SELECT id FROM public.documents
+      WHERE site_id = ${DEFAULT_SITE_ID}
+        AND lib_id = ${libId}
+        AND locale = ${locale}
+        AND parent_id = ${docId}
+    `;
+  } catch (childError: any) {
     throw new Error('查询子文档失败: ' + childError.message);
   }
 
-  // 2. 更新所有子文档的 parent_id 为 null（提升为顶级）
-  if (children && children.length > 0) {
+  // 2. 将子文档提升为顶级
+  if (children.length > 0) {
     const childIds = children.map(c => c.id);
-    const { error: updateError } = await supabase
-      .from('documents')
-      .update({ parent_id: null })
-      .eq('site_id', DEFAULT_SITE_ID)
-      .eq('lib_id', libId)
-      .eq('locale', locale)
-      .in('id', childIds);
-    if (updateError) {
+    try {
+      await sql`
+        UPDATE public.documents
+        SET parent_id = NULL
+        WHERE site_id = ${DEFAULT_SITE_ID}
+          AND lib_id = ${libId}
+          AND locale = ${locale}
+          AND id IN ${sql(childIds)}
+      `;
+    } catch (updateError: any) {
       throw new Error('更新子文档父级失败: ' + updateError.message);
     }
   }
 
-  // 3. 删除当前文档的 Markdown 文件
-  const { data: docFile } = await supabase
-    .from('documents')
-    .select('file')
-    .eq('site_id', DEFAULT_SITE_ID)
-    .eq('lib_id', libId)
-    .eq('locale', locale)
-    .eq('id', docId)
-    .maybeSingle();
+  // 3. 删除 Markdown 文件
+  let docFile: { file: string } | undefined;
+  try {
+    const rows = await sql<{ file: string }[]>`
+      SELECT file FROM public.documents
+      WHERE site_id = ${DEFAULT_SITE_ID}
+        AND lib_id = ${libId}
+        AND locale = ${locale}
+        AND id = ${docId}
+      LIMIT 1
+    `;
+    docFile = rows[0];
+  } catch {}
 
   if (docFile) {
     const key = `docs/${locale}/${libId}/${docFile.file}`;
@@ -366,31 +407,31 @@ export async function deleteDocument(locale: string, libId: string, docId: strin
     } catch {}
   }
 
-  // 4. 删除当前文档的数据库记录
-  const { error: deleteError } = await supabase
-    .from('documents')
-    .delete()
-    .eq('site_id', DEFAULT_SITE_ID)
-    .eq('lib_id', libId)
-    .eq('locale', locale)
-    .eq('id', docId);
-
-  if (deleteError) {
+  // 4. 删除数据库记录
+  try {
+    await sql`
+      DELETE FROM public.documents
+      WHERE site_id = ${DEFAULT_SITE_ID}
+        AND lib_id = ${libId}
+        AND locale = ${locale}
+        AND id = ${docId}
+    `;
+  } catch (deleteError: any) {
     throw new Error('删除文档失败: ' + deleteError.message);
   }
 
-   // 5. 删除当前文档的 pages 记录（使用统一的 deletePage 函数）
+  // 5. 删除 pages 记录
   const pageId = `doc:${docId}`;
   try {
     await deletePage(pageId, locale);
   } catch (err) {
     console.error(`删除文档 pages 失败 (${pageId}):`, err);
   }
+
+  // ✅ 新增：清空文档参数缓存
+  clearAllDocParamsCache();
 }
 
-/**
- * 批量更新排序（单语言）- 增加重试机制
- */
 export async function updateDocOrders(
   locale: string,
   libId: string,
@@ -401,48 +442,44 @@ export async function updateDocOrders(
     let attempt = 0;
     while (attempt <= retries) {
       try {
-        const { error } = await supabase
-          .from('documents')
-          .update({
-            parent_id: item.parentId,
-            order_index: item.order,
-            updated_at: new Date().toISOString(),
-          })
-          .eq('site_id', DEFAULT_SITE_ID)
-          .eq('id', item.id)
-          .eq('locale', locale);
-        if (error) throw error;
-        break; // 成功则退出重试循环
-      } catch (err) {
+        await sql`
+          UPDATE public.documents
+          SET parent_id = ${item.parentId},
+              order_index = ${item.order},
+              updated_at = ${new Date().toISOString()}
+          WHERE site_id = ${DEFAULT_SITE_ID}
+            AND id = ${item.id}
+            AND locale = ${locale}
+        `;
+        break;
+      } catch (err: any) {
         attempt++;
         if (attempt > retries) {
           throw new Error(`更新排序失败 (locale: ${locale}, id: ${item.id}): ${err.message}`);
         }
-        // 指数退避等待
         await new Promise(r => setTimeout(r, 100 * Math.pow(2, attempt - 1)));
       }
     }
   }
 }
 
-
-/**
- * 跨语言同步排序（所有语言）- 限制并发数
- */
 export async function syncDocOrdersAllLocales(
   libId: string,
   items: Array<{ id: string; parentId: string | null; order: number }>
 ): Promise<void> {
-  // 获取该文档库的所有语言
-  const { data: localesData } = await supabase
-    .from('documents')
-    .select('locale')
-    .eq('site_id', DEFAULT_SITE_ID)
-    .eq('lib_id', libId);
-  const locales = [...new Set(localesData?.map(row => row.locale) || [])];
+  let locales: string[] = [];
+  try {
+    const rows = await sql<{ locale: string }[]>`
+      SELECT DISTINCT locale FROM public.documents
+      WHERE site_id = ${DEFAULT_SITE_ID}
+        AND lib_id = ${libId}
+    `;
+    locales = rows.map(r => r.locale);
+  } catch {
+    return;
+  }
   if (locales.length === 0) return;
 
-  // 限制并发数：每次最多处理 2 个语言
   const concurrency = 2;
   const errors: string[] = [];
 
@@ -452,7 +489,7 @@ export async function syncDocOrdersAllLocales(
       batch.map(async (locale) => {
         try {
           await updateDocOrders(locale, libId, items);
-        } catch (err) {
+        } catch (err: any) {
           const msg = `语言 ${locale} 更新失败: ${err.message}`;
           errors.push(msg);
           console.error(msg);
@@ -466,20 +503,14 @@ export async function syncDocOrdersAllLocales(
   }
 }
 
-/**
- * 获取文档树（层级结构，含子文档）
- * 自动修复悬空父ID：若父文档不存在，则置为 null
- */
 export async function getDocTree(locale: string, libId: string): Promise<any[]> {
   const docs = await getDocsByLib(locale, libId);
   if (!docs || docs.length === 0) {
     return [];
   }
 
-  // 收集所有文档ID，用于验证父ID是否存在
   const allIds = new Set(docs.map(d => d.id));
 
-  // 修复悬空父ID：将指向不存在文档的 parentId 置为 null
   const cleanedDocs = docs.map(doc => {
     if (doc.parentId && !allIds.has(doc.parentId)) {
       console.warn(`[getDocTree] 孤儿文档: ${doc.id} 的 parentId ${doc.parentId} 不存在，已提升为一级文档`);
@@ -488,7 +519,6 @@ export async function getDocTree(locale: string, libId: string): Promise<any[]> 
     return doc;
   });
 
-  // 构建树形结构
   const map = new Map<string, any>();
   const roots: any[] = [];
 
@@ -505,7 +535,6 @@ export async function getDocTree(locale: string, libId: string): Promise<any[]> 
     }
   });
 
-  // 递归排序
   const sortTree = (nodes: any[]) => {
     nodes.sort((a, b) => a.order - b.order);
     nodes.forEach(node => sortTree(node.children));
@@ -585,4 +614,73 @@ export async function updateDocTranslations(
   }
 
   return { success, failed, errors };
+}
+
+// ============================================================
+// ✅ 新增：获取所有文档的 {locale, libSlug, docSlug}
+// 用于 generateStaticParams 预生成
+// ============================================================
+
+let cachedAllDocParams: Array<{ locale: string; libSlug: string; docSlug: string }> | null = null;
+let cachedAllDocParamsAt = 0;
+const ALL_DOC_PARAMS_TTL = 5 * 60 * 1000;
+
+export async function getAllDocParams(): Promise<Array<{ locale: string; libSlug: string; docSlug: string }>> {
+  const now = Date.now();
+
+  if (cachedAllDocParams && now - cachedAllDocParamsAt < ALL_DOC_PARAMS_TTL) {
+    console.log(`[getAllDocParams] ✅ 命中缓存（${cachedAllDocParams.length} 条）`);
+    return cachedAllDocParams;
+  }
+
+  console.log(`[getAllDocParams] ❌ 未命中，查库中...`);
+  const start = Date.now();
+
+  try {
+    // 1. 查所有文档（只要 lib_id、locale、slug）
+    const rows = await sql<{ locale: string; lib_id: string; slug: string }[]>`
+      SELECT locale, lib_id, slug
+      FROM public.documents
+      WHERE site_id = ${DEFAULT_SITE_ID}
+        AND slug IS NOT NULL
+        AND slug != ''
+    `;
+
+    // 2. 拿所有文档库，建立 libId → libSlug 映射
+    const libs = await getDocsLibs();
+    const libSlugMap = new Map<string, string>();
+    for (const lib of libs) {
+      if (lib.id && lib.slug) {
+        libSlugMap.set(lib.id, lib.slug);
+      }
+    }
+
+    // 3. 拼装结果（只保留能拿到 libSlug 的）
+    const result: Array<{ locale: string; libSlug: string; docSlug: string }> = [];
+    for (const r of rows) {
+      const libSlug = libSlugMap.get(r.lib_id);
+      if (!libSlug) continue;
+      result.push({
+        locale: r.locale,
+        libSlug,
+        docSlug: r.slug,
+      });
+    }
+
+    const elapsed = Date.now() - start;
+    console.log(`[getAllDocParams] ✅ 完成，${result.length} 条，耗时 ${elapsed}ms`);
+
+    cachedAllDocParams = result;
+    cachedAllDocParamsAt = now;
+    return result;
+  } catch (error: any) {
+    console.error(`[getAllDocParams] 失败: ${error.message}`);
+    return cachedAllDocParams ?? [];
+  }
+}
+
+export function clearAllDocParamsCache(): void {
+  cachedAllDocParams = null;
+  cachedAllDocParamsAt = 0;
+  console.log('[getAllDocParams] 缓存已清空');
 }

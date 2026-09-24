@@ -1,5 +1,5 @@
 // lib/discovery/services/product-sync.service.ts
-import { supabase } from '@/lib/supabase/client';
+import sql from '@/lib/db/admin';
 import { getEnabledLanguages } from '@/lib/languages/settings';
 import { LANGUAGES } from '@/lib/languages/config';
 import { readProduct, writeProduct } from '@/lib/products/mdParser';
@@ -94,7 +94,7 @@ export interface ProductSyncResult {
 }
 
 // ============================================================
-// 获取同步状态列表
+// 获取同步状态列表 — 已迁移
 // ============================================================
 
 export async function getProductSyncStatus(
@@ -102,41 +102,41 @@ export async function getProductSyncStatus(
   includeVariants: boolean = true
 ): Promise<ProductSyncResult> {
   const enabledCodes = await getEnabledLanguages();
-  const allEnabledLocales = LANGUAGES.filter(lang => enabledCodes.includes(lang.code)).map(lang => lang.code);
+  const allEnabledLocales = LANGUAGES
+    .filter(lang => enabledCodes.includes(lang.code))
+    .map(lang => lang.code);
 
   let targetLocales: string[];
   if (sourceLocale === 'zh') {
-    // 中文→英文：仅目标英文
     targetLocales = allEnabledLocales.filter(loc => loc === 'en');
   } else {
     targetLocales = allEnabledLocales.filter(loc => loc !== sourceLocale);
   }
   const totalTargetCount = targetLocales.length;
 
-  let query = supabase
-    .from('products')
-    .select(`
-      productId,
-      product_name,
-      sku,
-      slug,
-      main_image_url,
-      updatedAt,
-      source_locale,
-      source_product_id,
-      parent_product_id
-    `)
-    .eq('site_id', SITE_ID)
-    .eq('locale', sourceLocale);
-
+  // 1. 查询产品列表
+  const conditions: any[] = [
+    sql`site_id = ${SITE_ID}`,
+    sql`locale = ${sourceLocale}`,
+  ];
   if (!includeVariants) {
-    query = query.is('parent_product_id', null);
+    conditions.push(sql`parent_product_id IS NULL`);
   }
+  const whereClause = conditions.reduce(
+    (acc, c, i) => (i === 0 ? c : sql`${acc} AND ${c}`),
+    sql``
+  );
 
-  query = query.order('updatedAt', { ascending: false });
-
-  const { data: products, error } = await query;
-  if (error) {
+  let products: any[];
+  try {
+    products = await sql<any[]>`
+      SELECT "productId", product_name, sku, slug, main_image_url,
+             "updatedAt", source_locale, source_product_id, parent_product_id
+      FROM public.products
+      WHERE ${whereClause}
+      ORDER BY "updatedAt" DESC
+    `;
+  } catch (error: any) {
     console.error('查询产品失败:', error);
     throw new Error(`查询产品失败: ${error.message}`);
   }
@@ -149,27 +149,29 @@ export async function getProductSyncStatus(
     .filter(p => p.parent_product_id === null)
     .map(p => p.productId);
 
-  let syncQuery = supabase
-    .from('products')
-    .select('source_product_id, source_locale, productId, locale')
-    .eq('site_id', SITE_ID)
-    .in('source_product_id', parentProductIds)
-    .eq('source_locale', sourceLocale)
-    .in('locale', targetLocales);
-
-  const { data: syncRecords, error: syncError } = await syncQuery;
-  if (syncError) {
-    console.error('查询同步记录失败:', syncError);
-    throw new Error(`查询同步记录失败: ${syncError.message}`);
+  // 2. 查询同步记录（仅在 ID 列表和目标语言都非空时执行）
+  let syncRecords: any[] = [];
+  if (parentProductIds.length > 0 && targetLocales.length > 0) {
+    try {
+      syncRecords = await sql<any[]>`
+        SELECT source_product_id, source_locale, "productId", locale
+        FROM public.products
+        WHERE site_id = ${SITE_ID}
+          AND source_product_id IN ${sql(parentProductIds)}
+          AND source_locale = ${sourceLocale}
+          AND locale IN ${sql(targetLocales)}
+      `;
+    } catch (syncError: any) {
+      console.error('查询同步记录失败:', syncError);
+      throw new Error(`查询同步记录失败: ${syncError.message}`);
+    }
   }
 
   const syncMap = new Map<string, Set<string>>();
-  if (syncRecords) {
-    for (const rec of syncRecords) {
-      const pid = rec.source_product_id;
-      if (!syncMap.has(pid)) syncMap.set(pid, new Set());
-      syncMap.get(pid)!.add(rec.locale);
-    }
+  for (const rec of syncRecords) {
+    const pid = rec.source_product_id;
+    if (!syncMap.has(pid)) syncMap.set(pid, new Set());
+    syncMap.get(pid)!.add(rec.locale);
   }
 
   const items: ProductSyncItem[] = products.map(p => {
@@ -195,7 +197,7 @@ export async function getProductSyncStatus(
 }
 
 // ============================================================
-// 批量同步实现（顶层过滤父产品）
+// 批量同步实现（顶层过滤父产品）— 已迁移
 // ============================================================
 
 interface SyncProgressLog {
@@ -210,7 +212,7 @@ interface BatchSyncOptions {
   productIds: string[];
   mode: 'repair' | 'copy' | 'copy_translate';
   operator: string;
-  syncStrategy?: 'full' | 'incremental';  // 新增策略
+  syncStrategy?: 'full' | 'incremental';
   onProgress?: (log: SyncProgressLog) => void;
 }
 
@@ -221,22 +223,20 @@ interface BatchSyncResult {
   errors: string[];
 }
 
-/**
- * 仅同步父产品（变体会由父产品同步时一并处理）
- */
 async function filterParentProductIds(productIds: string[], sourceLocale: string): Promise<string[]> {
   if (!productIds || productIds.length === 0) return [];
-  const { data, error } = await supabase
-    .from('products')
-    .select('productId, parent_product_id')
-    .eq('site_id', SITE_ID)
-    .eq('locale', sourceLocale)
-    .in('productId', productIds);
-  if (error) {
+  try {
+    const data = await sql<{ productId: string; parent_product_id: string | null }[]>`
+      SELECT "productId", parent_product_id FROM public.products
+      WHERE site_id = ${SITE_ID}
+        AND locale = ${sourceLocale}
+        AND "productId" IN ${sql(productIds)}
+    `;
+    return data.filter(p => p.parent_product_id === null).map(p => p.productId);
+  } catch (error) {
     console.error('查询产品父级信息失败:', error);
     return [];
   }
-  return data.filter(p => p.parent_product_id === null).map(p => p.productId);
 }
 
 export async function executeProductBatchSync(
@@ -283,7 +283,10 @@ export async function executeProductBatchSync(
 export async function executeProductBatchSyncWithProgress(
   options: BatchSyncOptions
 ): Promise<void> {
-  const { sourceLocale, targetLocales, productIds, mode, operator, syncStrategy = 'full', onProgress } = options;
+  const {
+    sourceLocale, targetLocales, productIds, mode, operator,
+    syncStrategy = 'full', onProgress,
+  } = options;
   const parentIds = await filterParentProductIds(productIds, sourceLocale);
   if (parentIds.length === 0) {
     onProgress?.({
@@ -294,7 +297,6 @@ export async function executeProductBatchSyncWithProgress(
     return;
   }
 
-  // 仅检查环境变量（不发起任何网络请求）
   if (mode === 'copy_translate') {
     const apiKey = process.env.DEEPSEEK_API_KEY;
     if (!apiKey || apiKey.trim() === '') {
@@ -332,7 +334,7 @@ export async function executeProductBatchSyncWithProgress(
 }
 
 // ============================================================
-// 单个产品同步核心逻辑（含增量/全量分支）
+// 单个产品同步核心逻辑 — 已迁移
 // ============================================================
 
 async function syncSingleProduct(options: {
@@ -344,18 +346,27 @@ async function syncSingleProduct(options: {
   syncStrategy?: 'full' | 'incremental';
   onProgress?: (log: SyncProgressLog) => void;
 }): Promise<void> {
-  const { productId, sourceLocale, targetLocales, mode, operator, syncStrategy = 'full', onProgress } = options;
+  const {
+    productId, sourceLocale, targetLocales, mode,
+    operator, syncStrategy = 'full', onProgress,
+  } = options;
 
-  // 1. 查询产品是否为变体（防御性，实际已在上层过滤）
-  const { data: productInfo, error: productInfoError } = await supabase
-    .from('products')
-    .select('parent_product_id')
-    .eq('site_id', SITE_ID)
-    .eq('productId', productId)
-    .eq('locale', sourceLocale)
-    .maybeSingle();
+  // 1. 查询产品是否为变体
+  let productInfo: { parent_product_id: string | null } | undefined;
+  try {
+    const rows = await sql<{ parent_product_id: string | null }[]>`
+      SELECT parent_product_id FROM public.products
+      WHERE site_id = ${SITE_ID}
+        AND "productId" = ${productId}
+        AND locale = ${sourceLocale}
+      LIMIT 1
+    `;
+    productInfo = rows[0];
+  } catch (error: any) {
+    throw new Error(`产品 ${productId} 在 ${sourceLocale} 不存在: ${error.message}`);
+  }
 
-  if (productInfoError || !productInfo) {
+  if (!productInfo) {
     throw new Error(`产品 ${productId} 在 ${sourceLocale} 不存在`);
   }
 
@@ -373,17 +384,18 @@ async function syncSingleProduct(options: {
 
   // ---------- 修复模式 ----------
   if (mode === 'repair') {
-    // 获取源语言下所有产品（父 + 变体）
-    const { data: sourceProducts, error: sourceError } = await supabase
-      .from('products')
-      .select('productId')
-      .eq('site_id', SITE_ID)
-      .eq('locale', sourceLocale)
-      .or(`productId.eq.${parentId},parent_product_id.eq.${parentId}`);
-
-    if (sourceError) {
-      throw new Error(`获取源产品列表失败: ${sourceError.message}`);
+    let sourceProducts: { productId: string }[];
+    try {
+      sourceProducts = await sql<{ productId: string }[]>`
+        SELECT "productId" FROM public.products
+        WHERE site_id = ${SITE_ID}
+          AND locale = ${sourceLocale}
+          AND ("productId" = ${parentId} OR parent_product_id = ${parentId})
+      `;
+    } catch (error: any) {
+      throw new Error(`获取源产品列表失败: ${error.message}`);
     }
+
     if (!sourceProducts || sourceProducts.length === 0) {
       onProgress?.({ productId, message: '未找到源产品记录', status: 'failed' });
       return;
@@ -397,17 +409,24 @@ async function syncSingleProduct(options: {
           status: 'processing',
         });
 
-        // 检查目标语言中存在的产品
-        const { data: targetProducts, error: targetError } = await supabase
-          .from('products')
-          .select('productId')
-          .eq('site_id', SITE_ID)
-          .eq('locale', targetLocale)
-          .in('productId', sourceProducts.map(p => p.productId));
-
-        if (targetError) {
-          throw new Error(`查询目标产品失败: ${targetError.message}`);
+        const sourceIds = sourceProducts.map(p => p.productId);
+        if (sourceIds.length === 0) {
+          onProgress?.({ productId, message: `源产品列表为空，跳过 ${targetLocale}`, status: 'failed' });
+          continue;
         }
+
+        let targetProducts: { productId: string }[];
+        try {
+          targetProducts = await sql<{ productId: string }[]>`
+            SELECT "productId" FROM public.products
+            WHERE site_id = ${SITE_ID}
+              AND locale = ${targetLocale}
+              AND "productId" IN ${sql(sourceIds)}
+          `;
+        } catch (error: any) {
+          throw new Error(`查询目标产品失败: ${error.message}`);
+        }
+
         if (!targetProducts || targetProducts.length === 0) {
           onProgress?.({
             productId,
@@ -417,7 +436,6 @@ async function syncSingleProduct(options: {
           continue;
         }
 
-        // 为每个存在的产品更新同步字段
         for (const sp of sourceProducts) {
           const exists = targetProducts.some(tp => tp.productId === sp.productId);
           if (!exists) continue;
@@ -442,7 +460,6 @@ async function syncSingleProduct(options: {
   }
 
   // ---------- 复制模式（copy / copy_translate） ----------
-  // 步骤1: 读取源父产品的 MD 文件
   onProgress?.({ productId, message: `[1/8] 读取源产品数据...`, status: 'processing' });
   const sourceProduct = await readProduct(sourceLocale, parentId);
   if (!sourceProduct) {
@@ -451,54 +468,63 @@ async function syncSingleProduct(options: {
   }
   onProgress?.({ productId, message: `[1/8] 源产品数据读取完成`, status: 'processing' });
 
-  // 步骤2: 从数据库获取源父产品的完整信息（包括 productLineId 等字段）
+  // 2. 获取源父产品的数据库信息
   onProgress?.({ productId, message: `[2/8] 获取源产品数据库信息...`, status: 'processing' });
-  let { data: sourceDbRecord, error: dbError } = await supabase
-    .from('products')
-    .select('productLineId, categoryId, seriesId')
-    .eq('site_id', SITE_ID)
-    .eq('productId', parentId)
-    .eq('locale', sourceLocale)
-    .maybeSingle();
-
-  if (dbError) {
+  let sourceDbRecord:
+    | { productLineId: string | null; categoryId: string | null; seriesId: string | null }
+    | undefined;
+  try {
+    const rows = await sql<{
+      productLineId: string | null;
+      categoryId: string | null;
+      seriesId: string | null;
+    }[]>`
+      SELECT "productLineId", "categoryId", "seriesId" FROM public.products
+      WHERE site_id = ${SITE_ID}
+        AND "productId" = ${parentId}
+        AND locale = ${sourceLocale}
+      LIMIT 1
+    `;
+    sourceDbRecord = rows[0];
+  } catch (dbError: any) {
     onProgress?.({ productId, message: `[2/8] 获取数据库信息失败`, status: 'failed' });
     throw new Error(`无法获取源父产品数据库记录 ${parentId}: ${dbError.message}`);
   }
 
-  // 如果源 productLineId 为空，尝试从其他语言继承
   let effectiveProductLineId = sourceDbRecord?.productLineId || '';
   let effectiveCategoryId = sourceProduct.categoryId || sourceDbRecord?.categoryId || '';
   let effectiveSeriesId = sourceProduct.seriesId || sourceDbRecord?.seriesId || '';
 
   if (!effectiveProductLineId) {
-    // 查询其他语言中该产品是否有 productLineId
-    const { data: otherLangRecord, error: otherError } = await supabase
-      .from('products')
-      .select('productLineId')
-      .eq('site_id', SITE_ID)
-      .eq('productId', parentId)
-      .neq('locale', sourceLocale)
-      .not('productLineId', 'eq', '')
-      .limit(1)
-      .maybeSingle();
-
-    if (!otherError && otherLangRecord?.productLineId) {
-      effectiveProductLineId = otherLangRecord.productLineId;
-    } else {
-      // 如果其他语言也没有，尝试从分类获取
-      try {
+    try {
+      const rows = await sql<{ productLineId: string }[]>`
+        SELECT "productLineId" FROM public.products
+        WHERE site_id = ${SITE_ID}
+          AND "productId" = ${parentId}
+          AND locale != ${sourceLocale}
+          AND NULLIF("productLineId", '') IS NOT NULL
+        LIMIT 1
+      `;
+      if (rows[0]?.productLineId) {
+        effectiveProductLineId = rows[0].productLineId;
+      } else {
         const catId = effectiveCategoryId || sourceDbRecord?.categoryId;
         if (catId) {
           const lineId = await getProductLineIdFromCategory(sourceLocale, catId);
           if (lineId) effectiveProductLineId = lineId;
         }
-      } catch (ignore) { /* ignore */ }
+      }
+    } catch (ignore) {
+      /* ignore */
     }
   }
-  onProgress?.({ productId, message: `[2/8] 数据库信息获取完成 (productLineId: ${effectiveProductLineId})`, status: 'processing' });
+  onProgress?.({
+    productId,
+    message: `[2/8] 数据库信息获取完成 (productLineId: ${effectiveProductLineId})`,
+    status: 'processing',
+  });
 
-  // 过滤目标语言（排除源语言本身和源产品的源语言）
+  // 过滤目标语言
   const allowedTargets = targetLocales.filter(loc => {
     if (sourceProduct.source_locale && loc === sourceProduct.source_locale) return false;
     if (loc === sourceLocale) return false;
@@ -512,42 +538,47 @@ async function syncSingleProduct(options: {
 
   // 辅助：获取目标产品已存在的 createdAt
   async function getTargetCreatedAt(pid: string, loc: string): Promise<string | null> {
-    const { data, error } = await supabase
-      .from('products')
-      .select('createdAt')
-      .eq('site_id', SITE_ID)
-      .eq('productId', pid)
-      .eq('locale', loc)
-      .maybeSingle();
-    if (error || !data) return null;
-    return data.createdAt;
+    try {
+      const rows = await sql<{ createdAt: string }[]>`
+        SELECT "createdAt" FROM public.products
+        WHERE site_id = ${SITE_ID}
+          AND "productId" = ${pid}
+          AND locale = ${loc}
+        LIMIT 1
+      `;
+      return rows[0]?.createdAt ?? null;
+    } catch {
+      return null;
+    }
   }
 
   // --- 增量/全量分支：处理每个目标语言 ---
   for (const targetLocale of allowedTargets) {
-    // **增量模式检查**：如果该语言已同步，则跳过（仅当 syncStrategy === 'incremental'）
+    // 增量模式：已同步则跳过
     if (syncStrategy === 'incremental') {
-      const { data: existingSync, error: checkError } = await supabase
-        .from('products')
-        .select('productId')
-        .eq('site_id', SITE_ID)
-        .eq('productId', parentId)
-        .eq('locale', targetLocale)
-        .eq('source_locale', sourceLocale)
-        .eq('source_product_id', parentId)
-        .maybeSingle();
-
-      if (!checkError && existingSync) {
-        onProgress?.({
-          productId,
-          message: `跳过 ${targetLocale}（已同步）`,
-          status: 'success',
-        });
-        continue; // 跳过该语言，不执行任何同步操作
+      try {
+        const rows = await sql<{ productId: string }[]>`
+          SELECT "productId" FROM public.products
+          WHERE site_id = ${SITE_ID}
+            AND "productId" = ${parentId}
+            AND locale = ${targetLocale}
+            AND source_locale = ${sourceLocale}
+            AND source_product_id = ${parentId}
+          LIMIT 1
+        `;
+        if (rows[0]) {
+          onProgress?.({
+            productId,
+            message: `跳过 ${targetLocale}（已同步）`,
+            status: 'success',
+          });
+          continue;
+        }
+      } catch {
+        /* 检查失败时继续走全量流程 */
       }
     }
 
-    // 全量模式或目标未同步：执行完整同步
     try {
       onProgress?.({
         productId,
@@ -555,30 +586,26 @@ async function syncSingleProduct(options: {
         status: 'processing',
       });
 
-      // 步骤3: 翻译（如果需要）
+      // 3. 翻译
       let translatedData = { ...sourceProduct };
       if (mode === 'copy_translate') {
         onProgress?.({ productId, message: `[3/8] 翻译产品内容（Deepseek）...`, status: 'processing' });
         translatedData = await translateProductData(
-          sourceProduct,
-          sourceLocale,
-          targetLocale,
-          productId,
-          onProgress
+          sourceProduct, sourceLocale, targetLocale, productId, onProgress
         );
         onProgress?.({ productId, message: `[3/8] 翻译完成`, status: 'processing' });
       } else {
         onProgress?.({ productId, message: `[3/8] 跳过翻译（仅复制）`, status: 'processing' });
       }
 
-      // 步骤4: 写入目标 MD 文件
+      // 4. 写入 MD
       onProgress?.({ productId, message: `[4/8] 写入 MD 文件...`, status: 'processing' });
       await writeProduct(targetLocale, parentId, translatedData, translatedData.content || '');
       onProgress?.({ productId, message: `[4/8] MD 文件写入完成`, status: 'processing' });
 
       const now = new Date().toISOString();
 
-      // --- 步骤5: 父产品索引 ---
+      // 5. 父产品索引
       onProgress?.({ productId, message: `[5/8] 更新 products 索引...`, status: 'processing' });
       const parentExistingCreatedAt = await getTargetCreatedAt(parentId, targetLocale);
       const parentIndexData = {
@@ -607,7 +634,7 @@ async function syncSingleProduct(options: {
       await updateProductSyncFields(parentId, targetLocale, sourceLocale, parentId, operator);
       onProgress?.({ productId, message: `[5/8] products 索引更新完成`, status: 'processing' });
 
-      // --- 步骤6: 父产品 pages 注册 ---
+      // 6. 父产品 pages 注册
       onProgress?.({ productId, message: `[6/8] 注册 pages 表...`, status: 'processing' });
       const parentPageData = {
         id: `product:${parentId}`,
@@ -631,15 +658,17 @@ async function syncSingleProduct(options: {
       await upsertPage(parentPageData, targetLocale);
       onProgress?.({ productId, message: `[6/8] pages 注册完成`, status: 'processing' });
 
-      // --- 步骤7: 变体处理 ---
+      // 7. 变体处理
       const variants = translatedData.variants || [];
       if (variants.length > 0) {
-        onProgress?.({ productId, message: `[7/8] 处理 ${variants.length} 个变体...`, status: 'processing' });
+        onProgress?.({
+          productId,
+          message: `[7/8] 处理 ${variants.length} 个变体...`,
+          status: 'processing',
+        });
         for (const variant of variants) {
           if (!variant.id) continue;
-          onProgress?.({ productId, message: `  处理变体 ${variant.id}...`, status: 'processing' });
 
-          // 变体索引（继承父产品的 productLineId 等）
           const variantExistingCreatedAt = await getTargetCreatedAt(variant.id, targetLocale);
           const variantIndexData = {
             productId: variant.id,
@@ -666,7 +695,6 @@ async function syncSingleProduct(options: {
           await upsertProductIndex(variantIndexData as any);
           await updateProductSyncFields(variant.id, targetLocale, sourceLocale, parentId, operator);
 
-          // 变体 pages 注册
           const variantPageData = {
             id: `product:${parentId}/${variant.id}`,
             type: 'product',
@@ -693,7 +721,6 @@ async function syncSingleProduct(options: {
         onProgress?.({ productId, message: `[7/8] 无变体，跳过`, status: 'processing' });
       }
 
-      // 步骤8: 完成
       onProgress?.({
         productId,
         message: `[8/8] 同步到 ${targetLocale} 完成`,
@@ -710,7 +737,7 @@ async function syncSingleProduct(options: {
 }
 
 // ============================================================
-// 辅助函数
+// 辅助函数 — 已迁移
 // ============================================================
 
 async function updateProductSyncFields(
@@ -720,18 +747,18 @@ async function updateProductSyncFields(
   sourceProductId: string,
   operator: string
 ) {
-  const { error } = await supabase
-    .from('products')
-    .update({
-      source_locale: sourceLocale,
-      source_product_id: sourceProductId,
-      last_sync_time: new Date().toISOString(),
-      last_sync_operator: operator,
-    })
-    .eq('site_id', SITE_ID)
-    .eq('productId', productId)
-    .eq('locale', locale);
-  if (error) {
+  try {
+    await sql`
+      UPDATE public.products
+      SET source_locale = ${sourceLocale},
+          source_product_id = ${sourceProductId},
+          last_sync_time = ${new Date().toISOString()},
+          last_sync_operator = ${operator}
+      WHERE site_id = ${SITE_ID}
+        AND "productId" = ${productId}
+        AND locale = ${locale}
+    `;
+  } catch (error: any) {
     console.error(`更新 products 同步字段失败 (${productId}, ${locale}):`, error);
     throw new Error(`更新同步字段失败: ${error.message}`);
   }
@@ -745,24 +772,24 @@ async function updatePageSyncFields(
   operator: string
 ) {
   const pageId = `product:${productId}`;
-  const { error } = await supabase
-    .from('pages')
-    .update({
-      source_locale: sourceLocale,
-      source_content_hash: null,
-      last_sync_time: new Date().toISOString(),
-      last_sync_operator: operator,
-    })
-    .eq('id', pageId)
-    .eq('site_id', SITE_ID)
-    .eq('locale', locale);
-  if (error) {
+  try {
+    await sql`
+      UPDATE public.pages
+      SET source_locale = ${sourceLocale},
+          source_content_hash = null,
+          last_sync_time = ${new Date().toISOString()},
+          last_sync_operator = ${operator}
+      WHERE id = ${pageId}
+        AND site_id = ${SITE_ID}
+        AND locale = ${locale}
+    `;
+  } catch (error: any) {
     console.error(`更新 pages 同步字段失败 (${pageId}, ${locale}):`, error);
   }
 }
 
 // ============================================================
-// 翻译产品数据（支持变体 attributes 翻译）
+// 翻译产品数据 — 不查 DB，完全不变
 // ============================================================
 
 async function translateProductData(
@@ -778,7 +805,7 @@ async function translateProductData(
   const fields = config.fields || [];
   const promptTemplate = config.promptTemplate || '';
 
-  // 1. 翻译普通字段（非 attributes），包括父产品和变体的这些字段
+  // 1. 翻译普通字段
   const fieldsToTranslate = fields.filter(f => f !== 'attributes');
   let translated = { ...productData };
   if (fieldsToTranslate.length > 0) {
@@ -787,7 +814,7 @@ async function translateProductData(
     onProgress?.({ productId, message: `  普通字段翻译完成`, status: 'processing' });
   }
 
-  // 2. 辅助函数：翻译 attributes 对象（带重试）
+  // 2. 翻译 attributes（带重试）
   const translateAttributes = async (attrObj: any, context: string): Promise<any> => {
     if (!attrObj || typeof attrObj !== 'object') return attrObj;
     const attrJson = JSON.stringify(attrObj);
@@ -837,7 +864,7 @@ async function translateProductData(
     }
   };
 
-  // 3. 翻译父产品的 attributes
+  // 3. 父产品 attributes
   if (fields.includes('attributes') && productData.attributes && typeof productData.attributes === 'object') {
     onProgress?.({ productId, message: `  翻译父产品 attributes (键值对)...`, status: 'processing' });
     translated.attributes = await translateAttributes(productData.attributes, '父产品 attributes');
@@ -846,7 +873,7 @@ async function translateProductData(
     onProgress?.({ productId, message: `  父产品无 attributes 需要翻译`, status: 'processing' });
   }
 
-  // 4. 翻译变体的 attributes
+  // 4. 变体 attributes
   if (fields.includes('attributes') && translated.variants && Array.isArray(translated.variants)) {
     onProgress?.({ productId, message: `  翻译变体 attributes...`, status: 'processing' });
     for (const variant of translated.variants) {

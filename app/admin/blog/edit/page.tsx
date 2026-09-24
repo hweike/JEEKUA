@@ -1,3 +1,4 @@
+// app/admin/blog/edit/page.tsx
 'use client';
 
 import { useEffect, useState } from 'react';
@@ -73,7 +74,6 @@ export default function BlogEdit() {
         })
         .then(data => {
           if (data && data.id) {
-            // 存在数据 -> 编辑模式
             setIsExisting(true);
             setFormData({
               id: data.id,
@@ -91,7 +91,6 @@ export default function BlogEdit() {
               seo_description: data.seo_description || '',
             });
           } else {
-            // 数据不存在（data 为 null）
             setIsExisting(false);
             setFormData({
               id: id,
@@ -132,7 +131,6 @@ export default function BlogEdit() {
         })
         .finally(() => setLoading(false));
     } else {
-      // 完全新建（无 id）
       setIsExisting(false);
       setFormData({
         id: '',
@@ -172,14 +170,12 @@ export default function BlogEdit() {
   };
 
   const handleSave = async () => {
-    // 检测是否有产品选择弹窗存在
     const isDialogOpen = !!document.querySelector('.fixed.inset-0.bg-black.bg-opacity-50.flex.items-center.justify-center.z-50');
     if (isDialogOpen) {
       console.log('产品选择弹窗已打开，取消保存');
       return;
     }
 
-    // 必填验证
     if (!formData.title.trim()) {
       setToast({ message: '请填写文章标题', type: 'error' });
       return;
@@ -225,7 +221,6 @@ export default function BlogEdit() {
       const data = await res.json();
       if (res.ok) {
         setToast({ message: isExisting ? '更新成功' : '创建成功', type: 'success' });
-        // 保存后回到对应语言的列表页
         router.push(`/admin/blog?locale=${locale}`);
       } else {
         setToast({ message: data.error || '保存失败', type: 'error' });
@@ -314,6 +309,13 @@ export default function BlogEdit() {
                 showKeywords
                 showTitle
                 showDescription
+                locale={locale}
+                slugCheck={{
+                  enabled: true,
+                  endpoint: '/api/admin/blog/slugs',
+                  excludeId: id || undefined,
+                  autoResolveConflict: true, 
+                }}
               />
             </div>
           </div>

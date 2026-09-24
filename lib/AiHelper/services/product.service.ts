@@ -1,9 +1,8 @@
 // lib/AiHelper/services/product.service.ts
 import { ITranslationService } from '../core/types';
 import { getProductsByIds, updateProductTranslations } from '@/lib/products/services/product.service';
-import { supabase } from '@/lib/supabase/client';
+import sql from '@/lib/db/admin';
 
-// ====== 导出数据结构（仅翻译字段） ======
 interface ExportVariant {
   id: string;
   product_name: string;
@@ -27,7 +26,6 @@ interface ExportProduct {
   variants: ExportVariant[];
 }
 
-// ====== 导入数据结构 ======
 interface ImportVariant {
   id: string;
   product_name: string;
@@ -64,19 +62,30 @@ export const productAdapter: ITranslationService = {
   ): Promise<{ sourceLanguage: string; products: ExportProduct[] }> {
     console.log(`[AI Helper] exportData 开始，locale: ${locale}，过滤ID数量: ${options?.ids?.length || 0}`);
 
-    let query = supabase
-      .from('products')
-      .select('productId')
-      .eq('site_id', '000001')
-      .eq('locale', locale)
-      .is('parent_product_id', null);
-
+    // ✅ 已迁移：查询父产品 ID 列表
+    const conditions: any[] = [
+      sql`site_id = ${'000001'}`,
+      sql`locale = ${locale}`,
+      sql`parent_product_id IS NULL`,
+    ];
     if (options?.ids && options.ids.length > 0) {
-      query = query.in('productId', options.ids);
+      conditions.push(sql`"productId" IN ${sql(options.ids)}`);
+    }
+    const whereClause = conditions.reduce(
+      (acc, c, i) => (i === 0 ? c : sql`${acc} AND ${c}`),
+      sql``
+    );
+
+    let allProducts: { productId: string }[];
+    try {
+      allProducts = await sql<{ productId: string }[]>`
+        SELECT "productId" FROM public.products
+        WHERE ${whereClause}
+      `;
+    } catch (error: any) {
+      throw new Error(`获取产品列表失败: ${error.message}`);
     }
 
-    const { data: allProducts, error } = await query;
-    if (error) throw new Error(`获取产品列表失败: ${error.message}`);
     const productIds = allProducts.map(p => p.productId);
     console.log(`[AI Helper] 获取到 ${productIds.length} 个父产品 ID`);
 
@@ -125,6 +134,7 @@ export const productAdapter: ITranslationService = {
     sourceData: any,
     languageNames: Record<string, string>
   ): string {
+    // ... 完全不变 ...
     console.log(`[AI Helper] generatePrompt 开始，源语言: ${sourceLocale}, 目标语言: ${targetLocales.join(', ')}`);
     console.log(`[AI Helper] 产品数量: ${sourceData.products?.length || 0}`);
 
@@ -206,6 +216,7 @@ export const productAdapter: ITranslationService = {
     translations: TranslationInput[],
     sourceLocale: string
   ): Promise<{ imported: number; failed: number; errors: string[] }> {
+    // ... 完全不变 ...
     console.log(`[AI Helper] importTranslations 开始，共 ${translations.length} 个语言翻译数据`);
     let imported = 0;
     let failed = 0;

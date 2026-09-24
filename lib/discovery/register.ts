@@ -1,5 +1,5 @@
 // lib/discovery/register.ts
-import { supabase } from '@/lib/supabase/client';
+import sql from '@/lib/db/admin';
 import crypto from 'crypto';
 
 export const SITE_ID = process.env.NEXT_PUBLIC_SITE_ID || '000001';
@@ -23,7 +23,6 @@ export interface PageData {
   content_full?: string | null;
   translated_by_ai?: boolean;
   updatedAt?: string;
-  // 同步相关字段（仅目标语言页面需要，扫描时不传则保留原值）
   source_content_hash?: string | null;
   source_locale?: string | null;
   last_sync_time?: string | null;
@@ -45,39 +44,39 @@ function sortObjectKeys(obj: any): any {
   }, {} as any);
 }
 
-/**
- * 注册或更新页面（源语言或目标语言）
- * - 对于源语言页面：不传 source_content_hash, source_locale, last_sync_time, last_sync_operator
- * - 对于目标语言页面：需传入 source_content_hash, source_locale，可选 last_sync_time, last_sync_operator
- * - 保护机制：如果调用方未传入同步字段，则保留数据库中已有的值（避免扫描覆盖）
- */
 export async function upsertPage(page: PageData, locale: string): Promise<void> {
-  // ===== 强制类型映射（根据业务需求调整） =====
+  // 强制类型映射
   const FORCED_TYPE_MAP: Record<string, string> = {
     '10000001': 'home',
-    // 可添加更多：'10000002': 'inquiry', 等
   };
   const rawId = page.id.startsWith('page:') ? page.id.slice(5) : page.id;
-if (FORCED_TYPE_MAP[rawId]) {
-  page.type = FORCED_TYPE_MAP[rawId];
-}
-  // =============================================
+  if (FORCED_TYPE_MAP[rawId]) {
+    page.type = FORCED_TYPE_MAP[rawId];
+  }
 
-  // 1. 先查询现有记录的同步字段
-  const { data: existing, error: fetchError } = await supabase
-    .from('pages')
-    .select('source_content_hash, source_locale, last_sync_time, last_sync_operator')
-    .eq('id', page.id)
-    .eq('site_id', SITE_ID)
-    .eq('locale', locale)
-    .maybeSingle();
-
-  if (fetchError) {
+  // 1. 查询现有记录的同步字段
+  let existing: {
+    source_content_hash: string | null;
+    source_locale: string | null;
+    last_sync_time: string | null;
+    last_sync_operator: string | null;
+  } | undefined;
+  try {
+    const rows = await sql<typeof existing[]>`
+      SELECT source_content_hash, source_locale, last_sync_time, last_sync_operator
+      FROM public.pages
+      WHERE id = ${page.id}
+        AND site_id = ${SITE_ID}
+        AND locale = ${locale}
+      LIMIT 1
+    `;
+    existing = rows[0];
+  } catch (fetchError: any) {
     console.error(`查询现有页面 ${page.id} (${locale}) 失败:`, fetchError);
     throw new Error(`Failed to fetch existing page: ${fetchError.message}`);
   }
 
-  // 2. 计算内容哈希（基于新传入的内容）
+  // 2. 计算内容哈希
   const contentHash = computeHash({
     title: page.title,
     full_content: page.content_full || '',
@@ -86,8 +85,9 @@ if (FORCED_TYPE_MAP[rawId]) {
     seo_keywords: page.seo_keywords || '',
   });
 
-  // 3. 构建页面记录：同步字段若未显式传入，则使用现有记录的值（若无现有记录则为 null）
-  const pageRecord: any = {
+  // 3. 构建记录字段值
+  const now = new Date().toISOString();
+  const values = {
     id: page.id,
     site_id: SITE_ID,
     locale: locale,
@@ -107,36 +107,85 @@ if (FORCED_TYPE_MAP[rawId]) {
     content_summary: page.content_summary || null,
     content_hash: contentHash,
     translated_by_ai: page.translated_by_ai ? 1 : 0,
-    updatedAt: page.updatedAt || new Date().toISOString(),
-    // 同步字段：优先使用传入值（若为 undefined 则保留现有，若为 null 则清空，若现有也为 null 则最终为 null）
-    source_content_hash: page.source_content_hash !== undefined ? page.source_content_hash : (existing?.source_content_hash ?? null),
-    source_locale: page.source_locale !== undefined ? page.source_locale : (existing?.source_locale ?? null),
-    last_sync_time: page.last_sync_time !== undefined ? page.last_sync_time : (existing?.last_sync_time ?? null),
-    last_sync_operator: page.last_sync_operator !== undefined ? page.last_sync_operator : (existing?.last_sync_operator ?? null),
+    updatedAt: page.updatedAt || now,
+    source_content_hash:
+      page.source_content_hash !== undefined
+        ? page.source_content_hash
+        : existing?.source_content_hash ?? null,
+    source_locale:
+      page.source_locale !== undefined ? page.source_locale : existing?.source_locale ?? null,
+    last_sync_time:
+      page.last_sync_time !== undefined ? page.last_sync_time : existing?.last_sync_time ?? null,
+    last_sync_operator:
+      page.last_sync_operator !== undefined
+        ? page.last_sync_operator
+        : existing?.last_sync_operator ?? null,
   };
 
-  // 4. 执行 upsert
-  const { error: pageError } = await supabase
-    .from('pages')
-    .upsert(pageRecord, { onConflict: 'id, site_id, locale' });
-  if (pageError) {
+  // 4. upsert pages（显式列名，避免 sql(obj) 的引用问题）
+  try {
+    await sql`
+      INSERT INTO public.pages (
+        id, site_id, locale, type, title, slug, url, cover_image,
+        seo_title, seo_description, seo_keywords, canonical, noindex, nofollow,
+        priority, changefreq, content_summary, content_hash, translated_by_ai,
+        "updatedAt", source_content_hash, source_locale, last_sync_time, last_sync_operator
+      ) VALUES (
+        ${values.id}, ${values.site_id}, ${values.locale}, ${values.type},
+        ${values.title}, ${values.slug}, ${values.url}, ${values.cover_image},
+        ${values.seo_title}, ${values.seo_description}, ${values.seo_keywords},
+        ${values.canonical}, ${values.noindex}, ${values.nofollow},
+        ${values.priority}, ${values.changefreq}, ${values.content_summary},
+        ${values.content_hash}, ${values.translated_by_ai}, ${values.updatedAt},
+        ${values.source_content_hash}, ${values.source_locale},
+        ${values.last_sync_time}, ${values.last_sync_operator}
+      )
+      ON CONFLICT (id, site_id, locale)
+      DO UPDATE SET
+        type = EXCLUDED.type,
+        title = EXCLUDED.title,
+        slug = EXCLUDED.slug,
+        url = EXCLUDED.url,
+        cover_image = EXCLUDED.cover_image,
+        seo_title = EXCLUDED.seo_title,
+        seo_description = EXCLUDED.seo_description,
+        seo_keywords = EXCLUDED.seo_keywords,
+        canonical = EXCLUDED.canonical,
+        noindex = EXCLUDED.noindex,
+        nofollow = EXCLUDED.nofollow,
+        priority = EXCLUDED.priority,
+        changefreq = EXCLUDED.changefreq,
+        content_summary = EXCLUDED.content_summary,
+        content_hash = EXCLUDED.content_hash,
+        translated_by_ai = EXCLUDED.translated_by_ai,
+        "updatedAt" = EXCLUDED."updatedAt",
+        source_content_hash = EXCLUDED.source_content_hash,
+        source_locale = EXCLUDED.source_locale,
+        last_sync_time = EXCLUDED.last_sync_time,
+        last_sync_operator = EXCLUDED.last_sync_operator
+    `;
+  } catch (pageError: any) {
     console.error(`Upsert page ${page.id} (${locale}) failed:`, pageError);
     throw new Error(`Failed to upsert page: ${pageError.message}`);
   }
 
-  // 5. 处理 page_contents（仅当有内容时）
+  // 5. 处理 page_contents
   if (page.content_full) {
-    const { error: contentError } = await supabase
-      .from('page_contents')
-      .upsert({
-        page_id: page.id,
-        site_id: SITE_ID,
-        locale: locale,
-        full_content: page.content_full,
-        content_hash: contentHash,
-        updatedAt: page.updatedAt || new Date().toISOString(),
-      }, { onConflict: 'page_id, site_id, locale' });
-    if (contentError) {
+    try {
+      await sql`
+        INSERT INTO public.page_contents (
+          page_id, site_id, locale, full_content, content_hash, "updatedAt"
+        ) VALUES (
+          ${page.id}, ${SITE_ID}, ${locale}, ${page.content_full},
+          ${contentHash}, ${page.updatedAt || now}
+        )
+        ON CONFLICT (page_id, site_id, locale)
+        DO UPDATE SET
+          full_content = EXCLUDED.full_content,
+          content_hash = EXCLUDED.content_hash,
+          "updatedAt" = EXCLUDED."updatedAt"
+      `;
+    } catch (contentError: any) {
       console.error(`Upsert page_contents for ${page.id} (${locale}) failed:`, contentError);
       throw new Error(`Failed to upsert page content: ${contentError.message}`);
     }
@@ -144,24 +193,26 @@ if (FORCED_TYPE_MAP[rawId]) {
 }
 
 export async function deletePage(pageId: string, locale: string): Promise<void> {
-  const { error: pageDeleteError } = await supabase
-    .from('pages')
-    .delete()
-    .eq('id', pageId)
-    .eq('site_id', SITE_ID)
-    .eq('locale', locale);
-  if (pageDeleteError) {
+  try {
+    await sql`
+      DELETE FROM public.pages
+      WHERE id = ${pageId}
+        AND site_id = ${SITE_ID}
+        AND locale = ${locale}
+    `;
+  } catch (pageDeleteError: any) {
     console.error(`Delete page ${pageId} (${locale}) failed:`, pageDeleteError);
     throw new Error(`Failed to delete page: ${pageDeleteError.message}`);
   }
 
-  const { error: contentDeleteError } = await supabase
-    .from('page_contents')
-    .delete()
-    .eq('page_id', pageId)
-    .eq('site_id', SITE_ID)
-    .eq('locale', locale);
-  if (contentDeleteError) {
+  try {
+    await sql`
+      DELETE FROM public.page_contents
+      WHERE page_id = ${pageId}
+        AND site_id = ${SITE_ID}
+        AND locale = ${locale}
+    `;
+  } catch (contentDeleteError: any) {
     console.error(`Delete page_contents for ${pageId} (${locale}) failed:`, contentDeleteError);
     throw new Error(`Failed to delete page content: ${contentDeleteError.message}`);
   }

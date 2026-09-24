@@ -1,5 +1,6 @@
+// app/api/discovery/sync-logs/route.ts
 import { NextRequest, NextResponse } from 'next/server';
-import { supabase } from '@/lib/supabase/client';
+import sql from '@/lib/db/admin';
 
 const SITE_ID = process.env.NEXT_PUBLIC_SITE_ID || '000001';
 
@@ -9,29 +10,26 @@ export async function GET(req: NextRequest) {
   const sourceLocale = searchParams.get('sourceLocale');
   const targetLocale = searchParams.get('targetLocale');
 
-  let query = supabase
-    .from('sync_logs')
-    .select('*')
-    .eq('site_id', SITE_ID)
-    .order('created_at', { ascending: false })
-    .limit(500);
+  const conditions: any[] = [sql`site_id = ${SITE_ID}`];
+  if (status) conditions.push(sql`status = ${status}`);
+  if (sourceLocale) conditions.push(sql`source_locale = ${sourceLocale}`);
+  if (targetLocale) conditions.push(sql`target_locale = ${targetLocale}`);
 
-  if (status) {
-    query = query.eq('status', status);
-  }
-  if (sourceLocale) {
-    query = query.eq('source_locale', sourceLocale);
-  }
-  if (targetLocale) {
-    query = query.eq('target_locale', targetLocale);
-  }
+  const whereClause = conditions.reduce(
+    (acc, c, i) => (i === 0 ? c : sql`${acc} AND ${c}`),
+    sql``
+  );
 
-  const { data: logs, error } = await query;
-
-  if (error) {
+  try {
+    const logs = await sql<any[]>`
+      SELECT * FROM public.sync_logs
+      WHERE ${whereClause}
+      ORDER BY created_at DESC
+      LIMIT 500
+    `;
+    return NextResponse.json(logs);
+  } catch (error: any) {
     console.error('GET /api/discovery/sync-logs error:', error);
     return NextResponse.json({ error: 'Failed to fetch sync logs' }, { status: 500 });
   }
-
-  return NextResponse.json(logs || []);
 }

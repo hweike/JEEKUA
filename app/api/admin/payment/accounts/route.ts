@@ -2,6 +2,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { accountService } from '@/lib/payment/services/account.service';
 import { getSiteId, getOperator } from '@/lib/utils/request';
+// ✅ 新增类型 import
+import type { PaymentType, PaymentMethodType, AccountType } from '@/lib/payment/types/account';
 
 export async function GET(request: NextRequest) {
   try {
@@ -9,15 +11,24 @@ export async function GET(request: NextRequest) {
     const searchParams = request.nextUrl.searchParams;
     const type = searchParams.get('type') || undefined;
     const method = searchParams.get('method') || undefined;
-    // ✅ 修复：重命名变量避免与参数名冲突
     const accountTypeParam = searchParams.get('account_type') || undefined;
+    const isActiveParam = searchParams.get('is_active');
 
+    // ✅ 用 as 断言解决类型不匹配
     const accounts = await accountService.list(siteId, { 
-      type, 
-      method, 
-      account_type: accountTypeParam 
+      type: type as PaymentType | undefined, 
+      method: method as PaymentMethodType | undefined, 
+      account_type: accountTypeParam as AccountType | 'null' | 'NULL' | undefined 
     });
-    return NextResponse.json({ success: true, data: accounts });
+
+    // ✅ 过滤 is_active
+    const filtered = isActiveParam === 'true'
+      ? accounts.filter((a: any) => a.is_active !== false)
+      : isActiveParam === 'false'
+        ? accounts.filter((a: any) => a.is_active === false)
+        : accounts;
+
+    return NextResponse.json({ success: true, data: filtered });
   } catch (error: any) {
     console.error('❌ GET /api/admin/payment/accounts 错误:', error);
     return NextResponse.json(

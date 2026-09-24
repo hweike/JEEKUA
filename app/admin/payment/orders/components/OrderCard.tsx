@@ -141,8 +141,8 @@ export default function OrderCard({
   // ============================================================
   const getPrimaryActions = (order: OrderWithItems) => {
     const actions: { label: string; icon: React.ReactNode; action: string; color: string }[] = [];
-    const total = order.total_amount || 0;
-    const deposit = order.deposit_amount || 0;
+    const total = Number(order.total_amount) || 0;
+    const deposit = Number(order.deposit_amount) || 0;
     const hasDeposit = deposit > 0 && deposit < total;
 
     // 草稿 → 确认发送
@@ -167,8 +167,8 @@ export default function OrderCard({
 
     // ✅ 已付款 - 处理预付款/尾款场景
     if (order.status === 'paid') {
-      const total = order.total_amount || 0;
-      const deposit = order.deposit_amount || 0;
+      const total = Number(order.total_amount) || 0;
+      const deposit = Number(order.deposit_amount) || 0;
       const remaining = total - deposit;
       
       if (remaining > 0) {
@@ -299,20 +299,24 @@ export default function OrderCard({
   const hasMultipleItems = items.length > 1;
 
   // 格式化货币
-  const formatCurrency = (amount: number, currency: string) => {
-    return `${currency} ${amount.toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g, ',')}`;
+  const formatCurrency = (amount: number | string | null | undefined, currency: string) => {
+    const num = typeof amount === 'number' ? amount : Number(amount ?? 0);
+    if (isNaN(num)) return `${currency} 0.00`;
+    return `${currency} ${num.toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g, ',')}`;
   };
 
   // ============================================================
   // ✅ 获取金额显示信息
   // ============================================================
   const getAmountDisplay = () => {
-    const total = order.total_amount || 0;
-    const deposit = order.deposit_amount || 0;
+    const total = Number(order.total_amount) || 0;
+    const deposit = Number(order.deposit_amount) || 0;
     const currency = order.currency || 'USD';
     
-    const format = (amount: number) => {
-      return `${currency} ${amount.toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g, ',')}`;
+    const format = (amount: number | string | null | undefined) => {
+      const num = typeof amount === 'number' ? amount : Number(amount ?? 0);
+      if (isNaN(num)) return `${currency} 0.00`;
+      return `${currency} ${num.toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g, ',')}`;
     };
 
     if (order.status === 'draft' || order.status === 'cancelled') {

@@ -1,6 +1,6 @@
 // lib/discovery/scanners/video.scanner.ts
 import matter from 'gray-matter';
-import { supabase } from '@/lib/supabase/client';
+import sql from '@/lib/db/admin';
 import { upsertPage, SITE_ID } from '../register';
 import { getPrivateStorage } from '@/lib/storage/factory';
 import { readR2Json } from './utils';
@@ -9,17 +9,9 @@ import type { ProgressCallback } from './types';
 
 const storage = getPrivateStorage();
 
-/**
- * 扫描视频
- * 数据源：
- * - 索引：数据库 videos 表
- * - 内容：R2 videosys/${locale}/${id}.md（可选）
- * - 分类映射：从 videosys/${locale}/categories.json 加载 (category_key -> slug)
- */
 export async function scanVideos(locale: string, onProgress?: ProgressCallback): Promise<void> {
   onProgress?.(`📁 从数据库分页获取视频列表 (locale=${locale})`, 'info');
 
-  // 1. 加载分类映射 (category_key -> slug)
   const catKey = `videosys/${locale}/categories.json`;
   let catMap = new Map<string, string>();
   try {
@@ -42,49 +34,50 @@ export async function scanVideos(locale: string, onProgress?: ProgressCallback):
     totalSkipped = 0;
 
   // 获取总数
-  const { count: totalCount, error: countError } = await supabase
-    .from('videos')
-    .select('*', { count: 'exact', head: true })
-    .eq('site_id', SITE_ID)
-    .eq('locale', locale);
-
-  if (countError) {
+  let totalCount = 0;
+  try {
+    const countRows = await sql<{ count: string }[]>`
+      SELECT COUNT(*)::text AS count FROM public.videos
+      WHERE site_id = ${SITE_ID} AND locale = ${locale}
+    `;
+    totalCount = parseInt(countRows[0]?.count || '0', 10);
+  } catch (countError: any) {
     onProgress?.(`❌ 获取视频总数失败: ${countError.message}`, 'error');
     throw countError;
   }
-  onProgress?.(`📊 总共 ${totalCount || 0} 个视频，分页处理中`, 'info');
+  onProgress?.(`📊 总共 ${totalCount} 个视频，分页处理中`, 'info');
 
   while (true) {
-    const { data: videos, error } = await supabase
-      .from('videos')
-      .select('*')
-      .eq('site_id', SITE_ID)
-      .eq('locale', locale)
-      .range(page * PAGE_SIZE, (page + 1) * PAGE_SIZE - 1)
-      .order('order_index', { ascending: true });
-
-    if (error) {
+    let videos: any[];
+    try {
+      videos = await sql<any[]>`
+        SELECT * FROM public.videos
+        WHERE site_id = ${SITE_ID}
+          AND locale = ${locale}
+        ORDER BY order_index ASC
+        LIMIT ${PAGE_SIZE} OFFSET ${page * PAGE_SIZE}
+      `;
+    } catch (error: any) {
       onProgress?.(`❌ 查询视频表失败: ${error.message}`, 'error');
       throw error;
     }
     if (!videos || videos.length === 0) break;
 
     // 查询当前批次已存在的 pages
-    const videoIds = videos.map(v => v.id);
-    const pageIds = videoIds.map(id => `video:${id}`);
-    const { data: existingPages, error: pagesError } = await supabase
-      .from('pages')
-      .select('id, updatedAt, content_hash')
-      .in('id', pageIds)
-      .eq('site_id', SITE_ID)
-      .eq('locale', locale);
-
+    const videoIds = videos.map((v) => v.id);
+    const pageIds = videoIds.map((id) => `video:${id}`);
     const pageMap = new Map<string, { updatedAt: string; content_hash: string }>();
-    if (!pagesError && existingPages) {
+    try {
+      const existingPages = await sql<{ id: string; updatedAt: string; content_hash: string }[]>`
+        SELECT id, "updatedAt", content_hash FROM public.pages
+        WHERE id IN ${sql(pageIds)}
+          AND site_id = ${SITE_ID}
+          AND locale = ${locale}
+      `;
       for (const p of existingPages) {
         pageMap.set(p.id, { updatedAt: p.updatedAt, content_hash: p.content_hash });
       }
-    } else if (pagesError) {
+    } catch (pagesError: any) {
       onProgress?.(`⚠️ 查询现有页面失败: ${pagesError.message}，将强制全部重新处理`, 'warning');
     }
 
@@ -106,7 +99,6 @@ export async function scanVideos(locale: string, onProgress?: ProgressCallback):
       const pageId = `video:${videoId}`;
       const videoUpdatedAt = video.updated_at || new Date().toISOString();
 
-      // 跳过逻辑
       const existing = pageMap.get(pageId);
       if (existing && existing.updatedAt >= videoUpdatedAt) {
         skipped++;
@@ -115,7 +107,6 @@ export async function scanVideos(locale: string, onProgress?: ProgressCallback):
         continue;
       }
 
-      // 读取 MD 内容
       const mdKey = `videosys/${locale}/${videoId}.md`;
       let mdContent = '';
       let mdData: any = {};
@@ -133,10 +124,7 @@ export async function scanVideos(locale: string, onProgress?: ProgressCallback):
         }
       }
 
-      // 获取分类 slug
       const categorySlug = catMap.get(video.category_key) || video.category_key || 'default';
-
-      // 使用 mapper 构建 PageData
       const pageData = mapVideoToPageData(video, mdData, mdContent, categorySlug);
 
       try {

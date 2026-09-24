@@ -1,6 +1,6 @@
 // app/api/admin/payment/orders/[id]/pay/route.ts
 import { NextRequest, NextResponse } from 'next/server';
-import { supabase } from '@/lib/supabase/client';  // ✅ 添加 supabase 导入
+import sql from '@/lib/db/admin';
 import { orderService } from '@/lib/payment/services/order.service';
 import { accountService } from '@/lib/payment/services/account.service';
 import { paypalService } from '@/lib/payment/services/paypal.service';
@@ -8,14 +8,14 @@ import { getSiteId } from '@/lib/utils/request';
 
 export async function POST(
   request: NextRequest,
-  { params }: { params: Promise<{ id: string }> }  // ✅ 改为 Promise
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const { id } = await params;  // ✅ 使用 await
+    const { id } = await params;
     const siteId = await getSiteId(request);
     const order = await orderService.getById(siteId, id);
 
-    // ✅ 检查订单状态：正式订单（formal）且已发送（sent）才能支付
+    // ✅ 检查订单状态
     if (order.status !== 'formal' || order.sent_status !== 'sent') {
       return NextResponse.json(
         { success: false, error: '当前订单状态不支持支付' },
@@ -23,8 +23,7 @@ export async function POST(
       );
     }
 
-    // ✅ 检查支付方式：bank_transfer | qr_code | online_payment
-    // PayPal 属于 online_payment
+    // ✅ 检查支付方式
     if (order.payment_method !== 'online_payment') {
       return NextResponse.json(
         { success: false, error: '该订单不支持 PayPal 支付' },
@@ -71,15 +70,14 @@ export async function POST(
     );
 
     // ✅ 更新订单的 PayPal 订单 ID
-    const { error: updateError } = await supabase
-      .from('orders')
-      .update({
-        paypal_order_id: result.paypalOrderId,
-        updated_at: new Date().toISOString(),
-      })
-      .eq('id', order.id);
-
-    if (updateError) {
+    try {
+      await sql`
+        UPDATE public.orders
+        SET paypal_order_id = ${result.paypalOrderId},
+            updated_at = ${new Date().toISOString()}
+        WHERE id = ${order.id}
+      `;
+    } catch (updateError: any) {
       console.error('更新 PayPal 订单 ID 失败:', updateError);
     }
 

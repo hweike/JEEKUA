@@ -2,7 +2,9 @@
 
 import { useState, useEffect, useCallback, useRef, ReactNode } from 'react';
 import { toPinyin } from '@/lib/utils/pinyin';
-import { getFieldHint, getFieldPlaceholder, HINT_PATHS, InfoTooltip } from '@/config/fieldHints';
+import { getFieldPlaceholder, InfoTooltip } from '@/config/fieldHints';
+import { ensureUniqueSlugAsync } from '@/lib/utils/clientSlug';
+import { CheckCircle, XCircle, Loader2 } from 'lucide-react';
 
 export interface SeoData {
   slug: string;
@@ -12,6 +14,28 @@ export interface SeoData {
 }
 
 export type SlugStatus = 'idle' | 'checking' | 'available' | 'taken' | 'error';
+
+/** slug 自动检查配置 */
+export interface SlugCheckConfig {
+  /** 是否启用自动检查（默认 false） */
+  enabled?: boolean;
+  /** API 端点（默认 /api/admin/pages/slugs） */
+  endpoint?: string;
+  /** 排除的 ID（编辑模式下排除自身） */
+  excludeId?: string;
+  /** 响应数据字段名（默认 'pages'） */
+  dataKey?: string;
+  /** 数据项中 ID 字段名（默认 'id'） */
+  idKey?: string;
+  /** 数据项中 slug 字段名（默认 'slug'） */
+  slugKey?: string;
+  /** 检查延迟毫秒（默认 500） */
+  debounceMs?: number;
+  /** 当前语言（检查时需要） */
+  locale?: string;
+  /** ✅ 新增：检测到冲突时自动应用建议值（默认 false） */
+  autoResolveConflict?: boolean;
+}
 
 export interface SeoFieldsProps {
   slug?: string;
@@ -39,6 +63,12 @@ export interface SeoFieldsProps {
 
   /** 元描述下方的提示文案（非错误，仅建议） */
   seoDescriptionHint?: string;
+
+  /** slug 自动检查配置（启用后内部处理检查逻辑） */
+  slugCheck?: SlugCheckConfig;
+
+  /** 语言（用于 slug 检查） */
+  locale?: string;
 
   autoGenerateFrom?: string;
   showSlug?: boolean;
@@ -78,34 +108,28 @@ function generateSlugFromText(text: string): string {
   for (let i = 0; i < text.length; i++) {
     const ch = text[i];
 
-    // 字母或数字：累积到当前token
     if (/[a-zA-Z0-9]/.test(ch)) {
       currentToken += ch;
       continue;
     }
 
-    // 遇到非字母数字，先结束当前token
     if (currentToken) {
       parts.push(currentToken.toLowerCase());
       currentToken = '';
     }
 
-    // 处理中文：转换为拼音（整体）
     if (/[\u4e00-\u9fa5]/.test(ch)) {
       const pinyin = toPinyin(ch);
       if (pinyin) parts.push(pinyin);
     }
   }
 
-  // 处理末尾可能剩余的token
   if (currentToken) {
     parts.push(currentToken.toLowerCase());
   }
 
-  // 用连字符连接并清理多余连字符
   let slug = parts.join('-').replace(/-+/g, '-').replace(/^-|-$/g, '');
 
-  // 回退逻辑：如果没有任何有效字符，则按原始方式清理
   if (!slug) {
     slug = text
       .toLowerCase()
@@ -148,10 +172,12 @@ export default function SeoFields({
   onDescriptionChange,
   onChange,
   onSlugBlur,
-  slugStatus,
-  slugExtra,
+  slugStatus: externalSlugStatus,
+  slugExtra: externalSlugExtra,
   seoTitleHint,
   seoDescriptionHint,
+  slugCheck,
+  locale: localeProp,
   autoGenerateFrom,
   showSlug = true,
   showKeywords = true,
@@ -165,7 +191,7 @@ export default function SeoFields({
   className = '',
   labels = {},
 }: SeoFieldsProps) {
-  // 本地状态：初始化时使用外部传入的值
+  // ========== 本地状态 ==========
   const [slug, setSlug] = useState(externalSlug);
   const [seoKeywords, setSeoKeywords] = useState(externalKeywords);
   const [seoTitle, setSeoTitle] = useState(externalTitle);
@@ -174,79 +200,249 @@ export default function SeoFields({
   // 标记 slug 是否被用户手动编辑过
   const [isSlugManual, setIsSlugManual] = useState(!!externalSlug);
 
-  const isSlugManualRef = useRef(isSlugManual);
-  useEffect(() => {
-    isSlugManualRef.current = isSlugManual;
-  }, [isSlugManual]);
-
-  // 长度计数器（仅用于显示）
+  // 长度计数器
   const [slugLength, setSlugLength] = useState(slug.length);
   const [titleLength, setTitleLength] = useState(seoTitle.length);
   const [descLength, setDescLength] = useState(seoDescription.length);
 
-  useEffect(() => setSlugLength(slug.length), [slug]);
-  useEffect(() => setTitleLength(seoTitle.length), [seoTitle]);
-  useEffect(() => setDescLength(seoDescription.length), [seoDescription]);
+  // ========== ✅ 内部 slug 检查状态 ==========
+  const [internalSlugStatus, setInternalSlugStatus] = useState<SlugStatus>('idle');
+  const [internalSuggestedSlug, setInternalSuggestedSlug] = useState<string | null>(null);
 
-  // 同步外部变化到内部状态
+  // ========== ✅ 定时器 ref 与已检查记录（必须在 checkSlugAvailability 之前声明） ==========
+  const slugCheckTimer = useRef<NodeJS.Timeout | null>(null);
+  const lastCheckedSlug = useRef<string>('');
+
+  // ========== ✅ 用 ref 保存最新状态，避免闭包过期和依赖循环 ==========
+  const slugRef = useRef(slug);
+  const seoKeywordsRef = useRef(seoKeywords);
+  const seoTitleRef = useRef(seoTitle);
+  const seoDescriptionRef = useRef(seoDescription);
+  const isSlugManualRef = useRef(isSlugManual);
+  const internalSlugStatusRef = useRef(internalSlugStatus);
+
+  // 同步 ref
+  useEffect(() => { slugRef.current = slug; }, [slug]);
+  useEffect(() => { seoKeywordsRef.current = seoKeywords; }, [seoKeywords]);
+  useEffect(() => { seoTitleRef.current = seoTitle; }, [seoTitle]);
+  useEffect(() => { seoDescriptionRef.current = seoDescription; }, [seoDescription]);
+  useEffect(() => { isSlugManualRef.current = isSlugManual; }, [isSlugManual]);
+  useEffect(() => { internalSlugStatusRef.current = internalSlugStatus; }, [internalSlugStatus]);
+
+  // ========== ✅ 用 ref 保存回调，避免依赖变化 ==========
+  const onSlugChangeRef = useRef(onSlugChange);
+  const onKeywordsChangeRef = useRef(onKeywordsChange);
+  const onTitleChangeRef = useRef(onTitleChange);
+  const onDescriptionChangeRef = useRef(onDescriptionChange);
+  const onChangeRef = useRef(onChange);
+  const onSlugBlurRef = useRef(onSlugBlur);
+
+  useEffect(() => { onSlugChangeRef.current = onSlugChange; }, [onSlugChange]);
+  useEffect(() => { onKeywordsChangeRef.current = onKeywordsChange; }, [onKeywordsChange]);
+  useEffect(() => { onTitleChangeRef.current = onTitleChange; }, [onTitleChange]);
+  useEffect(() => { onDescriptionChangeRef.current = onDescriptionChange; }, [onDescriptionChange]);
+  useEffect(() => { onChangeRef.current = onChange; }, [onChange]);
+  useEffect(() => { onSlugBlurRef.current = onSlugBlur; }, [onSlugBlur]);
+
+  // ========== ✅ 从 slugCheck 提取原始值，避免对象依赖不稳定 ==========
+  const isInternalCheckEnabled = !!slugCheck?.enabled;
+  const checkEndpoint = slugCheck?.endpoint;
+  const checkExcludeId = slugCheck?.excludeId;
+  const checkDataKey = slugCheck?.dataKey;
+  const checkIdKey = slugCheck?.idKey;
+  const checkSlugKey = slugCheck?.slugKey;
+  const checkDebounceMs = slugCheck?.debounceMs ?? 500;
+  const checkLocale = slugCheck?.locale || localeProp || 'zh';
+  // ✅ 新增：是否自动应用建议值
+  const checkAutoResolveConflict = slugCheck?.autoResolveConflict ?? false;
+
+  // ✅ 优先使用外部状态，否则使用内部状态
+  const effectiveSlugStatus = externalSlugStatus ?? internalSlugStatus;
+
+  // ========== ✅ 检查函数（使用 ref，依赖稳定） ==========
+  const checkSlugAvailability = useCallback(
+    async (value: string) => {
+      if (!isInternalCheckEnabled) return;
+
+      const trimmed = value.trim();
+      if (!trimmed) {
+        setInternalSlugStatus('idle');
+        setInternalSuggestedSlug(null);
+        return;
+      }
+
+      // ✅ 使用 ref 读取最新状态，避免依赖 internalSlugStatus
+      if (
+        lastCheckedSlug.current === trimmed &&
+        internalSlugStatusRef.current === 'available'
+      ) {
+        return;
+      }
+
+      setInternalSlugStatus('checking');
+      lastCheckedSlug.current = trimmed;
+
+      try {
+        const uniqueSlug = await ensureUniqueSlugAsync(trimmed, checkLocale, {
+          endpoint: checkEndpoint,
+          excludeId: checkExcludeId,
+          dataKey: checkDataKey,
+          idKey: checkIdKey,
+          slugKey: checkSlugKey,
+        });
+
+        if (uniqueSlug === trimmed) {
+          // ✅ 无冲突
+          setInternalSlugStatus('available');
+          setInternalSuggestedSlug(null);
+        } else {
+          // ✅ 有冲突
+          if (checkAutoResolveConflict) {
+            // ✅ 自动应用建议值
+            setSlug(uniqueSlug);
+            setIsSlugManual(true);
+            handleChange({ slug: uniqueSlug });
+            setInternalSlugStatus('available');
+            setInternalSuggestedSlug(null);
+            lastCheckedSlug.current = uniqueSlug;
+          } else {
+            // 显示建议值，等用户点击
+            setInternalSlugStatus('taken');
+            setInternalSuggestedSlug(uniqueSlug);
+          }
+        }
+      } catch (err) {
+        console.warn('[SeoFields] slug 检查失败:', err);
+        setInternalSlugStatus('error');
+        setInternalSuggestedSlug(null);
+      }
+    },
+    // ✅ 依赖原始值（不是对象），稳定
+    [
+      isInternalCheckEnabled,
+      checkEndpoint,
+      checkExcludeId,
+      checkDataKey,
+      checkIdKey,
+      checkSlugKey,
+      checkLocale,
+      checkAutoResolveConflict,  // ✅ 新增依赖
+    ]
+  );
+
+  // ========== ✅ 用 ref 保存检查函数，避免 useEffect 依赖 ==========
+  const checkSlugAvailabilityRef = useRef(checkSlugAvailability);
+  useEffect(() => {
+    checkSlugAvailabilityRef.current = checkSlugAvailability;
+  }, [checkSlugAvailability]);
+
+  // ========== ✅ 统一向外发送变化（使用 ref，依赖稳定） ==========
+  const handleChange = useCallback((updates: Partial<SeoData>) => {
+    const currentSlug = slugRef.current;
+    const currentKeywords = seoKeywordsRef.current;
+    const currentTitle = seoTitleRef.current;
+    const currentDescription = seoDescriptionRef.current;
+
+    const newData = {
+      slug: updates.slug ?? currentSlug,
+      seoKeywords: updates.seoKeywords ?? currentKeywords,
+      seoTitle: updates.seoTitle ?? currentTitle,
+      seoDescription: updates.seoDescription ?? currentDescription,
+    };
+
+    if (updates.slug !== undefined && onSlugChangeRef.current) {
+      onSlugChangeRef.current(updates.slug);
+    }
+    if (updates.seoKeywords !== undefined && onKeywordsChangeRef.current) {
+      onKeywordsChangeRef.current(updates.seoKeywords);
+    }
+    if (updates.seoTitle !== undefined && onTitleChangeRef.current) {
+      onTitleChangeRef.current(updates.seoTitle);
+    }
+    if (updates.seoDescription !== undefined && onDescriptionChangeRef.current) {
+      onDescriptionChangeRef.current(updates.seoDescription);
+    }
+    if (onChangeRef.current) {
+      onChangeRef.current(newData);
+    }
+  }, []); // ✅ 空依赖，永不重建
+
+  // ========== ✅ 同步外部变化到内部状态 ==========
   useEffect(() => {
     setSeoKeywords(externalKeywords);
     setSeoTitle(externalTitle);
     setSeoDescription(externalDescription);
   }, [externalKeywords, externalTitle, externalDescription]);
 
+  // ✅ slug 同步（使用 ref 判断，避免依赖 slug）
   useEffect(() => {
     if (!isSlugManualRef.current) {
       setSlug(externalSlug);
     } else {
-      if (externalSlug && externalSlug !== slug) {
+      if (externalSlug && externalSlug !== slugRef.current) {
         setSlug(externalSlug);
       }
     }
-  }, [externalSlug, slug]);
+  }, [externalSlug]); // ✅ 只依赖 externalSlug
 
-  // 统一向外发送变化
-  const handleChange = useCallback(
-    (updates: Partial<SeoData>) => {
-      const newData = {
-        slug: updates.slug ?? slug,
-        seoKeywords: updates.seoKeywords ?? seoKeywords,
-        seoTitle: updates.seoTitle ?? seoTitle,
-        seoDescription: updates.seoDescription ?? seoDescription,
-      };
-      if (updates.slug !== undefined && onSlugChange) onSlugChange(updates.slug);
-      if (updates.seoKeywords !== undefined && onKeywordsChange) onKeywordsChange(updates.seoKeywords);
-      if (updates.seoTitle !== undefined && onTitleChange) onTitleChange(updates.seoTitle);
-      if (updates.seoDescription !== undefined && onDescriptionChange) onDescriptionChange(updates.seoDescription);
-      if (onChange) onChange(newData);
-    },
-    [slug, seoKeywords, seoTitle, seoDescription, onSlugChange, onKeywordsChange, onTitleChange, onDescriptionChange, onChange]
-  );
+  // ✅ 长度计数
+  useEffect(() => { setSlugLength(slug.length); }, [slug]);
+  useEffect(() => { setTitleLength(seoTitle.length); }, [seoTitle]);
+  useEffect(() => { setDescLength(seoDescription.length); }, [seoDescription]);
 
-  // 自动生成 slug（仅在非手动模式且 autoGenerateFrom 触发时）
+  // ========== ✅ 自动生成 slug（无循环） ==========
   useEffect(() => {
     if (!autoGenerateFrom || disabled || !showSlug) return;
-    if (!isSlugManual) {
-      const generated = generateSlugFromText(autoGenerateFrom);
-      if (generated && generated !== slug) {
-        setSlug(generated);
-        handleChange({ slug: generated });
+    if (isSlugManualRef.current) return; // ✅ 用 ref 判断
+
+    const generated = generateSlugFromText(autoGenerateFrom);
+    if (generated && generated !== slugRef.current) {
+      setSlug(generated);
+      handleChange({ slug: generated });
+
+      // 如果启用了内部检查，触发检查
+      if (isInternalCheckEnabled) {
+        if (slugCheckTimer.current) clearTimeout(slugCheckTimer.current);
+        slugCheckTimer.current = setTimeout(() => {
+          checkSlugAvailabilityRef.current(generated);
+        }, checkDebounceMs);
       }
     }
-  }, [autoGenerateFrom, isSlugManual, slug, showSlug, disabled, handleChange]);
+  }, [
+    autoGenerateFrom,
+    disabled,
+    showSlug,
+    isInternalCheckEnabled,
+    checkDebounceMs,
+    handleChange,
+  ]);
 
+  // ========== 事件处理 ==========
   const handleSlugEdit = (value: string) => {
     if (disabled) return;
     setIsSlugManual(true);
     const newSlug = value.slice(0, slugMaxLength);
     setSlug(newSlug);
     handleChange({ slug: newSlug });
+
+    if (isInternalCheckEnabled) {
+      if (slugCheckTimer.current) clearTimeout(slugCheckTimer.current);
+      slugCheckTimer.current = setTimeout(() => {
+        checkSlugAvailabilityRef.current(newSlug);
+      }, checkDebounceMs);
+    }
   };
 
   const handleSlugBlur = () => {
     if (disabled) return;
-    if (onSlugBlur) {
-      onSlugBlur();
+
+    if (isInternalCheckEnabled) {
+      if (slugCheckTimer.current) clearTimeout(slugCheckTimer.current);
+      checkSlugAvailabilityRef.current(slugRef.current);
+    }
+
+    if (onSlugBlurRef.current) {
+      onSlugBlurRef.current();
     }
   };
 
@@ -271,6 +467,61 @@ export default function SeoFields({
     handleChange({ seoDescription: newVal });
   };
 
+  // ========== ✅ 应用建议的 slug ==========
+  const applySuggestedSlug = () => {
+    if (internalSuggestedSlug) {
+      setIsSlugManual(true);
+      setSlug(internalSuggestedSlug);
+      handleChange({ slug: internalSuggestedSlug });
+      setInternalSlugStatus('available');
+      setInternalSuggestedSlug(null);
+      lastCheckedSlug.current = internalSuggestedSlug;
+    }
+  };
+
+  // ========== ✅ 渲染 slug 状态提示 ==========
+  const renderSlugExtra = () => {
+    if (externalSlugExtra) return externalSlugExtra;
+    if (!isInternalCheckEnabled) return null;
+
+    return (
+      <>
+        {internalSlugStatus === 'checking' && (
+          <p className="text-gray-500 text-sm flex items-center gap-1">
+            <Loader2 size={14} className="animate-spin" /> 正在检查 URL 名称是否可用...
+          </p>
+        )}
+        {internalSlugStatus === 'available' && (
+          <p className="text-green-600 text-sm flex items-center gap-1">
+            <CheckCircle size={14} /> URL 名称可用
+          </p>
+        )}
+        {internalSlugStatus === 'taken' && (
+          <div className="text-red-500 text-sm">
+            <p className="flex items-center gap-1">
+              <XCircle size={14} /> URL 名称已被占用
+            </p>
+            {internalSuggestedSlug && (
+              <p className="mt-1">
+                建议使用：
+                <button
+                  type="button"
+                  onClick={applySuggestedSlug}
+                  className="text-blue-600 hover:underline font-medium ml-1"
+                >
+                  {internalSuggestedSlug}
+                </button>
+              </p>
+            )}
+          </div>
+        )}
+        {internalSlugStatus === 'error' && (
+          <p className="text-yellow-600 text-sm">⚠️ 无法检查 URL 名称，保存时请留意</p>
+        )}
+      </>
+    );
+  };
+
   const defaultLabels = {
     slug: 'URL 名称',
     keywords: 'SEO 核心关键词',
@@ -278,6 +529,8 @@ export default function SeoFields({
     description: 'SEO 元描述',
   };
   const finalLabels = { ...defaultLabels, ...labels };
+
+  const slugExtraContent = renderSlugExtra();
 
   return (
     <div className={`space-y-4 ${className}`}>
@@ -292,16 +545,13 @@ export default function SeoFields({
             value={slug}
             onChange={e => handleSlugEdit(e.target.value)}
             onBlur={handleSlugBlur}
-            className={getSlugInputClass(slugStatus)}
+            className={getSlugInputClass(effectiveSlugStatus)}
             placeholder={getFieldPlaceholder('common.seo.slug')}
             disabled={disabled}
           />
 
-          {/* slug 输入框下方的额外内容（如状态提示、建议值） */}
-          {slugExtra && (
-            <div className="mt-1">
-              {slugExtra}
-            </div>
+          {slugExtraContent && (
+            <div className="mt-1">{slugExtraContent}</div>
           )}
 
           <div className="text-xs text-gray-500 mt-1 flex justify-between">
@@ -347,7 +597,6 @@ export default function SeoFields({
             placeholder={getFieldPlaceholder('common.seo.title')}
             disabled={disabled}
           />
-          {/* ✅ 元标题提示（非错误） */}
           {seoTitleHint && (
             <p className="text-xs text-amber-600 mt-1">{seoTitleHint}</p>
           )}
@@ -371,7 +620,6 @@ export default function SeoFields({
             placeholder={getFieldPlaceholder('common.seo.description')}
             disabled={disabled}
           />
-          {/* ✅ 元描述提示（非错误） */}
           {seoDescriptionHint && (
             <p className="text-xs text-amber-600 mt-1">{seoDescriptionHint}</p>
           )}

@@ -1,6 +1,6 @@
 // lib/discovery/scanners/blog-post.scanner.ts
 import matter from 'gray-matter';
-import { supabase } from '@/lib/supabase/client';
+import sql from '@/lib/db/admin';
 import { upsertPage, SITE_ID } from '../register';
 import { getPrivateStorage } from '@/lib/storage/factory';
 import { mapBlogPostToPageData } from '../mappers/blog-post.mapper';
@@ -8,12 +8,6 @@ import type { ProgressCallback } from './types';
 
 const storage = getPrivateStorage();
 
-/**
- * 扫描博客文章
- * 数据源：
- * - 基本信息：数据库 blog_posts 表
- * - 内容：R2 blog/${locale}/posts/${id}.md
- */
 export async function scanBlogPosts(locale: string, onProgress?: ProgressCallback): Promise<void> {
   onProgress?.(`📁 从数据库分页获取博客文章列表 (locale=${locale})`, 'info');
 
@@ -24,50 +18,52 @@ export async function scanBlogPosts(locale: string, onProgress?: ProgressCallbac
     totalFailed = 0,
     totalSkipped = 0;
 
-  // 先获取总数
-  const { count: totalCount, error: countError } = await supabase
-    .from('blog_posts')
-    .select('*', { count: 'exact', head: true })
-    .eq('site_id', SITE_ID)
-    .eq('locale', locale);
-
-  if (countError) {
+  // 1. 获取总数
+  let totalCount = 0;
+  try {
+    const countRows = await sql<{ count: string }[]>`
+      SELECT COUNT(*)::text AS count FROM public.blog_posts
+      WHERE site_id = ${SITE_ID}
+        AND locale = ${locale}
+    `;
+    totalCount = parseInt(countRows[0]?.count || '0', 10);
+  } catch (countError: any) {
     onProgress?.(`❌ 获取博客文章总数失败: ${countError.message}`, 'error');
     throw countError;
   }
-  onProgress?.(`📊 总共 ${totalCount || 0} 篇博客文章，分页处理中`, 'info');
+  onProgress?.(`📊 总共 ${totalCount} 篇博客文章，分页处理中`, 'info');
 
   while (true) {
-    const { data: posts, error } = await supabase
-      .from('blog_posts')
-      .select('*')
-      .eq('site_id', SITE_ID)
-      .eq('locale', locale)
-      .range(page * PAGE_SIZE, (page + 1) * PAGE_SIZE - 1)
-      .order('updated_at', { ascending: false });
-
-    if (error) {
+    let posts: any[];
+    try {
+      posts = await sql<any[]>`
+        SELECT * FROM public.blog_posts
+        WHERE site_id = ${SITE_ID}
+          AND locale = ${locale}
+        ORDER BY updated_at DESC
+        LIMIT ${PAGE_SIZE} OFFSET ${page * PAGE_SIZE}
+      `;
+    } catch (error: any) {
       onProgress?.(`❌ 查询博客文章表失败: ${error.message}`, 'error');
       throw error;
     }
     if (!posts || posts.length === 0) break;
 
-    // 查询当前批次已存在的 pages，用于跳过逻辑
-    const postIds = posts.map(p => p.id);
-    const pageIds = postIds.map(id => `blogPost:${id}`);
-    const { data: existingPages, error: pagesError } = await supabase
-      .from('pages')
-      .select('id, updatedAt, content_hash')
-      .in('id', pageIds)
-      .eq('site_id', SITE_ID)
-      .eq('locale', locale);
-
+    // 2. 查询当前批次的现有 pages
+    const postIds = posts.map((p) => p.id);
+    const pageIds = postIds.map((id) => `blogPost:${id}`);
     const pageMap = new Map<string, { updatedAt: string; content_hash: string }>();
-    if (!pagesError && existingPages) {
+    try {
+      const existingPages = await sql<{ id: string; updatedAt: string; content_hash: string }[]>`
+        SELECT id, "updatedAt", content_hash FROM public.pages
+        WHERE id IN ${sql(pageIds)}
+          AND site_id = ${SITE_ID}
+          AND locale = ${locale}
+      `;
       for (const p of existingPages) {
         pageMap.set(p.id, { updatedAt: p.updatedAt, content_hash: p.content_hash });
       }
-    } else if (pagesError) {
+    } catch (pagesError: any) {
       onProgress?.(`⚠️ 查询现有页面失败: ${pagesError.message}，将强制全部重新处理`, 'warning');
     }
 
@@ -89,7 +85,6 @@ export async function scanBlogPosts(locale: string, onProgress?: ProgressCallbac
       const pageId = `blogPost:${postId}`;
       const postUpdatedAt = post.updated_at || new Date().toISOString();
 
-      // 检查是否可跳过
       const existing = pageMap.get(pageId);
       if (existing && existing.updatedAt >= postUpdatedAt) {
         skipped++;
@@ -111,15 +106,12 @@ export async function scanBlogPosts(locale: string, onProgress?: ProgressCallbac
       } catch (err: any) {
         if (err?.code === 'NoSuchKey' || err?.Code === 'NoSuchKey' || err?.message?.includes('File not found')) {
           onProgress?.(`⚠️ MD 文件不存在: ${mdKey}，将仅使用数据库信息`, 'warning');
-          // 内容留空，继续处理
         } else {
           onProgress?.(`❌ 读取云存储 MD 文件失败: ${err.message}，将仅使用数据库信息`, 'error');
-          // 内容留空，继续处理
         }
       }
 
       try {
-        // 使用 mapper 构建 PageData，传入数据库记录、MD 元数据和内容
         const pageData = mapBlogPostToPageData(post, mdData, mdContent);
         await upsertPage(pageData, locale);
         success++;

@@ -1,13 +1,12 @@
 // app/api/admin/productCrawl/[id]/route.ts
 import { NextRequest, NextResponse } from 'next/server';
-import { supabase } from '@/lib/supabase/client';
+import sql from '@/lib/db/admin';
 
 const DEFAULT_SITE_ID = '000001';
 
 // ============================================================
 // GET - 获取单条采集数据
 // ============================================================
-
 export async function GET(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
@@ -17,14 +16,16 @@ export async function GET(
 
     console.log('🔍 查询 crawler_id:', id);
 
-    const { data, error } = await supabase
-      .from('crawler_products')
-      .select('*')
-      .eq('site_id', DEFAULT_SITE_ID)
-      .eq('crawler_id', id)
-      .single();
-
-    if (error) {
+    let data: any;
+    try {
+      const rows = await sql<any[]>`
+        SELECT * FROM public.crawler_products
+        WHERE site_id = ${DEFAULT_SITE_ID}
+          AND crawler_id = ${id}
+        LIMIT 1
+      `;
+      data = rows[0];
+    } catch (error: any) {
       console.error('❌ 查询错误:', error);
       return NextResponse.json(
         { error: '商品不存在: ' + error.message },
@@ -32,48 +33,23 @@ export async function GET(
       );
     }
 
-    // 🔥 如果 sku_list 是字符串，解析为数组
-    if (data.sku_list && typeof data.sku_list === 'string') {
-      try {
-        data.sku_list = JSON.parse(data.sku_list);
-        console.log(`✅ 解析 sku_list: ${data.sku_list?.length || 0} 个变体`);
-      } catch (e) {
-        console.warn('⚠️ sku_list 解析失败，设置为空数组');
-        data.sku_list = [];
-      }
-    } else if (!data.sku_list) {
-      data.sku_list = [];
+    if (!data) {
+      return NextResponse.json({ error: '商品不存在' }, { status: 404 });
     }
 
-    // 🔥 如果 price_tiers 是字符串，解析为数组
-    if (data.price_tiers && typeof data.price_tiers === 'string') {
-      try {
-        data.price_tiers = JSON.parse(data.price_tiers);
-      } catch (e) {
-        console.warn('⚠️ price_tiers 解析失败');
-        data.price_tiers = [];
+    // 解析 JSON 字段（postgres 库自动反序列化 jsonb，但为兼容 text 类型保留兜底）
+    const parseField = (val: any, fallback: any) => {
+      if (val == null) return fallback;
+      if (typeof val === 'string') {
+        try { return JSON.parse(val); } catch { return fallback; }
       }
-    }
+      return val;
+    };
 
-    // 🔥 如果 additional_images 是字符串，解析为数组
-    if (data.additional_images && typeof data.additional_images === 'string') {
-      try {
-        data.additional_images = JSON.parse(data.additional_images);
-      } catch (e) {
-        console.warn('⚠️ additional_images 解析失败');
-        data.additional_images = [];
-      }
-    }
-
-    // 🔥 如果 attributes 是字符串，解析为对象
-    if (data.attributes && typeof data.attributes === 'string') {
-      try {
-        data.attributes = JSON.parse(data.attributes);
-      } catch (e) {
-        console.warn('⚠️ attributes 解析失败');
-        data.attributes = {};
-      }
-    }
+    data.sku_list = parseField(data.sku_list, []);
+    data.price_tiers = parseField(data.price_tiers, []);
+    data.additional_images = parseField(data.additional_images, []);
+    data.attributes = parseField(data.attributes, {});
 
     return NextResponse.json(data);
   } catch (error) {
@@ -88,7 +64,6 @@ export async function GET(
 // ============================================================
 // PUT - 更新采集数据
 // ============================================================
-
 export async function PUT(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
@@ -98,167 +73,86 @@ export async function PUT(
     const body = await request.json();
 
     console.log('🔄 更新 crawler_id:', id);
-    console.log('📦 收到 sku_list 数量:', body.sku_list?.length || 0);
 
-    // ============================================================
-    // 1. 准备更新数据
-    // ============================================================
+    // 序列化 JSON 字段（crawler_products 里的 JSON 字段可能是 text 类型）
+    const skuListJson = body.sku_list && body.sku_list.length > 0
+      ? JSON.stringify(body.sku_list)
+      : JSON.stringify([]);
 
-    // 🔥 将 sku_list 转换为 JSON 字符串存储
-    let skuListJson = null;
-    if (body.sku_list && body.sku_list.length > 0) {
-      try {
-        skuListJson = JSON.stringify(body.sku_list);
-        console.log(`📦 sku_list 已序列化: ${body.sku_list.length} 个变体`);
-      } catch (e) {
-        console.error('❌ sku_list 序列化失败:', e);
-        skuListJson = JSON.stringify([]);
-      }
-    } else {
-      skuListJson = JSON.stringify([]);
-    }
+    const priceTiersJson = body.price_tiers
+      ? (typeof body.price_tiers === 'string' ? body.price_tiers : JSON.stringify(body.price_tiers))
+      : null;
 
-    // 🔥 处理其他 JSON 字段
-    let priceTiersJson = null;
-    if (body.price_tiers) {
-      try {
-        priceTiersJson = typeof body.price_tiers === 'string' 
-          ? body.price_tiers 
-          : JSON.stringify(body.price_tiers);
-      } catch (e) {
-        priceTiersJson = JSON.stringify([]);
-      }
-    }
+    const additionalImagesJson = body.additional_images
+      ? (typeof body.additional_images === 'string' ? body.additional_images : JSON.stringify(body.additional_images))
+      : null;
 
-    let additionalImagesJson = null;
-    if (body.additional_images) {
-      try {
-        additionalImagesJson = typeof body.additional_images === 'string'
-          ? body.additional_images
-          : JSON.stringify(body.additional_images);
-      } catch (e) {
-        additionalImagesJson = JSON.stringify([]);
-      }
-    }
+    const attributesJson = body.attributes
+      ? (typeof body.attributes === 'string' ? body.attributes : JSON.stringify(body.attributes))
+      : null;
 
-    let attributesJson = null;
-    if (body.attributes) {
-      try {
-        attributesJson = typeof body.attributes === 'string'
-          ? body.attributes
-          : JSON.stringify(body.attributes);
-      } catch (e) {
-        attributesJson = JSON.stringify({});
-      }
-    }
+    // 动态 SET
+    const setClauses: any[] = [];
+    if (body.product_name !== undefined) setClauses.push(sql`product_name = ${body.product_name}`);
+    if (body.sku !== undefined) setClauses.push(sql`sku = ${body.sku}`);
+    if (body.brand !== undefined) setClauses.push(sql`brand = ${body.brand}`);
+    if (priceTiersJson !== null) setClauses.push(sql`price_tiers = ${priceTiersJson}`);
+    if (body.currency !== undefined) setClauses.push(sql`currency = ${body.currency || 'USD'}`);
+    if (body.min_order_quantity !== undefined) setClauses.push(sql`min_order_quantity = ${body.min_order_quantity || 1}`);
+    if (body.main_image_url !== undefined) setClauses.push(sql`main_image_url = ${body.main_image_url}`);
+    if (additionalImagesJson !== null) setClauses.push(sql`additional_images = ${additionalImagesJson}`);
+    if (body.description !== undefined) setClauses.push(sql`description = ${body.description}`);
+    if (body.short_description !== undefined) setClauses.push(sql`short_description = ${body.short_description}`);
+    if (attributesJson !== null) setClauses.push(sql`attributes = ${attributesJson}`);
+    if (body.slug !== undefined) setClauses.push(sql`slug = ${body.slug}`);
+    if (body.availability !== undefined) setClauses.push(sql`availability = ${body.availability || 'in_stock'}`);
+    setClauses.push(sql`sku_list = ${skuListJson}`);
+    setClauses.push(sql`"updatedAt" = ${new Date().toISOString()}`);
 
-    const updateData: any = {
-      product_name: body.product_name,
-      sku: body.sku,
-      brand: body.brand,
-      price_tiers: priceTiersJson,
-      currency: body.currency || 'USD',
-      min_order_quantity: body.min_order_quantity || 1,
-      main_image_url: body.main_image_url,
-      additional_images: additionalImagesJson,
-      description: body.description,
-      short_description: body.short_description,
-      attributes: attributesJson,
-      slug: body.slug,
-      availability: body.availability || 'in_stock',
-      sku_list: skuListJson,  // 🔥 存储变体数据
-      updated_at: new Date().toISOString()
-    };
+    const setClause = setClauses.reduce(
+      (acc, c, i) => (i === 0 ? c : sql`${acc}, ${c}`),
+      sql``
+    );
 
-    // 移除 undefined 字段
-    Object.keys(updateData).forEach(key => {
-      if (updateData[key] === undefined || updateData[key] === null) {
-        delete updateData[key];
-      }
-    });
-
-    console.log('📦 更新数据:', {
-      product_name: updateData.product_name,
-      sku: updateData.sku,
-      currency: updateData.currency,
-      sku_list_length: body.sku_list?.length || 0
-    });
-
-    // ============================================================
-    // 2. 执行更新
-    // ============================================================
-
-    const { data, error } = await supabase
-      .from('crawler_products')
-      .update(updateData)
-      .eq('site_id', DEFAULT_SITE_ID)
-      .eq('crawler_id', id)
-      .select();
-
-    if (error) {
+    let data: any;
+    try {
+      const rows = await sql<any[]>`
+        UPDATE public.crawler_products
+        SET ${setClause}
+        WHERE site_id = ${DEFAULT_SITE_ID}
+          AND crawler_id = ${id}
+        RETURNING *
+      `;
+      data = rows[0];
+    } catch (error: any) {
       console.error('❌ 更新错误:', error);
-      return NextResponse.json(
-        { error: error.message },
-        { status: 500 }
-      );
+      return NextResponse.json({ error: error.message }, { status: 500 });
     }
 
-    if (!data || data.length === 0) {
-      return NextResponse.json(
-        { error: '商品不存在' },
-        { status: 404 }
-      );
+    if (!data) {
+      return NextResponse.json({ error: '商品不存在' }, { status: 404 });
     }
 
     console.log('✅ 更新成功');
 
-    // ============================================================
-    // 3. 返回结果（解析 JSON 字段）
-    // ============================================================
-
-    const result = data[0];
-    
-    // 解析 sku_list
-    if (result.sku_list && typeof result.sku_list === 'string') {
-      try {
-        result.sku_list = JSON.parse(result.sku_list);
-      } catch (e) {
-        result.sku_list = [];
+    // 解析 JSON 字段
+    const parseField = (val: any, fallback: any) => {
+      if (val == null) return fallback;
+      if (typeof val === 'string') {
+        try { return JSON.parse(val); } catch { return fallback; }
       }
-    }
+      return val;
+    };
 
-    // 解析 price_tiers
-    if (result.price_tiers && typeof result.price_tiers === 'string') {
-      try {
-        result.price_tiers = JSON.parse(result.price_tiers);
-      } catch (e) {
-        result.price_tiers = [];
-      }
-    }
+    data.sku_list = parseField(data.sku_list, []);
+    data.price_tiers = parseField(data.price_tiers, []);
+    data.additional_images = parseField(data.additional_images, []);
+    data.attributes = parseField(data.attributes, {});
 
-    // 解析 additional_images
-    if (result.additional_images && typeof result.additional_images === 'string') {
-      try {
-        result.additional_images = JSON.parse(result.additional_images);
-      } catch (e) {
-        result.additional_images = [];
-      }
-    }
-
-    // 解析 attributes
-    if (result.attributes && typeof result.attributes === 'string') {
-      try {
-        result.attributes = JSON.parse(result.attributes);
-      } catch (e) {
-        result.attributes = {};
-      }
-    }
-
-    return NextResponse.json({ 
-      success: true, 
-      data: result
+    return NextResponse.json({
+      success: true,
+      data,
     });
-
   } catch (error) {
     console.error('更新商品失败:', error);
     return NextResponse.json(
@@ -271,7 +165,6 @@ export async function PUT(
 // ============================================================
 // DELETE - 删除采集数据
 // ============================================================
-
 export async function DELETE(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
@@ -281,31 +174,25 @@ export async function DELETE(
 
     console.log('🗑️ 删除 crawler_id:', id);
 
-    const { data, error } = await supabase
-      .from('crawler_products')
-      .delete()
-      .eq('site_id', DEFAULT_SITE_ID)
-      .eq('crawler_id', id)
-      .select();
-
-    if (error) {
+    let data: any[];
+    try {
+      data = await sql<any[]>`
+        DELETE FROM public.crawler_products
+        WHERE site_id = ${DEFAULT_SITE_ID}
+          AND crawler_id = ${id}
+        RETURNING *
+      `;
+    } catch (error: any) {
       console.error('❌ 删除错误:', error);
-      return NextResponse.json(
-        { error: error.message },
-        { status: 500 }
-      );
+      return NextResponse.json({ error: error.message }, { status: 500 });
     }
 
     if (!data || data.length === 0) {
-      return NextResponse.json(
-        { error: '商品不存在' },
-        { status: 404 }
-      );
+      return NextResponse.json({ error: '商品不存在' }, { status: 404 });
     }
 
     console.log('✅ 删除成功');
     return NextResponse.json({ success: true });
-    
   } catch (error) {
     console.error('删除商品失败:', error);
     return NextResponse.json(

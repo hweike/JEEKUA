@@ -1,5 +1,5 @@
 // lib/discovery/services/sync-batch.service.ts
-import { supabase } from '@/lib/supabase/client';
+import sql from '@/lib/db/admin';
 import { upsertPage, SITE_ID } from '@/lib/discovery/register';
 import { PageData } from '@/lib/discovery/register';
 import { syncBusinessData, SyncContext } from '@/lib/discovery/sync';
@@ -15,18 +15,19 @@ async function insertSyncLog(
   errorMessage?: string,
   operator?: string
 ) {
-  await supabase.from('sync_logs').insert({
-    site_id: siteId,
-    sync_type: 'page',
-    source_id: sourceId,
-    source_locale: sourceLocale,
-    target_locale: targetLocale,
-    target_id: sourceId,
-    source_hash: sourceHash,
-    status,
-    error_message: errorMessage || null,
-    operator: operator || 'admin',
-  });
+  try {
+    await sql`
+      INSERT INTO public.sync_logs (
+        site_id, sync_type, source_id, source_locale, target_locale,
+        target_id, source_hash, status, error_message, operator
+      ) VALUES (
+        ${siteId}, 'page', ${sourceId}, ${sourceLocale}, ${targetLocale},
+        ${sourceId}, ${sourceHash}, ${status}, ${errorMessage ?? null}, ${operator || 'admin'}
+      )
+    `;
+  } catch (error) {
+    console.error('[insertSyncLog] 插入失败:', error);
+  }
 }
 
 export interface BatchSyncParams {
@@ -52,9 +53,6 @@ export interface BatchSyncResult {
   results: BatchSyncResultItem[];
 }
 
-/**
- * 根据页面类型和翻译数据构建 PageData
- */
 function buildPageData(
   sourcePage: any,
   translatedData: any,
@@ -62,6 +60,7 @@ function buildPageData(
   sourceLocale: string,
   operator: string
 ): PageData {
+  // ... 完全不变 ...
   let title: string;
   let seo_title: string | null;
   let seo_description: string | null;
@@ -86,7 +85,6 @@ function buildPageData(
     content_summary = translatedData?.description ?? sourcePage.content_summary;
     content_full = translatedData?.description ?? sourcePage.content_full;
   } else if (type === 'product') {
-    // 适配 product 翻译配置字段
     title = translatedData?.product_name ?? sourcePage.title;
     seo_title = translatedData?.seo_title ?? sourcePage.seo_title;
     seo_description = translatedData?.seo_description ?? sourcePage.seo_description;
@@ -94,7 +92,6 @@ function buildPageData(
     content_summary = translatedData?.short_description ?? sourcePage.content_summary;
     content_full = translatedData?.description ?? sourcePage.content_full;
   } else {
-    // 其他类型通用后备逻辑
     title = translatedData?.title ?? sourcePage.title;
     seo_title = translatedData?.seo_title ?? sourcePage.seo_title;
     seo_description = translatedData?.seo_description ?? sourcePage.seo_description;
@@ -129,9 +126,6 @@ function buildPageData(
   };
 }
 
-/**
- * 原有同步函数（保持完全不变）
- */
 export async function executeBatchSync(params: BatchSyncParams): Promise<BatchSyncResult> {
   const { sourceLocale, targetLocales, pageIds, mode, operator = 'admin' } = params;
 
@@ -140,7 +134,6 @@ export async function executeBatchSync(params: BatchSyncParams): Promise<BatchSy
     throw new Error('Source locale must be "en" or "zh"');
   }
 
-  // 过滤：只同步父级页面（id 不含 '/'），子级（变体、二级分类）由父级同步时内部处理
   const parentPageIds = pageIds.filter(id => !id.includes('/'));
   if (parentPageIds.length === 0) {
     return { total: 0, successCount: 0, failedCount: 0, results: [] };
@@ -152,35 +145,39 @@ export async function executeBatchSync(params: BatchSyncParams): Promise<BatchSy
   const results: BatchSyncResultItem[] = [];
 
   for (const pageId of parentPageIds) {
-    const { data: sourcePage, error: pageError } = await supabase
-      .from('pages')
-      .select('*')
-      .eq('id', pageId)
-      .eq('locale', sourceLocale)
-      .eq('site_id', SITE_ID)
-      .single();
+    // 1. 查询源页面
+    const sourceRows = await sql<any[]>`
+      SELECT * FROM public.pages
+      WHERE id = ${pageId}
+        AND locale = ${sourceLocale}
+        AND site_id = ${SITE_ID}
+      LIMIT 1
+    `;
+    const sourcePage = sourceRows[0];
 
-    if (pageError || !sourcePage) {
+    if (!sourcePage) {
       results.push({ pageId, status: 'failed', error: 'Source page not found' });
       continue;
     }
 
     const sourceHash = sourcePage.content_hash;
 
-    // 如果是 productCollection，预先获取子页面的哈希映射（用于二级分类同步）
+    // 2. productCollection 预取子页面哈希
     let childHashMap: Map<string, string> = new Map();
     if (sourcePage.type === 'productCollection') {
       const parentId = sourcePage.id;
-      const { data: childPages, error: childError } = await supabase
-        .from('pages')
-        .select('id, content_hash')
-        .eq('site_id', SITE_ID)
-        .eq('locale', sourceLocale)
-        .ilike('id', `${parentId}/%`);
-      if (!childError && childPages) {
+      try {
+        const childPages = await sql<{ id: string; content_hash: string }[]>`
+          SELECT id, content_hash FROM public.pages
+          WHERE site_id = ${SITE_ID}
+            AND locale = ${sourceLocale}
+            AND id LIKE ${parentId + '/%'}
+        `;
         childPages.forEach(p => {
           childHashMap.set(p.id, p.content_hash);
         });
+      } catch (err) {
+        console.warn(`[executeBatchSync] 查询子页面失败:`, err);
       }
     }
 
@@ -203,35 +200,31 @@ export async function executeBatchSync(params: BatchSyncParams): Promise<BatchSy
 
         if (repairOnly) {
           // 修复模式：仅更新同步字段
-          const { data: targetExists, error: existError } = await supabase
-            .from('pages')
-            .select('id')
-            .eq('id', pageId)
-            .eq('locale', targetLocale)
-            .eq('site_id', SITE_ID)
-            .maybeSingle();
+          const targetRows = await sql<{ id: string }[]>`
+            SELECT id FROM public.pages
+            WHERE id = ${pageId}
+              AND locale = ${targetLocale}
+              AND site_id = ${SITE_ID}
+            LIMIT 1
+          `;
 
-          if (existError || !targetExists) {
+          if (!targetRows[0]) {
             await insertSyncLog(SITE_ID, pageId, sourceLocale, targetLocale, sourceHash, 'skipped', 'Target page not found for repair', operator);
             results.push({ pageId, targetLocale, status: 'skipped', reason: 'Target page not found' });
             continue;
           }
 
-          const { error: updateError } = await supabase
-            .from('pages')
-            .update({
-              source_content_hash: sourceHash,
-              source_locale: sourceLocale,
-              last_sync_time: new Date().toISOString(),
-              last_sync_operator: operator,
-            })
-            .eq('id', pageId)
-            .eq('locale', targetLocale)
-            .eq('site_id', SITE_ID);
-
-          if (updateError) throw new Error(`Update pages failed: ${updateError.message}`);
+          await sql`
+            UPDATE public.pages
+            SET source_content_hash = ${sourceHash},
+                source_locale = ${sourceLocale},
+                last_sync_time = ${new Date().toISOString()},
+                last_sync_operator = ${operator}
+            WHERE id = ${pageId}
+              AND locale = ${targetLocale}
+              AND site_id = ${SITE_ID}
+          `;
         } else {
-          // 完整同步：处理父级 pages
           const translatedData = bizResult.data || sourcePage;
           const pageData = buildPageData(sourcePage, translatedData, sourceHash, sourceLocale, operator);
           await upsertPage(pageData, targetLocale);
@@ -292,11 +285,6 @@ export async function executeBatchSync(params: BatchSyncParams): Promise<BatchSy
   };
 }
 
-/**
- * 带进度回调的批量同步函数（新增，不改变原有逻辑）
- * 适用场景：中文→英文 或 英文→其他语言
- * 实时回调：当前正在处理的页面、状态（processing/success/failed）、累计成功/失败数量
- */
 export async function executeBatchSyncWithProgress(
   params: BatchSyncParams & { onProgress: (log: { pageId: string; status: 'processing' | 'success' | 'failed'; message?: string; successCount: number; failedCount: number }) => void }
 ): Promise<BatchSyncResult> {
@@ -307,7 +295,6 @@ export async function executeBatchSyncWithProgress(
     throw new Error('Source locale must be "en" or "zh"');
   }
 
-  // 过滤父级页面
   const parentPageIds = pageIds.filter(id => !id.includes('/'));
   if (parentPageIds.length === 0) {
     return { total: 0, successCount: 0, failedCount: 0, results: [] };
@@ -321,18 +308,18 @@ export async function executeBatchSyncWithProgress(
   let failedCount = 0;
 
   for (const pageId of parentPageIds) {
-    // 开始处理
     onProgress({ pageId, status: 'processing', message: `正在同步 ${pageId}`, successCount, failedCount });
 
-    const { data: sourcePage, error: pageError } = await supabase
-      .from('pages')
-      .select('*')
-      .eq('id', pageId)
-      .eq('locale', sourceLocale)
-      .eq('site_id', SITE_ID)
-      .single();
+    const sourceRows = await sql<any[]>`
+      SELECT * FROM public.pages
+      WHERE id = ${pageId}
+        AND locale = ${sourceLocale}
+        AND site_id = ${SITE_ID}
+      LIMIT 1
+    `;
+    const sourcePage = sourceRows[0];
 
-    if (pageError || !sourcePage) {
+    if (!sourcePage) {
       results.push({ pageId, status: 'failed', error: 'Source page not found' });
       failedCount++;
       onProgress({ pageId, status: 'failed', message: `源页面不存在: ${pageId}`, successCount, failedCount });
@@ -341,20 +328,21 @@ export async function executeBatchSyncWithProgress(
 
     const sourceHash = sourcePage.content_hash;
 
-    // 如果是 productCollection，预先获取子页面哈希
     let childHashMap: Map<string, string> = new Map();
     if (sourcePage.type === 'productCollection') {
       const parentId = sourcePage.id;
-      const { data: childPages, error: childError } = await supabase
-        .from('pages')
-        .select('id, content_hash')
-        .eq('site_id', SITE_ID)
-        .eq('locale', sourceLocale)
-        .ilike('id', `${parentId}/%`);
-      if (!childError && childPages) {
+      try {
+        const childPages = await sql<{ id: string; content_hash: string }[]>`
+          SELECT id, content_hash FROM public.pages
+          WHERE site_id = ${SITE_ID}
+            AND locale = ${sourceLocale}
+            AND id LIKE ${parentId + '/%'}
+        `;
         childPages.forEach(p => {
           childHashMap.set(p.id, p.content_hash);
         });
+      } catch (err) {
+        console.warn(`[executeBatchSyncWithProgress] 查询子页面失败:`, err);
       }
     }
 
@@ -378,34 +366,30 @@ export async function executeBatchSyncWithProgress(
         }
 
         if (repairOnly) {
-          const { data: targetExists, error: existError } = await supabase
-            .from('pages')
-            .select('id')
-            .eq('id', pageId)
-            .eq('locale', targetLocale)
-            .eq('site_id', SITE_ID)
-            .maybeSingle();
+          const targetRows = await sql<{ id: string }[]>`
+            SELECT id FROM public.pages
+            WHERE id = ${pageId}
+              AND locale = ${targetLocale}
+              AND site_id = ${SITE_ID}
+            LIMIT 1
+          `;
 
-          if (existError || !targetExists) {
+          if (!targetRows[0]) {
             await insertSyncLog(SITE_ID, pageId, sourceLocale, targetLocale, sourceHash, 'skipped', 'Target page not found for repair', operator);
             results.push({ pageId, targetLocale, status: 'skipped', reason: 'Target page not found' });
-            // 跳过不计入成功/失败
             continue;
           }
 
-          const { error: updateError } = await supabase
-            .from('pages')
-            .update({
-              source_content_hash: sourceHash,
-              source_locale: sourceLocale,
-              last_sync_time: new Date().toISOString(),
-              last_sync_operator: operator,
-            })
-            .eq('id', pageId)
-            .eq('locale', targetLocale)
-            .eq('site_id', SITE_ID);
-
-          if (updateError) throw new Error(`Update pages failed: ${updateError.message}`);
+          await sql`
+            UPDATE public.pages
+            SET source_content_hash = ${sourceHash},
+                source_locale = ${sourceLocale},
+                last_sync_time = ${new Date().toISOString()},
+                last_sync_operator = ${operator}
+            WHERE id = ${pageId}
+              AND locale = ${targetLocale}
+              AND site_id = ${SITE_ID}
+          `;
         } else {
           const translatedData = bizResult.data || sourcePage;
           const pageData = buildPageData(sourcePage, translatedData, sourceHash, sourceLocale, operator);

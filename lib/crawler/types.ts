@@ -3,6 +3,7 @@ export interface CrawlerRule {
   name: string;
   crawlType: 'category-tree' | 'mornsun-products' | 'shopify-collection' | 'single-product';
   startUrl?: string;
+
   // 分类树专用
   categoryTree?: {
     containerSelector: string | string[];
@@ -17,12 +18,17 @@ export interface CrawlerRule {
       nameSelector: string;
       urlSelector: string;
     };
+    // 兼容旧版单级分类
+    itemSelector?: string;
+    nameSelector?: string;
+    urlSelector?: string;
     urlPrefix?: string;
     waitTimeout?: number;
-    descriptionSelector?: string;
+    descriptionSelector?: string | string[];
     fetchAllDescriptions?: boolean;
     level2DescriptionDelay?: number;
   };
+
   // MORNSUN 产品列表专用
   mornsunProducts?: {
     tableContainer?: string;
@@ -30,12 +36,26 @@ export interface CrawlerRule {
     parentRowSelector?: string;
     childRowSelector?: string;
     dynamicHeaders?: boolean;
+    productLimit?: number;
     categoriesSource?: {
       type: 'task' | 'file';
       taskId?: string;
       filePath?: string;
     };
   };
+
+  // 通用产品列表配置
+  productList?: {
+    tableSelector?: string;
+    fieldMapping?: Record<string, string>;
+    pagination?: {
+      nextButtonSelector?: string;
+      maxPages?: number;
+      loadMoreSelector?: string;
+      maxScrolls?: number;
+    };
+  };
+
   // Shopify 商品系列专用
   shopifyCollection?: {
     collectionUrls: string[];
@@ -44,11 +64,13 @@ export interface CrawlerRule {
     paginationSelector?: string;
     maxPages?: number;
   };
+
   // 单页产品专用
   singleProduct?: {
     productUrls: string[];
     fieldsMapping?: Record<string, string>;
   };
+
   requestTimeout?: number;
   maxRetries?: number;
   debugScreenshot?: boolean;
@@ -66,7 +88,7 @@ export interface TaskData {
   progress?: string;
   createdAt: string;
   updatedAt: string;
-  latestProducts?: any[]; // 最近添加的几条产品数据（用于预览）
+  latestProducts?: any[];
 }
 
 export const DATA_ROOT = process.cwd() + '/crawler';

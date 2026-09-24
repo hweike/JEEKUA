@@ -1,6 +1,7 @@
+// app/api/account/inquiries/[id]/replies/route.ts
 import { NextResponse } from 'next/server';
 import { verifyCustomerToken } from '@/lib/account/server';
-import { supabase } from '@/lib/supabase/client';
+import sql from '@/lib/db/admin';
 
 export async function POST(
   request: Request,
@@ -32,45 +33,58 @@ export async function POST(
       return NextResponse.json({ error: 'Content required' }, { status: 400 });
     }
 
-    // 4. 验证询盘归属并获取客户信息（用于填充 sender 字段）
-    const { data: inquiry, error: inqErr } = await supabase
-      .from('inquiries')
-      .select('customer_id, email, name')
-      .eq('id', inquiryId)
-      .eq('customer_id', payload.customerId)
-      .maybeSingle();
+    // 4. 验证询盘归属并获取客户信息
+    let inquiry: { customer_id: string; email: string | null; name: string | null } | undefined;
+    try {
+      const rows = await sql<{ customer_id: string; email: string | null; name: string | null }[]>`
+        SELECT customer_id, email, name FROM public.inquiries
+        WHERE id = ${inquiryId}
+          AND customer_id = ${payload.customerId}
+        LIMIT 1
+      `;
+      inquiry = rows[0];
+    } catch (inqErr: any) {
+      console.error('Inquiry fetch error:', inqErr);
+    }
 
-    if (inqErr || !inquiry) {
+    if (!inquiry) {
       return NextResponse.json({ error: 'Inquiry not found or unauthorized' }, { status: 404 });
     }
 
     // 5. 插入回复
-    const { data: reply, error: repErr } = await supabase
-      .from('inquiry_replies')
-      .insert({
-        inquiry_id: inquiryId,
-        site_id: '000001', // 若需要动态可传
-        sender_type: 'user',
-        sender_email: inquiry.email || 'user@example.com',
-        sender_name: inquiry.name || '用户',
-        customer_id: payload.customerId,
-        content: content.trim(),
-        is_internal: false,
-        created_at: new Date().toISOString(),
-      })
-      .select('*')
-      .single();
-
-    if (repErr) {
+    let reply: any;
+    try {
+      const rows = await sql<any[]>`
+        INSERT INTO public.inquiry_replies (
+          inquiry_id, site_id, sender_type, sender_email, sender_name,
+          customer_id, content, is_internal, created_at
+        ) VALUES (
+          ${inquiryId}, ${'000001'}, 'user',
+          ${inquiry.email || 'user@example.com'},
+          ${inquiry.name || '用户'},
+          ${payload.customerId}, ${content.trim()}, false,
+          ${new Date().toISOString()}
+        )
+        RETURNING *
+      `;
+      reply = rows[0];
+    } catch (repErr: any) {
       console.error('Insert reply error:', repErr);
       return NextResponse.json({ error: 'Failed to save reply' }, { status: 500 });
     }
 
-    // 6. 可选：更新主表的 updated_at
-    await supabase
-      .from('inquiries')
-      .update({ updated_at: new Date().toISOString() })
-      .eq('id', inquiryId);
+    if (!reply) {
+      return NextResponse.json({ error: 'Failed to save reply' }, { status: 500 });
+    }
+
+    // 6. 更新主表的 updated_at
+    try {
+      await sql`
+        UPDATE public.inquiries
+        SET updated_at = ${new Date().toISOString()}
+        WHERE id = ${inquiryId}
+      `;
+    } catch {}
 
     return NextResponse.json({ success: true, reply }, { status: 201 });
   } catch (error) {

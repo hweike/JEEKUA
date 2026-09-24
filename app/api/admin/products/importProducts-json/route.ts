@@ -11,7 +11,7 @@ import {
 import { writeProduct, readProduct } from '@/lib/products/mdParser';
 import { generateSlug, generateSeoTitle, generateSeoDescription } from '@/lib/products/seoGenerator';
 import { getPrivateStorage } from '@/lib/storage/factory';
-import { supabase } from '@/lib/supabase/client';
+import sql from '@/lib/db/admin';
 import { downloadAndSaveImage } from '@/lib/files/download';
 
 const DEFAULT_SITE_ID = '000001';
@@ -196,7 +196,11 @@ async function processProductItem(
     return { success: false, error: '缺少 rawData 字段' };
   }
 
-  const { categoryName, brand, parent_product_name, parent_product_sku, parent_product_imageUrl, attributes, variants } = rawData;
+  const {
+    categoryName, brand, parent_product_name, parent_product_sku,
+    parent_product_imageUrl, attributes, variants,
+  } = rawData;
+
   if (!categoryName || !brand || !parent_product_name || !parent_product_sku) {
     return { success: false, error: 'JSON 缺少必要字段 (categoryName, brand, parent_product_name, parent_product_sku)' };
   }
@@ -218,28 +222,31 @@ async function processProductItem(
   if (!sku) sku = generateSkuFromRule(skuRule);
   else sku = sku.trim();
 
-  // 检查父商品是否存在
-  const { data: existingProduct, error: queryError } = await supabase
-    .from('products')
-    .select('productId, createdAt')
-    .eq('site_id', DEFAULT_SITE_ID)
-    .eq('locale', locale)
-    .eq('sku', sku)
-    .is('parent_product_id', null)
-    .maybeSingle();
-
-  if (queryError) {
+  // ============================================================
+  // ✅ 检查父商品是否存在（已迁移到 sql）
+  // ============================================================
+  let existingProduct: { productId: string; createdAt: string | null } | undefined;
+  try {
+    const rows = await sql<{ productId: string; createdAt: string | null }[]>`
+      SELECT "productId", "createdAt" FROM public.products
+      WHERE site_id = ${DEFAULT_SITE_ID}
+        AND locale = ${locale}
+        AND sku = ${sku}
+        AND parent_product_id IS NULL
+      LIMIT 1
+    `;
+    existingProduct = rows[0];
+  } catch (queryError: any) {
     return { success: false, error: `数据库查询失败: ${queryError.message}` };
   }
 
   const isUpdate = !!existingProduct;
 
-  // 如果 !ifoverwrite 且商品已存在，直接跳过
   if (isUpdate && !ifoverwrite) {
-    return { success: true, productId: existingProduct.productId, skipped: true };
+    return { success: true, productId: existingProduct!.productId, skipped: true };
   }
 
-  const productId = isUpdate ? existingProduct.productId : generateUniqueId();
+  const productId = isUpdate ? existingProduct!.productId : generateUniqueId();
 
   // 处理主图
   const mainImageKey = parent_product_imageUrl
@@ -252,23 +259,24 @@ async function processProductItem(
     : '';
 
   // 处理变体图片
-  const variantsWithImages = await Promise.all((variants || []).map(async (variant: any) => {
-    let variantImageKey = '';
-    if (variant.product_imageUrl) {
-      variantImageKey = await downloadAndSaveImage(variant.product_imageUrl, {
-        referenceType: 'product',
-        referenceId: productId,
-        cache: imageCache,
-        pending: pendingDownloads,
-      });
-    }
-    return {
-      ...variant,
-      localImageKey: variantImageKey,
-    };
-  }));
+  const variantsWithImages = await Promise.all(
+    (variants || []).map(async (variant: any) => {
+      let variantImageKey = '';
+      if (variant.product_imageUrl) {
+        variantImageKey = await downloadAndSaveImage(variant.product_imageUrl, {
+          referenceType: 'product',
+          referenceId: productId,
+          cache: imageCache,
+          pending: pendingDownloads,
+        });
+      }
+      return {
+        ...variant,
+        localImageKey: variantImageKey,
+      };
+    })
+  );
 
-  // description 和 short_description 强制为空
   const description = '';
   const shortDescription = '';
 
@@ -334,7 +342,6 @@ async function processProductItem(
     productData.variants = existingMd?.variants || [];
   }
 
-  // ★ 强制清空函数
   const sanitizeProductData = (data: any) => {
     data.description = '';
     data.short_description = '';
@@ -367,31 +374,35 @@ async function processProductItem(
     slug,
     status: 'published',
     updatedAt: now,
-    createdAt: isUpdate ? existingProduct.createdAt : now,
+    createdAt: isUpdate ? existingProduct!.createdAt : now,
   });
 
-  // ★ 第一次写入前强制清空
   sanitizeProductData(productData);
   console.log(`[IMPORT] Writing parent product ${productId}, description: "${productData.description}"`);
   await writeProduct(locale, productId, productData, '');
 
+  // ============================================================
   // 处理变体
+  // ============================================================
   const variantItems: any[] = [];
   for (const variant of variantsWithImages) {
     let variantSku = variant.product_sku?.trim();
     if (!variantSku) variantSku = generateSkuFromRule(skuRule);
     else variantSku = variantSku.trim();
 
-    const { data: existingVariant, error: variantQueryError } = await supabase
-      .from('products')
-      .select('productId, createdAt')
-      .eq('site_id', DEFAULT_SITE_ID)
-      .eq('locale', locale)
-      .eq('sku', variantSku)
-      .not('parent_product_id', 'is', null)
-      .maybeSingle();
-
-    if (variantQueryError) {
+    // ✅ 查询变体是否存在（已迁移到 sql）
+    let existingVariant: { productId: string; createdAt: string | null } | undefined;
+    try {
+      const rows = await sql<{ productId: string; createdAt: string | null }[]>`
+        SELECT "productId", "createdAt" FROM public.products
+        WHERE site_id = ${DEFAULT_SITE_ID}
+          AND locale = ${locale}
+          AND sku = ${variantSku}
+          AND parent_product_id IS NOT NULL
+        LIMIT 1
+      `;
+      existingVariant = rows[0];
+    } catch (variantQueryError: any) {
       console.error(`查询变体失败 (SKU: ${variantSku}):`, variantQueryError);
       continue;
     }
@@ -402,13 +413,12 @@ async function processProductItem(
       continue;
     }
 
-    const variantId = isVariantUpdate ? existingVariant.productId : generateUniqueId();
+    const variantId = isVariantUpdate ? existingVariant!.productId : generateUniqueId();
 
     const variantName = variant.product_name || `${productName} - ${variantSku}`;
     const variantSlug = generateSlug(variantName);
     const variantImageKey = variant.localImageKey || '';
 
-    // 变体 description 和 short_description 为空
     const variantDescription = '';
     const variantShortDesc = '';
 
@@ -446,7 +456,9 @@ async function processProductItem(
       productData.variants.push(variantData);
     }
 
-    // 写入 products 表
+    // ============================================================
+    // ✅ 写入 products 表（已迁移到 sql，显式列名）
+    // ============================================================
     const variantRecord = {
       productId: variantId,
       site_id: DEFAULT_SITE_ID,
@@ -458,11 +470,11 @@ async function processProductItem(
       currency: productData.currency,
       availability: productData.availability,
       min_order_quantity: productData.min_order_quantity,
-      price_tiers: JSON.stringify(productData.price_tiers),
+      price_tiers: JSON.stringify(productData.price_tiers), // text 类型
       main_image_url: variantImageKey,
       slug: variantSlug,
       status: 'published',
-      createdAt: isVariantUpdate ? existingVariant.createdAt : new Date().toISOString(),
+      createdAt: isVariantUpdate ? existingVariant!.createdAt : new Date().toISOString(),
       updatedAt: new Date().toISOString(),
       productLineId: productLineId || '',
       categoryId,
@@ -471,9 +483,54 @@ async function processProductItem(
     };
 
     if (isVariantUpdate) {
-      await supabase.from('products').update(variantRecord).eq('productId', variantId);
+      try {
+        await sql`
+          UPDATE public.products
+          SET sku = ${variantRecord.sku},
+              product_name = ${variantRecord.product_name},
+              parent_product_id = ${variantRecord.parent_product_id},
+              brand = ${variantRecord.brand},
+              currency = ${variantRecord.currency},
+              availability = ${variantRecord.availability},
+              min_order_quantity = ${variantRecord.min_order_quantity},
+              price_tiers = ${variantRecord.price_tiers},
+              main_image_url = ${variantRecord.main_image_url},
+              slug = ${variantRecord.slug},
+              status = ${variantRecord.status},
+              "updatedAt" = ${variantRecord.updatedAt},
+              "productLineId" = ${variantRecord.productLineId},
+              "categoryId" = ${variantRecord.categoryId},
+              "seriesId" = ${variantRecord.seriesId},
+              "templateId" = ${variantRecord.templateId}
+          WHERE "productId" = ${variantId}
+            AND site_id = ${DEFAULT_SITE_ID}
+            AND locale = ${locale}
+        `;
+      } catch (e) {
+        console.error(`更新变体失败:`, e);
+      }
     } else {
-      await supabase.from('products').insert(variantRecord);
+      try {
+        await sql`
+          INSERT INTO public.products (
+            "productId", site_id, locale, sku, product_name, parent_product_id,
+            brand, currency, availability, min_order_quantity, price_tiers,
+            main_image_url, slug, status, "createdAt", "updatedAt",
+            "productLineId", "categoryId", "seriesId", "templateId"
+          ) VALUES (
+            ${variantRecord.productId}, ${variantRecord.site_id}, ${variantRecord.locale},
+            ${variantRecord.sku}, ${variantRecord.product_name}, ${variantRecord.parent_product_id},
+            ${variantRecord.brand}, ${variantRecord.currency}, ${variantRecord.availability},
+            ${variantRecord.min_order_quantity}, ${variantRecord.price_tiers},
+            ${variantRecord.main_image_url}, ${variantRecord.slug}, ${variantRecord.status},
+            ${variantRecord.createdAt}, ${variantRecord.updatedAt},
+            ${variantRecord.productLineId}, ${variantRecord.categoryId},
+            ${variantRecord.seriesId}, ${variantRecord.templateId}
+          )
+        `;
+      } catch (e) {
+        console.error(`插入变体失败:`, e);
+      }
     }
 
     await upsertProductIndex({
@@ -495,16 +552,15 @@ async function processProductItem(
       slug: variantSlug,
       status: 'published',
       updatedAt: new Date().toISOString(),
-      createdAt: isVariantUpdate ? existingVariant.createdAt : new Date().toISOString(),
+      createdAt: isVariantUpdate ? existingVariant!.createdAt : new Date().toISOString(),
       templateId: productData.templateId,
     });
 
     variantItems.push(variantData);
   }
 
-  // 更新父产品的 MD 文件（变体可能已变更）
+  // 更新父产品的 MD 文件
   if (variantItems.length > 0 || isUpdate) {
-    // ★ 第二次写入前强制清空
     sanitizeProductData(productData);
     console.log(`[IMPORT] Updating parent product ${productId} after variant processing, description: "${productData.description}"`);
     await writeProduct(locale, productId, productData, '');

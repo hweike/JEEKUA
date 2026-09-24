@@ -1,3 +1,5 @@
+// lib/docs/index.ts
+
 // ========== 文档库相关函数 ==========
 export {
   getDocsLibs,
@@ -12,13 +14,15 @@ export {
 export {
   getDocsByLib,
   getDocument,
-  getDocBySlug,          // 新增导出
+  getDocBySlug,
   saveDocument,
   deleteDocument,
   copyDocument,
   updateDocOrders,
   syncDocOrdersAllLocales,
   getDocTree,
+  getAllDocParams,           // ✅ 新增
+  clearAllDocParamsCache,    // ✅ 新增
 } from './document';
 
 // ========== 树构建函数 ==========
@@ -27,7 +31,7 @@ export { getDocsTree } from './tree';
 // ========== 类型定义 ==========
 export type { DocsLib, Doc, DocIndex, TreeNode } from './types';
 
-// ========== 新增：SEO 缓存版本 ==========
+// ========== SEO 缓存版本 ==========
 export {
   getCachedDocsLibBySlug,
   getCachedDocBySlug,

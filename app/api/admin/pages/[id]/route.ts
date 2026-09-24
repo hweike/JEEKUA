@@ -1,12 +1,11 @@
 // app/api/admin/pages/[id]/route.ts
 import { NextRequest, NextResponse } from 'next/server';
+import { revalidatePath } from 'next/cache';
 import { updatePage, deletePage } from '@/lib/pages/pageService';
-import { readPage } from '@/lib/pages/storage';
+import { readPageFresh } from '@/lib/pages/storage';  // ✅ 只导入 readPageFresh
 
-// 是否为开发环境
 const isDev = process.env.NODE_ENV === 'development';
 
-// ========== 数据合规检查（更新场景，字段可选） ==========
 function validatePageData(data: any) {
   const errors: string[] = [];
 
@@ -41,6 +40,7 @@ function validatePageData(data: any) {
 /**
  * GET /api/admin/pages/:id?locale=zh
  * 后台编辑页面加载，返回完整数据（含 content、templateData）
+ * ✅ 使用 readPageFresh，保证读到最新数据
  */
 export async function GET(
   request: NextRequest,
@@ -62,7 +62,8 @@ export async function GET(
       console.log(`[GET /api/admin/pages/${id}] locale: ${locale}`);
     }
 
-    const page = await readPage(locale, id);
+    const page = await readPageFresh(locale, id);
+
     if (!page) {
       return NextResponse.json(
         { success: false, error: 'Page not found' },
@@ -70,7 +71,6 @@ export async function GET(
       );
     }
 
-    // ✅ 返回完整数据（含 content、templateData）
     return NextResponse.json({
       success: true,
       data: page,
@@ -114,7 +114,6 @@ export async function PUT(
       console.log(`[PUT /api/admin/pages/${id}] body:`, JSON.stringify(body, null, 2));
     }
 
-    // 数据合规检查
     const { errors } = validatePageData(body);
     if (errors.length > 0) {
       console.error(`[PUT /api/admin/pages/${id}] ❌ 数据合规性错误:`, errors);
@@ -124,7 +123,8 @@ export async function PUT(
       );
     }
 
-    // 更新页面
+    const before = await readPageFresh(locale, id);
+
     const startTime = Date.now();
     const updated = await updatePage(locale, id, body);
     const duration = Date.now() - startTime;
@@ -137,7 +137,19 @@ export async function PUT(
       });
     }
 
-    // 返回统一结构，只返回必要字段
+    try {
+      revalidatePath(`/${locale}/${updated.slug}`);
+      if (before && before.slug && before.slug !== updated.slug) {
+        revalidatePath(`/${locale}/${before.slug}`);
+      }
+      if (isDev) {
+        console.log(`[PUT /api/admin/pages/${id}] ✅ revalidatePath: /${locale}/${updated.slug}` +
+          (before && before.slug && before.slug !== updated.slug ? ` + /${locale}/${before.slug}` : ''));
+      }
+    } catch (e) {
+      console.warn(`[PUT /api/admin/pages/${id}] revalidatePath 失败:`, e);
+    }
+
     return NextResponse.json({
       success: true,
       data: {
@@ -151,7 +163,6 @@ export async function PUT(
     const message = error?.message || '更新失败';
     console.error(`[PUT /api/admin/pages/${id}] ❌ 捕获错误:`, message);
 
-    // 尝试解析 JSON 错误（如 SEO 校验错误）
     try {
       const errors = JSON.parse(message);
       return NextResponse.json(
@@ -191,10 +202,23 @@ export async function DELETE(
       console.log(`[DELETE /api/admin/pages/${id}] locale: ${locale}`);
     }
 
+    const before = await readPageFresh(locale, id);
+
     await deletePage(locale, id);
 
     if (isDev) {
       console.log(`[DELETE /api/admin/pages/${id}] ✅ 删除成功`);
+    }
+
+    try {
+      if (before?.slug) {
+        revalidatePath(`/${locale}/${before.slug}`);
+        if (isDev) {
+          console.log(`[DELETE /api/admin/pages/${id}] ✅ revalidatePath: /${locale}/${before.slug}`);
+        }
+      }
+    } catch (e) {
+      console.warn(`[DELETE /api/admin/pages/${id}] revalidatePath 失败:`, e);
     }
 
     return NextResponse.json({ success: true });

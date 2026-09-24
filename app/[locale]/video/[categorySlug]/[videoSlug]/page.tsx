@@ -2,8 +2,8 @@
 import { notFound, redirect } from 'next/navigation';
 import { Suspense } from 'react';
 import { getTranslations } from 'next-intl/server';
-import { getCachedVideoBySlug, getCachedVideoCategories } from '@/lib/videosys';
-import { withDynamicLocale } from '@/lib/withPageLocale';
+import { getCachedVideoBySlug, getCachedVideoCategories, getAllPublishedVideos } from '@/lib/videosys';
+import { withStaticLocale } from '@/lib/withPageLocale';
 import { getSeoInput } from '@/lib/seo/getSeoInput';
 import { getSiteSettings } from '@/lib/getSiteSettings';
 import { getImageUrl } from '@/lib/files/url';
@@ -17,7 +17,16 @@ import VideoDetailLoading from './loading';
 type Params = Promise<{ locale: string; categorySlug: string; videoSlug: string }>;
 
 export async function generateMetadata({ params }: { params: Params }) {
-  const { locale, videoSlug } = await params;
+  const resolvedParams = await params;
+  if (!resolvedParams?.locale) {
+    return {
+      title: 'Video',
+      robots: 'noindex, follow',
+    };
+  }
+
+  const { locale, videoSlug } = resolvedParams;
+
   const settings = await getSiteSettings();
   const siteName = settings.siteName || 'Site Name';
   const baseUrl = (settings.websiteUrl || process.env.NEXT_PUBLIC_BASE_URL || '').replace(/\/+$/, '');
@@ -111,9 +120,6 @@ async function VideoDetailContent({ locale, categorySlug, videoSlug }: VideoDeta
     }
   }
 
-  // ============================================================
-  // ✅ 视频详情页专属 CSS 变量（带 fallback）
-  // ============================================================
   const containerBg = 'var(--video-detail-bg, var(--background, #ffffff))';
   const containerText = 'var(--video-detail-text, var(--foreground, #0f172a))';
   const titleColor = 'var(--video-detail-title-color, var(--foreground, #0f172a))';
@@ -154,7 +160,6 @@ async function VideoDetailContent({ locale, categorySlug, videoSlug }: VideoDeta
           style={{ gap: 'var(--spacing-8, 2rem)' }}
         >
           <div className="flex-1 min-w-0">
-            {/* 标题 */}
             <h1
               className="font-bold"
               style={{
@@ -167,7 +172,6 @@ async function VideoDetailContent({ locale, categorySlug, videoSlug }: VideoDeta
               {video.title}
             </h1>
 
-            {/* 元数据 */}
             <div
               className="flex items-center"
               style={{
@@ -185,7 +189,6 @@ async function VideoDetailContent({ locale, categorySlug, videoSlug }: VideoDeta
               )}
             </div>
 
-            {/* 播放器容器 */}
             <div
               className="aspect-video w-full bg-black overflow-hidden"
               style={{
@@ -196,7 +199,6 @@ async function VideoDetailContent({ locale, categorySlug, videoSlug }: VideoDeta
               <VideoPlayer source={video.source_type} videoId={video.video_id} title={video.title} />
             </div>
 
-            {/* 标签 */}
             {tags.length > 0 && (
               <div style={{ marginBottom: 'var(--spacing-6, 1.5rem)' }}>
                 <div
@@ -224,7 +226,6 @@ async function VideoDetailContent({ locale, categorySlug, videoSlug }: VideoDeta
               </div>
             )}
 
-            {/* 简介 */}
             {videoDescription && (
               <div style={{ marginBottom: 'var(--spacing-8, 2rem)' }}>
                 <h2
@@ -243,7 +244,6 @@ async function VideoDetailContent({ locale, categorySlug, videoSlug }: VideoDeta
               </div>
             )}
 
-            {/* Markdown 内容 */}
             {video.content && (
               <div>
                 <div
@@ -263,7 +263,6 @@ async function VideoDetailContent({ locale, categorySlug, videoSlug }: VideoDeta
             )}
           </div>
 
-          {/* 侧边栏 */}
           <aside className="w-full lg:w-80 flex-shrink-0">
             <div className="sticky top-24">
               <RelatedProducts resourceType="video" resourceId={video.id} />
@@ -276,7 +275,12 @@ async function VideoDetailContent({ locale, categorySlug, videoSlug }: VideoDeta
 }
 
 async function VideoDetailPage({ params }: { params: Params }) {
-  const { locale, categorySlug, videoSlug } = await params;
+  const resolvedParams = await params;
+  if (!resolvedParams?.locale) {
+    notFound();
+  }
+
+  const { locale, categorySlug, videoSlug } = resolvedParams;
   const decodedVideoSlug = decodeURIComponent(videoSlug);
 
   return (
@@ -290,9 +294,32 @@ async function VideoDetailPage({ params }: { params: Params }) {
   );
 }
 
+// ============================================================
+// ✅ ISR 预生成：为所有已发布视频生成静态 HTML，访问最快
+// ============================================================
 export async function generateStaticParams() {
-  return [];
+  const t0 = Date.now();
+  const callsite = new Error().stack?.split('\n')[2]?.trim() || 'unknown';
+  console.log(`[video/[categorySlug]/[videoSlug]] generateStaticParams 开始（调用来源: ${callsite}）`);
+
+  try {
+    const videos = await getAllPublishedVideos();
+    const elapsed = Date.now() - t0;
+    console.log(`[video/[categorySlug]/[videoSlug]] generateStaticParams: ${videos.length} 个视频，总耗时 ${elapsed}ms`);
+
+    return videos.map((v) => ({
+      locale: v.locale,
+      categorySlug: v.categorySlug,
+      videoSlug: v.videoSlug,
+    }));
+  } catch (err) {
+    const elapsed = Date.now() - t0;
+    console.error(`[video/[categorySlug]/[videoSlug]] generateStaticParams 失败（耗时 ${elapsed}ms）:`, err);
+    return [];
+  }
 }
 
+// ✅ 预生成所有视频（构建时），新增视频由 dynamicParams 按需生成
+export const dynamicParams = true;
 export const revalidate = 3600;
-export default withDynamicLocale(VideoDetailPage);
+export default withStaticLocale(VideoDetailPage);

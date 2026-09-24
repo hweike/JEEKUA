@@ -3,7 +3,8 @@
 
 import { useState, useEffect } from 'react';
 import { CheckCircle, AlertCircle, Loader2, ChevronRight, Building2, Smartphone, CreditCard, Globe, MapPin, Building, Check, Info } from 'lucide-react';
-import { accountService } from '@/lib/payment/services/account.service';
+// ❌ 删除：不再从客户端直接引入服务端模块
+// import { accountService } from '@/lib/payment/services/account.service';
 import type { PaymentAccount, PaymentMethodType, AccountType } from '@/lib/payment/types/account';
 import { PAYMENT_METHOD_LABELS, PAYMENT_TYPE_LABELS } from '@/lib/payment/types/account';
 // ✅ 统一使用 getBankLogo，与 share/page.tsx 保持一致
@@ -201,7 +202,7 @@ export default function PaymentMethodSelector({
   const [isSyncing, setIsSyncing] = useState(false);
 
   // ============================================================
-  // 加载所有活跃的收款账号
+  // 加载所有活跃的收款账号（✅ 改为通过 API Route 查询）
   // ============================================================
   useEffect(() => {
     const loadAccounts = async () => {
@@ -212,7 +213,17 @@ export default function PaymentMethodSelector({
       }
       
       try {
-        const data = await accountService.getAllActive(siteId);
+        // ✅ 通过 API Route 查询（避免客户端直接引 server-only 模块）
+        const params = new URLSearchParams({ 
+          siteId,
+          is_active: 'true',   // 只要活跃账号
+        });
+        const res = await fetch(`/api/admin/payment/accounts?${params}`);
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const json = await res.json();
+        // API 返回格式：{ success: true, data: accounts }
+        const data: PaymentAccount[] = json.data || [];
+        
         setAccounts(data);
         
         // ✅ 多选模式：优先使用外部传入的选中账号

@@ -3,7 +3,6 @@
 
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { Search, X, Loader2, Layers } from 'lucide-react';
-import { supabase } from '@/lib/supabase/client';
 
 interface Product {
   id: string;
@@ -34,13 +33,6 @@ interface ProductSelectorProps {
 }
 
 const DEFAULT_IMAGE = '/images/no-image.png';
-const DEFAULT_SITE_ID = process.env.NEXT_PUBLIC_SITE_ID || '000001';
-
-function extractPriceFromTiers(priceTiers: any[]): number {
-  if (!priceTiers || priceTiers.length === 0) return 0;
-  const firstTier = priceTiers[0];
-  return firstTier?.price || 0;
-}
 
 export default function ProductSelector({
   open,
@@ -60,7 +52,7 @@ export default function ProductSelector({
   const [total, setTotal] = useState(0);
   const [hasMore, setHasMore] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  
+
   // ✅ 使用 ref 管理状态，避免触发 re-render 循环
   const loadingRef = useRef(false);
   const searchTimeoutRef = useRef<NodeJS.Timeout | null>(null);
@@ -71,173 +63,84 @@ export default function ProductSelector({
 
   const size = 20;
 
-  // ✅ 核心加载函数 - 不依赖任何 state，使用 ref 控制
-  const loadProducts = useCallback(async (resetPage: boolean = true) => {
-    if (!isMountedRef.current || loadingRef.current) return;
+  // ✅ 核心加载函数 - 通过后端 API 查询
+  const loadProducts = useCallback(
+    async (resetPage: boolean = true) => {
+      if (!isMountedRef.current || loadingRef.current) return;
 
-    const currentPage = resetPage ? 1 : currentPageRef.current;
-    const offset = (currentPage - 1) * size;
-    const currentSearch = searchTermRef.current;
+      const currentPage = resetPage ? 1 : currentPageRef.current;
+      const currentSearch = searchTermRef.current;
 
-    loadingRef.current = true;
-    setLoading(resetPage);
-    setLoadingMore(!resetPage);
-    setError(null);
+      loadingRef.current = true;
+      setLoading(resetPage);
+      setLoadingMore(!resetPage);
+      setError(null);
 
-    try {
-      // 查询父产品
-      let query = supabase
-        .from('products')
-        .select('*', { count: 'exact' })
-        .eq('site_id', DEFAULT_SITE_ID)
-        .eq('locale', locale)
-        .eq('status', 'published')
-        .is('parent_product_id', null);
-
-      if (currentSearch.trim()) {
-        query = query.or(`product_name.ilike.%${currentSearch}%,sku.ilike.%${currentSearch}%`);
-      }
-
-      query = query.order('updatedAt', { ascending: false });
-
-      const { data: parentData, error: parentError, count } = await query.range(offset, offset + size - 1);
-
-      if (parentError) throw new Error(parentError.message);
-
-      const parentIds = (parentData || []).map((item: any) => item.productId);
-
-      // 查询变体
-      let variantData: any[] = [];
-      if (parentIds.length > 0) {
-        const { data: variants, error: variantError } = await supabase
-          .from('products')
-          .select('*')
-          .eq('site_id', DEFAULT_SITE_ID)
-          .eq('locale', locale)
-          .eq('status', 'published')
-          .in('parent_product_id', parentIds)
-          .order('updatedAt', { ascending: false });
-
-        if (!variantError && variants) {
-          variantData = variants;
-        }
-      }
-
-      // 构建父产品映射
-      const parentMap: Record<string, any> = {};
-      (parentData || []).forEach((item: any) => {
-        parentMap[item.productId] = item;
-      });
-
-      // 构建产品列表
-      const items: Product[] = [];
-
-      (parentData || []).forEach((item: any) => {
-        const price = extractPriceFromTiers(item.price_tiers);
-        items.push({
-          id: item.productId,
-          product_name: item.product_name || '未命名产品',
-          sku: item.sku || '',
-          price: price,
-          currency: item.currency || 'USD',
-          main_image_url: item.main_image_url || '',
-          status: item.status || 'published',
-          _isVariant: false,
-          parent_product_id: '',
-          parent_product_name: '',
-          categoryId: item.categoryId || '',
-          productLineId: item.productLineId || '',
-          seriesId: item.seriesId || '',
-          additional_images: item.additional_images || [],
-          price_tiers: item.price_tiers || [],
+      try {
+        // ✅ 通过后端 API 查询（避免浏览器端直连 Supabase 被 CF 拦截）
+        const params = new URLSearchParams({
+          locale,
+          search: currentSearch,
+          page: String(currentPage),
+          size: String(size),
         });
-      });
 
-      variantData.forEach((item: any) => {
-        const parent = parentMap[item.parent_product_id];
-        const price = parent ? extractPriceFromTiers(parent.price_tiers) : 0;
-        items.push({
-          id: item.productId,
-          product_name: item.product_name || '未命名变体',
-          sku: item.sku || '',
-          price: price,
-          currency: parent?.currency || 'USD',
-          main_image_url: item.main_image_url || '',
-          status: item.status || 'published',
-          _isVariant: true,
-          parent_product_id: item.parent_product_id || '',
-          parent_product_name: parent?.product_name || '',
-          categoryId: item.categoryId || '',
-          productLineId: item.productLineId || '',
-          seriesId: item.seriesId || '',
-          additional_images: item.additional_images || [],
-          price_tiers: parent?.price_tiers || [],
-        });
-      });
-
-      // 重新组织：父产品 + 其变体
-      const sortedItems: Product[] = [];
-      const processedVariantIds = new Set<string>();
-      
-      items.filter(item => !item._isVariant).forEach(parent => {
-        sortedItems.push(parent);
-        const variants = items.filter(v => v._isVariant && v.parent_product_id === parent.id);
-        variants.forEach(v => {
-          sortedItems.push(v);
-          processedVariantIds.add(v.id);
-        });
-      });
-
-      items.filter(item => item._isVariant && !processedVariantIds.has(item.id)).forEach(v => {
-        sortedItems.push(v);
-      });
-
-      // ✅ 更新状态
-      if (isMountedRef.current) {
-        if (resetPage) {
-          setProducts(sortedItems);
-        } else {
-          setProducts(prev => {
-            const existingIds = new Set(prev.map(p => p.id));
-            const newItems = sortedItems.filter(p => !existingIds.has(p.id));
-            return [...prev, ...newItems];
-          });
+        const res = await fetch(`/api/admin/products/selector?${params}`);
+        if (!res.ok) {
+          throw new Error(`请求失败: ${res.status}`);
         }
 
-        setTotal(count || 0);
-        const totalCount = count || 0;
-        setHasMore((currentPage * size) < totalCount);
-        currentPageRef.current = currentPage + 1;
-        setPage(currentPage + 1);
+        const data = await res.json();
+        const sortedItems: Product[] = data.items || [];
+        const totalCount: number = data.total || 0;
+        const hasMoreData: boolean = data.hasMore || false;
+
+        if (isMountedRef.current) {
+          if (resetPage) {
+            setProducts(sortedItems);
+          } else {
+            setProducts((prev) => {
+              const existingIds = new Set(prev.map((p) => p.id));
+              const newItems = sortedItems.filter((p) => !existingIds.has(p.id));
+              return [...prev, ...newItems];
+            });
+          }
+
+          setTotal(totalCount);
+          setHasMore(hasMoreData);
+          currentPageRef.current = currentPage + 1;
+          setPage(currentPage + 1);
+        }
+      } catch (err: any) {
+        console.error('加载产品失败:', err);
+        if (isMountedRef.current) {
+          setError(err.message || '加载产品失败，请重试');
+        }
+      } finally {
+        loadingRef.current = false;
+        if (isMountedRef.current) {
+          setLoading(false);
+          setLoadingMore(false);
+        }
       }
-    } catch (err: any) {
-      console.error('加载产品失败:', err);
-      if (isMountedRef.current) {
-        setError(err.message || '加载产品失败，请重试');
-      }
-    } finally {
-      loadingRef.current = false;
-      if (isMountedRef.current) {
-        setLoading(false);
-        setLoadingMore(false);
-      }
-    }
-  }, [locale, size]);
+    },
+    [locale, size]
+  );
 
   // ✅ 搜索防抖
   useEffect(() => {
     if (!open) return;
-    
+
     if (searchTimeoutRef.current) {
       clearTimeout(searchTimeoutRef.current);
     }
-    
+
     searchTimeoutRef.current = setTimeout(() => {
       searchTermRef.current = searchTerm;
       currentPageRef.current = 1;
       loadProducts(true);
     }, 300);
-    
+
     return () => {
       if (searchTimeoutRef.current) {
         clearTimeout(searchTimeoutRef.current);
@@ -254,13 +157,12 @@ export default function ProductSelector({
       setPage(1);
       setProducts([]);
       setSelectedIds(new Set(initialSelected));
-      // 延迟执行，确保组件已挂载
       const timer = setTimeout(() => {
         loadProducts(true);
       }, 50);
       return () => clearTimeout(timer);
     }
-    
+
     if (!open) {
       initialLoadRef.current = false;
       loadingRef.current = false;
@@ -309,7 +211,7 @@ export default function ProductSelector({
 
   // 确认选择
   const handleConfirm = () => {
-    const selectedProducts = products.filter(p => selectedIds.has(p.id));
+    const selectedProducts = products.filter((p) => selectedIds.has(p.id));
     onSelect(selectedProducts);
     onClose();
   };
@@ -394,7 +296,9 @@ export default function ProductSelector({
             <div className="text-center py-12 text-gray-400">
               <div className="text-4xl mb-2">📦</div>
               <p>暂无商品</p>
-              <p className="text-sm mt-1">{searchTerm ? '请尝试其他关键词' : '请先添加商品'}</p>
+              <p className="text-sm mt-1">
+                {searchTerm ? '请尝试其他关键词' : '请先添加商品'}
+              </p>
             </div>
           ) : (
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
@@ -436,9 +340,7 @@ export default function ProductSelector({
                             </div>
                             <div className="text-xs text-gray-400">{product.sku || '无SKU'}</div>
                           </div>
-                          <div className="flex-shrink-0">
-                            {getStatusBadge(product)}
-                          </div>
+                          <div className="flex-shrink-0">{getStatusBadge(product)}</div>
                         </div>
 
                         {/* 价格 */}
@@ -448,9 +350,7 @@ export default function ProductSelector({
 
                         {/* 选中标识 */}
                         {isSelected && (
-                          <div className="mt-1 text-xs text-blue-600 font-medium">
-                            ✓ 已选
-                          </div>
+                          <div className="mt-1 text-xs text-blue-600 font-medium">✓ 已选</div>
                         )}
                       </div>
                     </div>

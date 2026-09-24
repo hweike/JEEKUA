@@ -6,8 +6,7 @@ import { getTranslations } from 'next-intl/server';
 import { injectRuntimeDataSafe } from '@/lib/webbuilder/runtime-injector';
 import { TemplateRenderer } from '@/components/webbuilder/TemplateRenderer';
 import { getCachedBlogCategories, getCachedBlogPostsByCategorySlug, getCachedBlogConfig } from '@/lib/blog';
-import { supabase } from '@/lib/supabase/client';
-import { extractAllTextIds } from '@/lib/webbuilder/text-utils';
+import sql from '@/lib/db/admin';
 import { withDynamicLocale } from '@/lib/withPageLocale';
 import { getSeoInput } from '@/lib/seo/getSeoInput';
 import { generatePageMetadata } from '@/lib/seo';
@@ -24,53 +23,44 @@ interface StructuredDataWithGraph {
   name: string;
   description?: string;
   itemList?: { url: string }[];
-  [key: string]: any; // 允许其他属性
+  [key: string]: any;
 }
 
-// ===== 缓存：布局查询 =====
+// ===== 缓存：布局查询（已迁移）=====
 const getCachedLayout = unstable_cache(
   async (templateId: string) => {
-    return supabase
-      .from('site_pages')
-      .select('id, template, template_data, template_hash, content, type')
-      .eq('site_id', DEFAULT_SITE_ID)
-      .eq('locale', 'base')
-      .eq('template', templateId)
-      .maybeSingle();
+    try {
+      const rows = await sql<any[]>`
+        SELECT id, template, template_data, template_hash, content, type
+        FROM public.site_pages
+        WHERE site_id = ${DEFAULT_SITE_ID}
+          AND locale = 'base'
+          AND template = ${templateId}
+        LIMIT 1
+      `;
+      return { data: rows[0] ?? null, error: null };
+    } catch (error: any) {
+      console.error('[getCachedLayout] 查询失败:', error);
+      return { data: null, error };
+    }
   },
   ['blog-category-layout'],
   { revalidate: 3600 }
 );
 
-// ===== 缓存：翻译文本 =====
-const getCachedTexts = unstable_cache(
-  async (templateId: string, locale: string, textIds: string[]) => {
-    if (textIds.length === 0) return {};
-    const { data, error } = await supabase
-      .from('component_texts')
-      .select('text_id, text')
-      .eq('site_id', DEFAULT_SITE_ID)
-      .eq('template_id', templateId)
-      .eq('locale', locale)
-      .in('text_id', textIds);
-    if (error) {
-      console.error('[Texts] 查询失败:', error);
-      return {};
-    }
-    return data.reduce((acc, row) => ({ ...acc, [row.text_id]: row.text }), {});
-  },
-  ['blog-category-texts'],
-  { revalidate: 3600 }
-);
-
 // ===== generateMetadata =====
 export async function generateMetadata({ params }: { params: Promise<{ locale: string; categorySlug: string }> }) {
-  const { locale, categorySlug } = await params;
+  const resolvedParams = await params;
+  if (!resolvedParams?.locale) {
+    return { title: 'Blog', robots: 'noindex, follow' };
+  }
+
+  const { locale, categorySlug } = resolvedParams;
+
   const settings = await getSiteSettings();
   const baseUrl = (settings.websiteUrl || process.env.NEXT_PUBLIC_BASE_URL || '').replace(/\/+$/, '');
   const siteName = settings.siteName || 'Site Name';
 
-  // 获取完整数据（与 getDataFetcher 逻辑一致）
   const t = await getTranslations({ locale, namespace: 'Blog' });
   const [blogConfig, categories, posts] = await Promise.all([
     getCachedBlogConfig(locale),
@@ -104,14 +94,13 @@ export async function generateMetadata({ params }: { params: Promise<{ locale: s
   };
 }
 
-// ===== 内容组件（用于 Suspense） =====
+// ===== 内容组件 =====
 interface CategoryContentProps {
   locale: string;
   categorySlug: string;
 }
 
 async function CategoryContent({ locale, categorySlug }: CategoryContentProps) {
-  // 1. 获取所有数据和翻译
   const settings = await getSiteSettings();
   const baseUrl = (settings.websiteUrl || process.env.NEXT_PUBLIC_BASE_URL || '').replace(/\/+$/, '');
   const siteName = settings.siteName || 'Site Name';
@@ -124,10 +113,8 @@ async function CategoryContent({ locale, categorySlug }: CategoryContentProps) {
   const category = categories.find((c) => c.slug === categorySlug);
   if (!category) notFound();
 
-  // 2. 获取模板 ID
   const templateId = category.template || DEFAULT_BLOG_TEMPLATE_ID;
 
-  // 3. 查询布局（缓存）
   const { data: layoutPage, error: layoutError } = await getCachedLayout(templateId);
   if (layoutError) {
     console.error('[CategoryContent] 查询布局失败:', layoutError);
@@ -159,13 +146,9 @@ async function CategoryContent({ locale, categorySlug }: CategoryContentProps) {
     );
   }
 
-  const actualTemplateId = layoutPageData.template || finalTemplateId;
+  // ✅ component_texts 表已废弃，texts 恒为空对象
+  const texts: Record<string, string> = {};
 
-  // 4. 提取翻译文本（缓存）
-  const textIds = extractAllTextIds(templateData);
-  const texts = await getCachedTexts(actualTemplateId, locale, textIds);
-
-  // 5. 构建运行时数据
   const runtimeData = {
     entityType: 'blog-collection',
     categories,
@@ -176,7 +159,6 @@ async function CategoryContent({ locale, categorySlug }: CategoryContentProps) {
   };
   const finalRuntime = { ...runtimeData, texts, locale };
 
-  // 6. 注入运行时数据
   let finalData = injectRuntimeDataSafe(templateData, finalRuntime);
   if (!finalData.__runtime) {
     (finalData as any).__runtime = finalRuntime;
@@ -189,23 +171,13 @@ async function CategoryContent({ locale, categorySlug }: CategoryContentProps) {
     }
   }
 
-  // 7. 生成 JSON-LD（使用完整数据）
   const seoData = { blogConfig, category, posts, siteName, baseUrl, t };
   const seoInput = await getSeoInput('blogCollection', categorySlug, locale, seoData);
   let jsonLdScripts: string[] = [];
 
   if (seoInput?.structuredData) {
-    // 使用类型断言将 structuredData 转为扩展类型
     const data = seoInput.structuredData as StructuredDataWithGraph;
-    
-    // 检查是否包含 @graph 属性
-    if (data['@graph'] && Array.isArray(data['@graph'])) {
-      // 直接序列化整个对象（包含 @context 和 @graph）
-      jsonLdScripts = [JSON.stringify(data)];
-    } else {
-      // 否则按照标准结构包装（兼容旧逻辑）
-      jsonLdScripts = [JSON.stringify(data)];
-    }
+    jsonLdScripts = [JSON.stringify(data)];
   }
 
   return (
@@ -228,7 +200,13 @@ interface BlogCategoryPageProps {
 }
 
 async function BlogCategoryPage({ params }: BlogCategoryPageProps) {
-  const { locale, categorySlug } = await params;
+  const resolvedParams = await params;
+  if (!resolvedParams?.locale) {
+    notFound();
+  }
+
+  const { locale, categorySlug } = resolvedParams;
+
   return (
     <Suspense fallback={<CategoryLoading />}>
       <CategoryContent locale={locale} categorySlug={categorySlug} />
@@ -236,7 +214,6 @@ async function BlogCategoryPage({ params }: BlogCategoryPageProps) {
   );
 }
 
-// ===== 移除 generateStaticParams，依赖 ISR =====
 export async function generateStaticParams() {
   return [];
 }

@@ -2,7 +2,7 @@
 // SEO 同步服务（按最新需求重构）
 // =====================================================
 
-import { supabase } from '@/lib/supabase/client';
+import sql from '@/lib/db/admin';
 import { getPrivateStorage } from '@/lib/storage/factory';
 import matter from 'gray-matter';
 
@@ -16,16 +16,25 @@ export class SyncService {
     locale: string
   ): Promise<void> {
     try {
-      const { data: page, error: pageError } = await supabase
-        .from('pages')
-        .select('id, type, seo_title, seo_description, seo_keywords')
-        .eq('site_id', siteId)
-        .eq('id', pageId)
-        .eq('locale', locale)
-        .maybeSingle();
+      // ✅ pages 表迁移（注意 "updatedAt" / "createdAt" 是 camelCase）
+      let page: any;
+      try {
+        const rows = await sql<any[]>`
+          SELECT id, type, seo_title, seo_description, seo_keywords
+          FROM public.pages
+          WHERE site_id = ${siteId}
+            AND id = ${pageId}
+            AND locale = ${locale}
+          LIMIT 1
+        `;
+        page = rows[0];
+      } catch (err: any) {
+        console.warn(`同步跳过: 页面 ${pageId} 获取失败`, err?.message);
+        return;
+      }
 
-      if (pageError || !page) {
-        console.warn(`同步跳过: 页面 ${pageId} 获取失败`, pageError?.message);
+      if (!page) {
+        console.warn(`同步跳过: 页面 ${pageId} 不存在`);
         return;
       }
 
@@ -83,15 +92,10 @@ export class SyncService {
   }
 
   // ============================================================
-  // 1. product：判断父产品还是变体
+  // 1. product
   // ============================================================
-  private async syncProduct(
-    productId: string,
-    locale: string,
-    page: any
-  ): Promise<void> {
+  private async syncProduct(productId: string, locale: string, page: any): Promise<void> {
     const isVariant = productId.includes('/');
-
     if (isVariant) {
       await this.syncVariantProductMd(productId, locale, page);
     } else {
@@ -99,27 +103,13 @@ export class SyncService {
     }
   }
 
-  /**
-   * 父产品：更新 MD 文件中的根 seo 字段
-   */
-  private async syncParentProductMd(
-    productId: string,
-    locale: string,
-    page: any
-  ): Promise<void> {
+  private async syncParentProductMd(productId: string, locale: string, page: any): Promise<void> {
     const mdKey = `products/${locale}/products/${productId}.md`;
     await this.updateMdFile(mdKey, page, null);
     console.log(`✅ 更新父产品根 seo: ${mdKey}`);
   }
 
-  /**
-   * 变体产品：更新 MD 文件中 variants 数组对应变体的 seo_* 字段
-   */
-  private async syncVariantProductMd(
-    productId: string,
-    locale: string,
-    page: any
-  ): Promise<void> {
+  private async syncVariantProductMd(productId: string, locale: string, page: any): Promise<void> {
     const parts = productId.split('/');
     const parentId = parts[0];
     const variantId = parts[parts.length - 1];
@@ -135,15 +125,11 @@ export class SyncService {
     console.log(`✅ 更新变体 ${variantId} SEO → variants 数组`);
   }
 
-  /**
-   * 检查变体是否存在于 MD 文件中
-   */
   private async variantExistsInMd(mdKey: string, variantId: string): Promise<boolean> {
     try {
       const rawContent = await storage.read(mdKey, 'utf8');
       const parsed = matter(rawContent);
       const data = parsed.data || {};
-      
       if (data.variants && Array.isArray(data.variants)) {
         return data.variants.some((v: any) => v.id === variantId);
       }
@@ -155,13 +141,9 @@ export class SyncService {
   }
 
   // ============================================================
-  // 2a. productLine：更新 categories.json
+  // 2a. productLine
   // ============================================================
-  private async syncProductLineJson(
-    rawId: string,
-    locale: string,
-    page: any
-  ): Promise<void> {
+  private async syncProductLineJson(rawId: string, locale: string, page: any): Promise<void> {
     const jsonPath = `products/${locale}/categories.json`;
     try {
       const data = await this.readJson(jsonPath);
@@ -186,13 +168,9 @@ export class SyncService {
   }
 
   // ============================================================
-  // 2b. productCollection：更新 categories.json
+  // 2b. productCollection
   // ============================================================
-  private async syncProductCollectionJson(
-    rawId: string,
-    locale: string,
-    page: any
-  ): Promise<void> {
+  private async syncProductCollectionJson(rawId: string, locale: string, page: any): Promise<void> {
     const jsonPath = `products/${locale}/categories.json`;
     try {
       const data = await this.readJson(jsonPath);
@@ -242,7 +220,7 @@ export class SyncService {
   }
 
   // ============================================================
-  // 3. blogPost：只更新 blog_posts 表
+  // 3. blogPost ✅ 已迁移
   // ============================================================
   private async syncBlogPostTable(
     siteId: string,
@@ -251,36 +229,26 @@ export class SyncService {
     page: any
   ): Promise<void> {
     try {
-      const { error: updateError } = await supabase
-        .from('blog_posts')
-        .update({
-          seo_title: page.seo_title,
-          seo_description: page.seo_description,
-          seo_keywords: page.seo_keywords,
-          updated_at: new Date().toISOString(),
-        })
-        .eq('site_id', siteId)
-        .eq('id', postId)
-        .eq('locale', locale);
-
-      if (updateError) {
-        console.error(`更新 blog_posts 表失败 (${postId}):`, updateError);
-      } else {
-        console.log(`✅ 更新 blog_posts 表: ${postId}`);
-      }
+      await sql`
+        UPDATE public.blog_posts
+        SET seo_title = ${page.seo_title},
+            seo_description = ${page.seo_description},
+            seo_keywords = ${page.seo_keywords},
+            updated_at = ${new Date().toISOString()}
+        WHERE site_id = ${siteId}
+          AND id = ${postId}
+          AND locale = ${locale}
+      `;
+      console.log(`✅ 更新 blog_posts 表: ${postId}`);
     } catch (error) {
       console.error(`同步博客文章 ${postId} 失败:`, error);
     }
   }
 
   // ============================================================
-  // 4. blogCategory：只更新 categories.json
+  // 4. blogCategory
   // ============================================================
-  private async syncBlogCategoryJson(
-    rawId: string,
-    locale: string,
-    page: any
-  ): Promise<void> {
+  private async syncBlogCategoryJson(rawId: string, locale: string, page: any): Promise<void> {
     const jsonPath = `blog/${locale}/categories.json`;
     try {
       const data = await this.readJson(jsonPath);
@@ -305,12 +273,9 @@ export class SyncService {
   }
 
   // ============================================================
-  // 5. docLibrary：更新 docs/libs.json
+  // 5. docLibrary
   // ============================================================
-  private async syncDocLibraryJson(
-    rawId: string,
-    page: any
-  ): Promise<void> {
+  private async syncDocLibraryJson(rawId: string, page: any): Promise<void> {
     const jsonPath = `docs/libs.json`;
     try {
       const data = await this.readJson(jsonPath);
@@ -335,7 +300,7 @@ export class SyncService {
   }
 
   // ============================================================
-  // 6. doc：只更新 documents 表
+  // 6. doc ✅ 已迁移
   // ============================================================
   private async syncDocTable(
     siteId: string,
@@ -344,36 +309,26 @@ export class SyncService {
     page: any
   ): Promise<void> {
     try {
-      const { error: updateError } = await supabase
-        .from('documents')
-        .update({
-          seo_title: page.seo_title,
-          seo_description: page.seo_description,
-          seo_keywords: page.seo_keywords,
-          updated_at: new Date().toISOString(),
-        })
-        .eq('site_id', siteId)
-        .eq('id', docId)
-        .eq('locale', locale);
-
-      if (updateError) {
-        console.error(`更新 documents 表失败 (${docId}):`, updateError);
-      } else {
-        console.log(`✅ 更新 documents 表: ${docId}`);
-      }
+      await sql`
+        UPDATE public.documents
+        SET seo_title = ${page.seo_title},
+            seo_description = ${page.seo_description},
+            seo_keywords = ${page.seo_keywords},
+            updated_at = ${new Date().toISOString()}
+        WHERE site_id = ${siteId}
+          AND id = ${docId}
+          AND locale = ${locale}
+      `;
+      console.log(`✅ 更新 documents 表: ${docId}`);
     } catch (error) {
       console.error(`同步文档 ${docId} 失败:`, error);
     }
   }
 
   // ============================================================
-  // 7. videoCategory：只更新 categories.json
+  // 7. videoCategory
   // ============================================================
-  private async syncVideoCategoryJson(
-    rawId: string,
-    locale: string,
-    page: any
-  ): Promise<void> {
+  private async syncVideoCategoryJson(rawId: string, locale: string, page: any): Promise<void> {
     const jsonPath = `videosys/${locale}/categories.json`;
     try {
       const data = await this.readJson(jsonPath);
@@ -398,7 +353,7 @@ export class SyncService {
   }
 
   // ============================================================
-  // 8. video：更新 videos 表 + MD 文件
+  // 8. video ✅ 已迁移
   // ============================================================
   private async syncVideoTableAndMd(
     siteId: string,
@@ -407,23 +362,17 @@ export class SyncService {
     page: any
   ): Promise<void> {
     try {
-      const { error: updateError } = await supabase
-        .from('videos')
-        .update({
-          seo_title: page.seo_title,
-          seo_description: page.seo_description,
-          seo_keywords: page.seo_keywords,
-          updated_at: new Date().toISOString(),
-        })
-        .eq('site_id', siteId)
-        .eq('id', videoId)
-        .eq('locale', locale);
-
-      if (updateError) {
-        console.error(`更新 videos 表失败 (${videoId}):`, updateError);
-      } else {
-        console.log(`✅ 更新 videos 表: ${videoId}`);
-      }
+      await sql`
+        UPDATE public.videos
+        SET seo_title = ${page.seo_title},
+            seo_description = ${page.seo_description},
+            seo_keywords = ${page.seo_keywords},
+            updated_at = ${new Date().toISOString()}
+        WHERE site_id = ${siteId}
+          AND id = ${videoId}
+          AND locale = ${locale}
+      `;
+      console.log(`✅ 更新 videos 表: ${videoId}`);
 
       const mdKey = `videosys/${locale}/${videoId}.md`;
       await this.updateMdFile(mdKey, page, null);
@@ -433,7 +382,7 @@ export class SyncService {
   }
 
   // ============================================================
-  // 9. home, page, inquiry, policy：更新 site_pages 表 + MD 文件
+  // 9. home, page, inquiry, policy ✅ 已迁移（修正 site_pages → pages）
   // ============================================================
   private async syncSitePageTableAndMd(
     siteId: string,
@@ -442,23 +391,17 @@ export class SyncService {
     page: any
   ): Promise<void> {
     try {
-      const { error: updateError } = await supabase
-        .from('site_pages')
-        .update({
-          seo_title: page.seo_title,
-          seo_description: page.seo_description,
-          seo_keywords: page.seo_keywords,
-          updated_at: new Date().toISOString(),
-        })
-        .eq('site_id', siteId)
-        .eq('id', pageId)
-        .eq('locale', locale);
-
-      if (updateError) {
-        console.error(`更新 site_pages 表失败 (${pageId}):`, updateError);
-      } else {
-        console.log(`✅ 更新 site_pages 表: ${pageId}`);
-      }
+      await sql`
+        UPDATE public.pages
+        SET seo_title = ${page.seo_title},
+            seo_description = ${page.seo_description},
+            seo_keywords = ${page.seo_keywords},
+            "updatedAt" = ${new Date().toISOString()}
+        WHERE site_id = ${siteId}
+          AND id = ${pageId}
+          AND locale = ${locale}
+      `;
+      console.log(`✅ 更新 pages 表: ${pageId}`);
 
       const mdKey = `pages/${locale}/${pageId}.md`;
       await this.updateMdFile(mdKey, page, null);
@@ -489,11 +432,6 @@ export class SyncService {
     await storage.write(filePath, content, { contentType: 'application/json' });
   }
 
-  /**
-   * 更新 MD 文件
-   * - 父产品（variantId = null）：更新根 seo_title, seo_description, seo_keywords
-   * - 变体（variantId 有值）：更新 variants 数组中对应变体的 seo_title, seo_description, seo_keywords
-   */
   private async updateMdFile(mdKey: string, page: any, variantId: string | null): Promise<void> {
     try {
       let rawContent = '';
@@ -512,9 +450,6 @@ export class SyncService {
       const content = parsed.content || '';
 
       if (variantId) {
-        // ============================================================
-        // ✅ 变体：直接修改 variants 数组中对应变体的 seo_* 字段
-        // ============================================================
         if (data.variants && Array.isArray(data.variants)) {
           const variant = data.variants.find((v: any) => v.id === variantId);
           if (variant) {
@@ -529,9 +464,6 @@ export class SyncService {
           console.warn(`MD 文件中没有 variants 数组`);
         }
       } else {
-        // ============================================================
-        // ✅ 父产品：更新根 seo 字段
-        // ============================================================
         const seoTitle = page.seo_title || null;
         const seoDescription = page.seo_description || null;
         const seoKeywords = page.seo_keywords || null;

@@ -6,8 +6,6 @@ import { useSearchParams, useRouter } from 'next/navigation';
 import ProductImageManager from '@/components/ProductImageManager';
 import InfoTooltip from '@/components/InfoTooltip';
 import SeoFields from '@/components/common/SeoFields';
-import { generateClientSlug } from '@/lib/utils/clientSlug';
-import { toPinyin } from '@/lib/utils/pinyin';
 import Toast from '@/components/Toast';
 import { getLanguageDisplayName } from '@/lib/languages/config';
 
@@ -28,12 +26,6 @@ interface VariantForm {
   seo_description: string;
   seo_keywords: string;
   slug: string;
-}
-
-function generateSlugForProduct(text: string): string {
-  if (!text) return '';
-  const pinyinText = toPinyin(text);
-  return generateClientSlug(pinyinText);
 }
 
 // ---------- 骨架屏组件 ----------
@@ -281,11 +273,8 @@ export default function VariantEditPage() {
       setToast({ message: '请填写变体名称', type: 'error' });
       return;
     }
-    let finalSlug = form.slug;
-    if (!finalSlug || finalSlug.trim() === '') {
-      finalSlug = generateSlugForProduct(form.product_name);
-      setForm(prev => ({ ...prev, slug: finalSlug }));
-    }
+    // ✅ slug 由 SeoFields 内部自动生成，这里只做兜底
+    const finalSlug = form.slug || '';
     if (!parentProduct || !parentProduct.categoryId) {
       setToast({ message: '父产品分类信息缺失，无法保存变体', type: 'error' });
       return;
@@ -482,6 +471,13 @@ export default function VariantEditPage() {
                 showTitle
                 showDescription
                 disabled={false}
+                locale={locale}
+                slugCheck={{
+                  enabled: true,
+                  endpoint: '/api/admin/products/slugs',
+                  excludeId: variantId || undefined,
+                  autoResolveConflict: true,  // ✅ 新增
+                }}
               />
             </div>
           </div>

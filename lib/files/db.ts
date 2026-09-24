@@ -1,7 +1,11 @@
 // lib/files/db.ts
-import { supabase } from '@/lib/supabase/client';
+import sql from '@/lib/db/admin';
 
 const DEFAULT_SITE_ID = process.env.NEXT_PUBLIC_SITE_ID || '000001';
+
+// ============================================================
+// 文件 CRUD
+// ============================================================
 
 export async function createMediaFile(data: {
   storage_key: string;
@@ -13,62 +17,62 @@ export async function createMediaFile(data: {
   height?: number | null;
   source_url?: string | null;
 }) {
-  const { data: inserted, error } = await supabase
-    .from('media_files')
-    .insert({
-      site_id: DEFAULT_SITE_ID,
-      storage_key: data.storage_key,
-      display_name: data.display_name,
-      mime_type: data.mime_type,
-      size: data.size,
-      file_hash: data.file_hash,
-      width: data.width ?? null,
-      height: data.height ?? null,
-      source_url: data.source_url ?? null,
-    })
-    .select()
-    .single();
-  if (error) throw new Error(`插入 media_files 失败: ${error.message}`);
-  return inserted;
+  try {
+    const rows = await sql<any[]>`
+      INSERT INTO public.media_files (
+        site_id, storage_key, display_name, mime_type, size, file_hash,
+        width, height, source_url
+      ) VALUES (
+        ${DEFAULT_SITE_ID}, ${data.storage_key}, ${data.display_name},
+        ${data.mime_type}, ${data.size}, ${data.file_hash},
+        ${data.width ?? null}, ${data.height ?? null}, ${data.source_url ?? null}
+      )
+      RETURNING *
+    `;
+    if (!rows[0]) throw new Error('插入未返回数据');
+    return rows[0];
+  } catch (error: any) {
+    throw new Error(`插入 media_files 失败: ${error.message}`);
+  }
 }
 
 export async function findMediaFileByHash(fileHash: string) {
-  const { data, error } = await supabase
-    .from('media_files')
-    .select('*')
-    .eq('site_id', DEFAULT_SITE_ID)
-    .eq('file_hash', fileHash)
-    .maybeSingle();
-
-  if (!error) return data || null;
-
-  if (error.code === 'PGRST116') {
-    const { data: multiple, error: multiError } = await supabase
-      .from('media_files')
-      .select('*')
-      .eq('site_id', DEFAULT_SITE_ID)
-      .eq('file_hash', fileHash)
-      .limit(1);
-    if (multiError) throw new Error(multiError.message);
-    return multiple?.[0] || null;
+  try {
+    const rows = await sql<any[]>`
+      SELECT * FROM public.media_files
+      WHERE site_id = ${DEFAULT_SITE_ID}
+        AND file_hash = ${fileHash}
+      LIMIT 1
+    `;
+    return rows[0] || null;
+  } catch (error: any) {
+    throw new Error(error.message);
   }
-
-  throw new Error(error.message);
 }
 
 export async function getMediaFileById(id: string) {
-  const { data, error } = await supabase
-    .from('media_files')
-    .select('storage_key')
-    .eq('site_id', DEFAULT_SITE_ID)
-    .eq('id', id)
-    .single();
-  if (error) throw new Error(error.message);
-  return data;
+  try {
+    const rows = await sql<{ storage_key: string }[]>`
+      SELECT storage_key FROM public.media_files
+      WHERE site_id = ${DEFAULT_SITE_ID}
+        AND id = ${id}
+      LIMIT 1
+    `;
+    if (!rows[0]) throw new Error('File not found');
+    return rows[0];
+  } catch (error: any) {
+    throw new Error(error.message);
+  }
 }
 
 /**
- * 获取文件列表（支持分页、搜索、分类过滤、引用状态过滤）
+ * ✅ 优化版：一次 SQL 查询完成
+ * - JOIN file_references 统计引用数
+ * - GROUP BY + HAVING 过滤
+ * - ORDER BY + LIMIT/OFFSET SQL 层分页
+ * - COUNT(*) OVER() 窗口函数一次拿 total
+ *
+ * 从 3 次查询 + 内存处理 → 1 次查询
  */
 export async function listMediaFiles(
   page: number = 1,
@@ -78,76 +82,62 @@ export async function listMediaFiles(
   referenced?: string | null
 ): Promise<{ files: any[]; total: number }> {
   try {
-    // 构建基础查询
-    let query = supabase
-      .from('media_files')
-      .select('id, storage_key, display_name, mime_type, size, created_at, alt_text, category_id')
-      .eq('site_id', DEFAULT_SITE_ID)
-      .is('deleted_at', null);
-
+    // 1. WHERE 条件（JOIN 后需带 mf. 前缀）
+    const conditions: any[] = [
+      sql`mf.site_id = ${DEFAULT_SITE_ID}`,
+      sql`mf.deleted_at IS NULL`,
+    ];
     if (search) {
-      query = query.ilike('display_name', `%${search}%`);
+      conditions.push(sql`mf.display_name ILIKE ${'%' + search + '%'}`);
     }
     if (categoryId) {
-      query = query.eq('category_id', categoryId);
+      conditions.push(sql`mf.category_id = ${categoryId}`);
     }
-
-    // 获取所有符合条件的文件
-    const { data: allFiles, error: filesError } = await query;
-
-    if (filesError) {
-      console.error('获取文件列表失败:', filesError);
-      return { files: [], total: 0 };
-    }
-
-    if (!allFiles || allFiles.length === 0) {
-      return { files: [], total: 0 };
-    }
-
-    // 获取所有引用关系
-    const { data: allRefs, error: refError } = await supabase
-      .from('file_references')
-      .select('file_id');
-
-    if (refError) {
-      console.error('获取引用列表失败:', refError);
-      return { files: [], total: 0 };
-    }
-
-    // 构建引用计数
-    const refCountMap: Record<string, number> = {};
-    allRefs?.forEach((ref: { file_id: string }) => {
-      refCountMap[ref.file_id] = (refCountMap[ref.file_id] || 0) + 1;
-    });
-
-    // 为每个文件添加引用计数，并根据引用状态过滤
-    let filteredFiles = allFiles.map((file: any) => ({
-      ...file,
-      referenceCount: refCountMap[file.id] || 0,
-    }));
-
-    // 根据引用状态过滤
-    if (referenced === 'true') {
-      filteredFiles = filteredFiles.filter(f => f.referenceCount > 0);
-    } else if (referenced === 'false') {
-      filteredFiles = filteredFiles.filter(f => f.referenceCount === 0);
-    }
-
-    // 排序（按创建时间降序）
-    filteredFiles.sort((a, b) => 
-      new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+    const whereClause = conditions.reduce(
+      (acc, c, i) => (i === 0 ? c : sql`${acc} AND ${c}`),
+      sql``
     );
 
-    // 分页
-    const total = filteredFiles.length;
-    const from = (page - 1) * pageSize;
-    const to = Math.min(from + pageSize, total);
-    const paginatedFiles = filteredFiles.slice(from, to);
+    // 2. HAVING 条件（引用过滤在 DB 层完成）
+    let havingClause = sql``;
+    if (referenced === 'true') {
+      havingClause = sql`HAVING COUNT(fr.id) > 0`;
+    } else if (referenced === 'false') {
+      havingClause = sql`HAVING COUNT(fr.id) = 0`;
+    }
 
-    return {
-      files: paginatedFiles,
-      total,
-    };
+    // 3. 分页参数
+    const offset = (page - 1) * pageSize;
+
+    // 4. 一次查询：JOIN + GROUP + HAVING + ORDER + LIMIT + 窗口函数 total
+    const rows = await sql<any[]>`
+      SELECT
+        mf.id,
+        mf.storage_key,
+        mf.display_name,
+        mf.mime_type,
+        mf.size,
+        mf.created_at,
+        mf.alt_text,
+        mf.category_id,
+        COUNT(fr.id)::int AS "referenceCount",
+        COUNT(*) OVER()::int AS "_total"
+      FROM public.media_files mf
+      LEFT JOIN public.file_references fr ON fr.file_id = mf.id
+      WHERE ${whereClause}
+      GROUP BY mf.id
+      ${havingClause}
+      ORDER BY mf.created_at DESC
+      LIMIT ${pageSize} OFFSET ${offset}
+    `;
+
+    // 5. 从窗口函数里取 total
+    const total = rows[0]?._total ?? 0;
+
+    // 6. 去掉 _total 字段
+    const files = rows.map(({ _total, ...rest }) => rest);
+
+    return { files, total };
   } catch (error: any) {
     console.error('listMediaFiles 错误:', error);
     return { files: [], total: 0 };
@@ -155,35 +145,48 @@ export async function listMediaFiles(
 }
 
 export async function softDeleteMediaFile(fileId: string) {
-  // 先检查文件是否属于当前站点
-  const { data: file, error: fileError } = await supabase
-    .from('media_files')
-    .select('id')
-    .eq('site_id', DEFAULT_SITE_ID)
-    .eq('id', fileId)
-    .single();
-  
-  if (fileError) throw new Error(fileError.message);
+  // 1. 检查文件存在
+  let file: { id: string } | undefined;
+  try {
+    const rows = await sql<{ id: string }[]>`
+      SELECT id FROM public.media_files
+      WHERE site_id = ${DEFAULT_SITE_ID}
+        AND id = ${fileId}
+      LIMIT 1
+    `;
+    file = rows[0];
+  } catch (error: any) {
+    throw new Error(error.message);
+  }
   if (!file) throw new Error('File not found or access denied');
 
-  const { count, error: countError } = await supabase
-    .from('file_references')
-    .select('*', { count: 'exact', head: true })
-    .eq('file_id', fileId);
-  
-  if (countError) throw new Error(countError.message);
-  if (count && count > 0) {
+  // 2. 检查引用计数（加 site_id 过滤，多租户安全）
+  const countRows = await sql<{ count: string }[]>`
+    SELECT COUNT(*)::text AS count FROM public.file_references
+    WHERE file_id = ${fileId}
+      AND site_id = ${DEFAULT_SITE_ID}
+  `;
+  const count = parseInt(countRows[0]?.count || '0', 10);
+  if (count > 0) {
     throw new Error('Cannot delete file with active references');
   }
-  
-  const { error } = await supabase
-    .from('media_files')
-    .update({ deleted_at: new Date().toISOString() })
-    .eq('site_id', DEFAULT_SITE_ID)
-    .eq('id', fileId);
-  
-  if (error) throw new Error(error.message);
+
+  // 3. 软删除（✅ 用 NOW() 让 PG 处理时间）
+  try {
+    await sql`
+      UPDATE public.media_files
+      SET deleted_at = NOW()
+      WHERE site_id = ${DEFAULT_SITE_ID}
+        AND id = ${fileId}
+    `;
+  } catch (error: any) {
+    throw new Error(error.message);
+  }
 }
+
+// ============================================================
+// 文件引用
+// ============================================================
 
 export async function createFileReference(data: {
   file_id: string;
@@ -192,42 +195,82 @@ export async function createFileReference(data: {
   alt_text?: string | null;
   sort_order?: number;
 }) {
-  // 验证文件是否属于当前站点
-  const { data: file, error: fileError } = await supabase
-    .from('media_files')
-    .select('id')
-    .eq('site_id', DEFAULT_SITE_ID)
-    .eq('id', data.file_id)
-    .single();
-  
-  if (fileError) throw new Error(fileError.message);
+  // 1. 验证文件存在
+  let file: { id: string } | undefined;
+  try {
+    const rows = await sql<{ id: string }[]>`
+      SELECT id FROM public.media_files
+      WHERE site_id = ${DEFAULT_SITE_ID}
+        AND id = ${data.file_id}
+      LIMIT 1
+    `;
+    file = rows[0];
+  } catch (error: any) {
+    throw new Error(error.message);
+  }
   if (!file) throw new Error('File not found or access denied');
 
-  const { error } = await supabase.from('file_references').insert(data);
-  if (error) throw new Error(error.message);
+  // 2. 插入引用（显式传 site_id）
+  try {
+    await sql`
+      INSERT INTO public.file_references (
+        site_id, file_id, reference_type, reference_id, alt_text, sort_order
+      )
+      VALUES (
+        ${DEFAULT_SITE_ID},
+        ${data.file_id}, ${data.reference_type}, ${data.reference_id},
+        ${data.alt_text ?? null}, ${data.sort_order ?? 0}
+      )
+    `;
+  } catch (error: any) {
+    throw new Error(error.message);
+  }
 }
 
+/**
+ * ✅ 加 site_id 过滤（多租户安全）
+ */
 export async function deleteFileReference(referenceId: number) {
-  // 验证引用是否关联到当前站点的文件
-  const { data: ref, error: refError } = await supabase
-    .from('file_references')
-    .select('file_id')
-    .eq('id', referenceId)
-    .single();
-  
-  if (refError) throw new Error(refError.message);
-  
-  const { data: file, error: fileError } = await supabase
-    .from('media_files')
-    .select('id')
-    .eq('site_id', DEFAULT_SITE_ID)
-    .eq('id', ref.file_id)
-    .single();
-  
-  if (fileError) throw new Error('File not found or access denied');
+  // 1. 查询引用（带 site_id）
+  let ref: { file_id: string } | undefined;
+  try {
+    const rows = await sql<{ file_id: string }[]>`
+      SELECT file_id FROM public.file_references
+      WHERE id = ${referenceId}
+        AND site_id = ${DEFAULT_SITE_ID}
+      LIMIT 1
+    `;
+    ref = rows[0];
+  } catch (error: any) {
+    throw new Error(error.message);
+  }
+  if (!ref) throw new Error('Reference not found');
 
-  const { error } = await supabase.from('file_references').delete().eq('id', referenceId);
-  if (error) throw new Error(error.message);
+  // 2. 验证文件属于当前站点
+  let file: { id: string } | undefined;
+  try {
+    const rows = await sql<{ id: string }[]>`
+      SELECT id FROM public.media_files
+      WHERE site_id = ${DEFAULT_SITE_ID}
+        AND id = ${ref.file_id}
+      LIMIT 1
+    `;
+    file = rows[0];
+  } catch {
+    // ignore
+  }
+  if (!file) throw new Error('File not found or access denied');
+
+  // 3. 删除引用（带 site_id）
+  try {
+    await sql`
+      DELETE FROM public.file_references
+      WHERE id = ${referenceId}
+        AND site_id = ${DEFAULT_SITE_ID}
+    `;
+  } catch (error: any) {
+    throw new Error(error.message);
+  }
 }
 
 export async function upsertFileReference(data: {
@@ -237,19 +280,38 @@ export async function upsertFileReference(data: {
   alt_text?: string | null;
   sort_order?: number;
 }) {
-  // 验证文件是否属于当前站点
-  const { data: file, error: fileError } = await supabase
-    .from('media_files')
-    .select('id')
-    .eq('site_id', DEFAULT_SITE_ID)
-    .eq('id', data.file_id)
-    .single();
-  
-  if (fileError) throw new Error(fileError.message);
+  // 1. 验证文件存在
+  let file: { id: string } | undefined;
+  try {
+    const rows = await sql<{ id: string }[]>`
+      SELECT id FROM public.media_files
+      WHERE site_id = ${DEFAULT_SITE_ID}
+        AND id = ${data.file_id}
+      LIMIT 1
+    `;
+    file = rows[0];
+  } catch (error: any) {
+    throw new Error(error.message);
+  }
   if (!file) throw new Error('File not found or access denied');
 
-  const { error } = await supabase
-    .from('file_references')
-    .upsert(data, { onConflict: 'file_id,reference_type,reference_id' });
-  if (error) throw new Error(error.message);
+  // 2. upsert（显式传 site_id）
+  try {
+    await sql`
+      INSERT INTO public.file_references (
+        site_id, file_id, reference_type, reference_id, alt_text, sort_order
+      )
+      VALUES (
+        ${DEFAULT_SITE_ID},
+        ${data.file_id}, ${data.reference_type}, ${data.reference_id},
+        ${data.alt_text ?? null}, ${data.sort_order ?? 0}
+      )
+      ON CONFLICT (file_id, reference_type, reference_id)
+      DO UPDATE SET
+        alt_text = EXCLUDED.alt_text,
+        sort_order = EXCLUDED.sort_order
+    `;
+  } catch (error: any) {
+    throw new Error(error.message);
+  }
 }

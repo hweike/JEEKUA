@@ -1,11 +1,9 @@
 // lib/seo/services/seo.service.ts
 // =====================================================
 // SEO 数据管理服务
-// 职责：管理 page_seo_data 表的 CRUD，以及分析/AI生成的编排
-// 调用方式：import { seoService } from '@/lib/seo/services'
 // =====================================================
 
-import { supabase } from '@/lib/supabase/client';
+import sql from '@/lib/db/admin';
 import type { PageSeoData, GenerateSeoInput, AnalyzedContent } from '../types';
 import { GENERATION_STATUS, PAGE_TYPES } from '../constants';
 import { strategiesService } from './strategies.service';
@@ -24,9 +22,6 @@ export class SeoService {
     });
   }
 
-  /**
-   * 将数据库行转换为 PageSeoData
-   */
   private mapToPageSeoData(row: any): PageSeoData {
     return {
       id: row.id,
@@ -55,26 +50,35 @@ export class SeoService {
     pageId: string,
     locale: string
   ): Promise<PageSeoData> {
-    const { data, error } = await (supabase
-      .from('page_seo_data') as any)
-      .select('*')
-      .eq('site_id', siteId)
-      .eq('page_id', pageId)
-      .eq('locale', locale)
-      .maybeSingle();
+    let existing: any;
+    try {
+      const rows = await sql<any[]>`
+        SELECT * FROM public.page_seo_data
+        WHERE site_id = ${siteId}
+          AND page_id = ${pageId}
+          AND locale = ${locale}
+        LIMIT 1
+      `;
+      existing = rows[0];
+    } catch (error: any) {
+      throw new Error(`查询 page_seo_data 失败: ${error.message}`);
+    }
+    if (existing) return this.mapToPageSeoData(existing);
 
-    if (error) throw new Error(`查询 page_seo_data 失败: ${error.message}`);
-    if (data) return this.mapToPageSeoData(data);
+    // 查 pages 表
+    let page: { type: string | null; title: string | null } | undefined;
+    try {
+      const rows = await sql<{ type: string | null; title: string | null }[]>`
+        SELECT type, title FROM public.pages
+        WHERE site_id = ${siteId}
+          AND id = ${pageId}
+          AND locale = ${locale}
+        LIMIT 1
+      `;
+      page = rows[0];
+    } catch {}
 
-    const { data: page, error: pageError } = await (supabase
-      .from('pages') as any)
-      .select('type, title')
-      .eq('site_id', siteId)
-      .eq('id', pageId)
-      .eq('locale', locale)
-      .maybeSingle();
-
-    if (pageError || !page) {
+    if (!page) {
       console.warn(`页面不存在或获取失败: ${pageId}`);
       return {
         site_id: siteId,
@@ -91,21 +95,19 @@ export class SeoService {
     }
 
     const pageType = page.type || 'unknown';
-    const newRecord = {
-      site_id: siteId,
-      page_id: pageId,
-      locale: locale,
-      page_type: pageType,
-      generation_status: GENERATION_STATUS.PENDING,
-    };
 
-    const { data: inserted, error: insertError } = await (supabase
-      .from('page_seo_data') as any)
-      .insert(newRecord)
-      .select()
-      .single();
-
-    if (insertError) {
+    try {
+      const rows = await sql<any[]>`
+        INSERT INTO public.page_seo_data (
+          site_id, page_id, locale, page_type, generation_status
+        ) VALUES (
+          ${siteId}, ${pageId}, ${locale}, ${pageType}, ${GENERATION_STATUS.PENDING}
+        )
+        RETURNING *
+      `;
+      if (!rows[0]) throw new Error('Insert returned no data');
+      return this.mapToPageSeoData(rows[0]);
+    } catch (insertError: any) {
       console.warn(`插入 page_seo_data 失败: ${insertError.message}`);
       return {
         site_id: siteId,
@@ -120,8 +122,6 @@ export class SeoService {
         seo_keywords: [],
       };
     }
-
-    return this.mapToPageSeoData(inserted);
   }
 
   /**
@@ -139,39 +139,45 @@ export class SeoService {
     const maxRetries = 3;
     let lastError: any;
 
-    const { data: page, error: pageError } = await (supabase
-      .from('pages') as any)
-      .select('type')
-      .eq('site_id', siteId)
-      .eq('id', pageId)
-      .eq('locale', locale)
-      .maybeSingle();
+    // 查 page type
+    let pageType = 'unknown';
+    try {
+      const rows = await sql<{ type: string | null }[]>`
+        SELECT type FROM public.pages
+        WHERE site_id = ${siteId}
+          AND id = ${pageId}
+          AND locale = ${locale}
+        LIMIT 1
+      `;
+      pageType = rows[0]?.type || 'unknown';
+    } catch {}
 
-    const pageType = page?.type || 'unknown';
-
-    const payload = {
-      site_id: siteId,
-      page_id: pageId,
-      locale: locale,
-      page_type: pageType,
-      ...updates,
-      generation_status: GENERATION_STATUS.ANALYZED,
-      updated_at: new Date().toISOString(),
-    };
+    const now = new Date().toISOString();
 
     for (let attempt = 1; attempt <= maxRetries; attempt++) {
       try {
-        const { data, error } = await (supabase
-          .from('page_seo_data') as any)
-          .upsert(payload, {
-            onConflict: 'site_id, page_id, locale',
-            ignoreDuplicates: false,
-          })
-          .select()
-          .single();
-
-        if (error) throw error;
-        return this.mapToPageSeoData(data);
+        const rows = await sql<any[]>`
+          INSERT INTO public.page_seo_data (
+            site_id, page_id, locale, page_type,
+            analyzed_keywords, analyzed_summary,
+            generation_status, updated_at
+          ) VALUES (
+            ${siteId}, ${pageId}, ${locale}, ${pageType},
+            ${updates.analyzed_keywords ?? []},
+            ${updates.analyzed_summary ?? ''},
+            ${GENERATION_STATUS.ANALYZED}, ${now}
+          )
+          ON CONFLICT (site_id, page_id, locale)
+          DO UPDATE SET
+            page_type = EXCLUDED.page_type,
+            analyzed_keywords = EXCLUDED.analyzed_keywords,
+            analyzed_summary = EXCLUDED.analyzed_summary,
+            generation_status = EXCLUDED.generation_status,
+            updated_at = EXCLUDED.updated_at
+          RETURNING *
+        `;
+        if (!rows[0]) throw new Error('Upsert returned no data');
+        return this.mapToPageSeoData(rows[0]);
       } catch (err: any) {
         lastError = err;
         console.warn(`updateAnalyzedData 尝试 ${attempt}/${maxRetries} 失败:`, err.message);
@@ -199,97 +205,108 @@ export class SeoService {
       seo_keywords?: string[];
     }
   ): Promise<PageSeoData> {
-    const payload = {
-      ...draft,
-      generation_status: GENERATION_STATUS.AI_GENERATED,
-      updated_at: new Date().toISOString(),
-    };
+    const setClauses: any[] = [
+      sql`generation_status = ${GENERATION_STATUS.AI_GENERATED}`,
+      sql`updated_at = ${new Date().toISOString()}`,
+    ];
+    if (draft.seo_title !== undefined) setClauses.push(sql`seo_title = ${draft.seo_title}`);
+    if (draft.seo_description !== undefined) setClauses.push(sql`seo_description = ${draft.seo_description}`);
+    if (draft.seo_keywords !== undefined) setClauses.push(sql`seo_keywords = ${draft.seo_keywords}`);
 
-    const { data, error } = await (supabase
-      .from('page_seo_data') as any)
-      .update(payload)
-      .eq('site_id', siteId)
-      .eq('page_id', pageId)
-      .eq('locale', locale)
-      .select()
-      .single();
+    const setClause = setClauses.reduce(
+      (acc, c, i) => (i === 0 ? c : sql`${acc}, ${c}`),
+      sql``
+    );
 
-    if (error) throw new Error(`更新草稿失败: ${error.message}`);
-    return this.mapToPageSeoData(data);
+    try {
+      const rows = await sql<any[]>`
+        UPDATE public.page_seo_data
+        SET ${setClause}
+        WHERE site_id = ${siteId}
+          AND page_id = ${pageId}
+          AND locale = ${locale}
+        RETURNING *
+      `;
+      if (!rows[0]) throw new Error('Page SEO data not found');
+      return this.mapToPageSeoData(rows[0]);
+    } catch (error: any) {
+      throw new Error(`更新草稿失败: ${error.message}`);
+    }
   }
 
   /**
- * 确认发布：将草稿写入 pages 表（状态 -> approved）
- * ✅ 同时更新 page_seo_data 的 seo 字段，保持草稿与正式数据一致
- * 并同步到业务表和 MD/JSON 文件
- */
-async approveSeo(
-  siteId: string,
-  pageId: string,
-  locale: string
-): Promise<void> {
-  // 1. 获取草稿
-  const { data: seoData, error: fetchError } = await (supabase
-    .from('page_seo_data') as any)
-    .select('seo_title, seo_description, seo_keywords')
-    .eq('site_id', siteId)
-    .eq('page_id', pageId)
-    .eq('locale', locale)
-    .maybeSingle();
+   * 确认发布：将草稿写入 pages 表（状态 -> approved）
+   */
+  async approveSeo(
+    siteId: string,
+    pageId: string,
+    locale: string
+  ): Promise<void> {
+    // 1. 获取草稿
+    let seoData: any;
+    try {
+      const rows = await sql<any[]>`
+        SELECT seo_title, seo_description, seo_keywords FROM public.page_seo_data
+        WHERE site_id = ${siteId}
+          AND page_id = ${pageId}
+          AND locale = ${locale}
+        LIMIT 1
+      `;
+      seoData = rows[0];
+    } catch (fetchError: any) {
+      throw new Error(`获取草稿失败: ${fetchError.message}`);
+    }
 
-  if (fetchError) {
-    throw new Error(`获取草稿失败: ${fetchError.message}`);
+    if (!seoData) {
+      console.warn(`页面 ${pageId} (${locale}) 没有草稿数据，跳过发布`);
+      return;
+    }
+
+    // 2. seo_keywords 数组转字符串
+    const keywordsText = Array.isArray(seoData.seo_keywords)
+      ? seoData.seo_keywords.filter(Boolean).join(', ')
+      : seoData.seo_keywords || '';
+
+    // 3. 更新 pages 表
+    try {
+      await sql`
+        UPDATE public.pages
+        SET seo_title = ${seoData.seo_title},
+            seo_description = ${seoData.seo_description},
+            seo_keywords = ${keywordsText},
+            "updatedAt" = ${new Date().toISOString()}
+        WHERE site_id = ${siteId}
+          AND id = ${pageId}
+          AND locale = ${locale}
+      `;
+    } catch (updateError: any) {
+      throw new Error(`更新 pages 表失败: ${updateError.message}`);
+    }
+
+    // 4. 更新 page_seo_data 状态
+    try {
+      await sql`
+        UPDATE public.page_seo_data
+        SET seo_title = ${seoData.seo_title},
+            seo_description = ${seoData.seo_description},
+            seo_keywords = ${seoData.seo_keywords},
+            generation_status = ${GENERATION_STATUS.APPROVED},
+            updated_at = ${new Date().toISOString()}
+        WHERE site_id = ${siteId}
+          AND page_id = ${pageId}
+          AND locale = ${locale}
+      `;
+    } catch (statusError: any) {
+      throw new Error(`更新状态失败: ${statusError.message}`);
+    }
+
+    // 5. 同步到业务表和 MD/JSON 文件
+    try {
+      await syncService.syncAfterApprove(siteId, pageId, locale);
+    } catch (syncError) {
+      console.error(`同步失败 (${pageId}, ${locale}):`, syncError);
+    }
   }
-
-  if (!seoData) {
-    console.warn(`页面 ${pageId} (${locale}) 没有草稿数据，跳过发布`);
-    return;
-  }
-
-  // 2. 将 seo_keywords 数组转换为逗号分隔的字符串（pages 表是 TEXT 类型）
-  const keywordsText = Array.isArray(seoData.seo_keywords)
-    ? seoData.seo_keywords.filter(Boolean).join(', ')
-    : seoData.seo_keywords || '';
-
-  // 3. 更新 pages 表（正式数据）
-  const { error: updateError } = await (supabase
-    .from('pages') as any)
-    .update({
-      seo_title: seoData.seo_title,
-      seo_description: seoData.seo_description,
-      seo_keywords: keywordsText,
-      updatedAt: new Date().toISOString(),
-    })
-    .eq('site_id', siteId)
-    .eq('id', pageId)
-    .eq('locale', locale);
-
-  if (updateError) throw new Error(`更新 pages 表失败: ${updateError.message}`);
-
-  // 4. ✅ 同时更新 page_seo_data 的 seo 字段（保持草稿与正式数据一致）
-  //    状态变为 approved
-  const { error: statusError } = await (supabase
-    .from('page_seo_data') as any)
-    .update({
-      seo_title: seoData.seo_title,
-      seo_description: seoData.seo_description,
-      seo_keywords: seoData.seo_keywords,
-      generation_status: GENERATION_STATUS.APPROVED,
-      updated_at: new Date().toISOString(),
-    })
-    .eq('site_id', siteId)
-    .eq('page_id', pageId)
-    .eq('locale', locale);
-
-  if (statusError) throw new Error(`更新状态失败: ${statusError.message}`);
-
-  // 5. 同步到业务表和 MD/JSON 文件（内部捕获异常）
-  try {
-    await syncService.syncAfterApprove(siteId, pageId, locale);
-  } catch (syncError) {
-    console.error(`同步失败 (${pageId}, ${locale}):`, syncError);
-  }
-}
 
   /**
    * 分析页面内容并更新 page_seo_data
@@ -310,7 +327,7 @@ async approveSeo(
   }
 
   /**
-   * 从 products 表获取产品基本信息（自身数据）
+   * 从 products 表获取产品基本信息
    */
   private async getProductBasicInfo(
     siteId: string,
@@ -322,7 +339,7 @@ async approveSeo(
     parentProductId: string | null;
     actualProductId: string;
   }> {
-    let product = null;
+    let product: any = null;
     let isVariant = false;
     let parentProductId: string | null = null;
     let actualProductId = fullProductId;
@@ -332,61 +349,63 @@ async approveSeo(
       const variantId = parts[parts.length - 1];
       actualProductId = variantId;
 
-      const { data, error } = await (supabase
-        .from('products') as any)
-        .select('*')
-        .eq('site_id', siteId)
-        .eq('productId', variantId)
-        .eq('locale', locale)
-        .maybeSingle();
-
-      if (!error && data) {
-        product = data;
-        isVariant = true;
-        parentProductId = data.parent_product_id || parts[0];
-      } else {
-        const parentId = parts[0];
-        const { data: parentData, error: parentError } = await (supabase
-          .from('products') as any)
-          .select('*')
-          .eq('site_id', siteId)
-          .eq('productId', parentId)
-          .eq('locale', locale)
-          .maybeSingle();
-
-        if (!parentError && parentData) {
-          product = parentData;
+      try {
+        const rows = await sql<any[]>`
+          SELECT * FROM public.products
+          WHERE site_id = ${siteId}
+            AND "productId" = ${variantId}
+            AND locale = ${locale}
+          LIMIT 1
+        `;
+        if (rows[0]) {
+          product = rows[0];
           isVariant = true;
-          parentProductId = parentId;
+          parentProductId = rows[0].parent_product_id || parts[0];
+        } else {
+          const parentId = parts[0];
+          const parentRows = await sql<any[]>`
+            SELECT * FROM public.products
+            WHERE site_id = ${siteId}
+              AND "productId" = ${parentId}
+              AND locale = ${locale}
+            LIMIT 1
+          `;
+          if (parentRows[0]) {
+            product = parentRows[0];
+            isVariant = true;
+            parentProductId = parentId;
+          }
         }
-      }
+      } catch {}
     } else {
-      const { data, error } = await (supabase
-        .from('products') as any)
-        .select('*')
-        .eq('site_id', siteId)
-        .eq('productId', fullProductId)
-        .eq('locale', locale)
-        .maybeSingle();
-
-      if (!error && data) {
-        product = data;
-        actualProductId = fullProductId;
-      }
+      try {
+        const rows = await sql<any[]>`
+          SELECT * FROM public.products
+          WHERE site_id = ${siteId}
+            AND "productId" = ${fullProductId}
+            AND locale = ${locale}
+          LIMIT 1
+        `;
+        if (rows[0]) {
+          product = rows[0];
+          actualProductId = fullProductId;
+        }
+      } catch {}
     }
 
     if (!product) {
-      const { data: page } = await (supabase
-        .from('pages') as any)
-        .select('title')
-        .eq('site_id', siteId)
-        .eq('id', `product:${fullProductId}`)
-        .eq('locale', locale)
-        .maybeSingle();
-
-      if (page) {
-        product = { product_name: page.title };
-      }
+      try {
+        const rows = await sql<{ title: string | null }[]>`
+          SELECT title FROM public.pages
+          WHERE site_id = ${siteId}
+            AND id = ${'product:' + fullProductId}
+            AND locale = ${locale}
+          LIMIT 1
+        `;
+        if (rows[0]) {
+          product = { product_name: rows[0].title };
+        }
+      } catch {}
     }
 
     return { product, isVariant, parentProductId, actualProductId };
@@ -506,18 +525,18 @@ async approveSeo(
       descTargetProductId = pageId;
     }
 
-    const { data: contentData, error: contentError } = await (supabase
-      .from('page_contents') as any)
-      .select('full_content')
-      .eq('page_id', descTargetProductId)
-      .eq('site_id', siteId)
-      .eq('locale', locale)
-      .maybeSingle();
-
     let fullContent = '';
-    if (!contentError && contentData?.full_content) {
-      fullContent = contentData.full_content;
-    }
+    try {
+      const rows = await sql<{ full_content: string | null }[]>`
+        SELECT full_content FROM public.page_contents
+        WHERE page_id = ${descTargetProductId}
+          AND site_id = ${siteId}
+          AND locale = ${locale}
+        LIMIT 1
+      `;
+      if (rows[0]?.full_content) fullContent = rows[0].full_content;
+    } catch {}
+
     if (fullContent) {
       lines.push('');
       lines.push('【产品描述】');
@@ -538,15 +557,20 @@ async approveSeo(
     pageId: string,
     locale: string
   ): Promise<AnalyzedContent> {
-    const { data: page, error } = await (supabase
-      .from('pages') as any)
-      .select('type, title, content_summary')
-      .eq('site_id', siteId)
-      .eq('id', pageId)
-      .eq('locale', locale)
-      .maybeSingle();
+    let page: { type: string; title: string; content_summary: string | null } | undefined;
+    try {
+      const rows = await sql<{ type: string; title: string; content_summary: string | null }[]>`
+        SELECT type, title, content_summary FROM public.pages
+        WHERE site_id = ${siteId}
+          AND id = ${pageId}
+          AND locale = ${locale}
+        LIMIT 1
+      `;
+      page = rows[0];
+    } catch (error: any) {
+      throw new Error(`获取页面信息失败: ${error.message}`);
+    }
 
-    if (error) throw new Error(`获取页面信息失败: ${error.message}`);
     if (!page) {
       return { keywords: [], summary: '', wordCount: 0 };
     }
@@ -567,17 +591,17 @@ async approveSeo(
     } else {
       const contentTypes = ['blogPost', 'doc', 'page', 'video'];
       if (contentTypes.includes(page.type)) {
-        const { data: contentData, error: contentError } = await (supabase
-          .from('page_contents') as any)
-          .select('full_content')
-          .eq('page_id', pageId)
-          .eq('site_id', siteId)
-          .eq('locale', locale)
-          .maybeSingle();
+        try {
+          const rows = await sql<{ full_content: string | null }[]>`
+            SELECT full_content FROM public.page_contents
+            WHERE page_id = ${pageId}
+              AND site_id = ${siteId}
+              AND locale = ${locale}
+            LIMIT 1
+          `;
+          if (rows[0]?.full_content) content = rows[0].full_content;
+        } catch {}
 
-        if (!contentError && contentData?.full_content) {
-          content = contentData.full_content;
-        }
         if (!content && page.content_summary) {
           content = page.content_summary;
         }
@@ -605,9 +629,6 @@ async approveSeo(
     return analysisResult;
   }
 
-  /**
-   * 获取 AnalyzerService 实例
-   */
   getAnalyzer(): AnalyzerService {
     return this.analyzer;
   }
@@ -622,33 +643,35 @@ async approveSeo(
     sourceLocale: string
   ): Promise<GenerateSeoInput> {
     // 1. 获取页面基本信息
-    const { data: page, error: pageError } = await (supabase
-      .from('pages') as any)
-      .select('title, content_summary')
-      .eq('site_id', siteId)
-      .eq('id', pageId)
-      .eq('locale', sourceLocale)
-      .maybeSingle();
+    let page: { title: string; content_summary: string | null } | undefined;
+    try {
+      const rows = await sql<{ title: string; content_summary: string | null }[]>`
+        SELECT title, content_summary FROM public.pages
+        WHERE site_id = ${siteId}
+          AND id = ${pageId}
+          AND locale = ${sourceLocale}
+        LIMIT 1
+      `;
+      page = rows[0];
+    } catch {}
 
     let pageTitle: string;
     let contentSummary: string | undefined;
 
-    if (pageError || !page) {
+    if (!page) {
       console.warn(`页面 ${pageId} 在 pages 表中不存在 (locale=${sourceLocale})，使用备用标题`);
       pageTitle = pageId;
     } else {
       pageTitle = page.title;
-      contentSummary = page.content_summary;
+      contentSummary = page.content_summary ?? undefined;
     }
 
     // 2. 获取 SEO 工作区数据
     const seoData = await this.getPageSeoData(siteId, pageId, sourceLocale);
 
-    // 如果 page_type 是 unknown，尝试从 pageId 前缀提取类型
     let pageType = seoData.page_type;
     if (pageType === 'unknown' && pageId.includes(':')) {
       const extractedType = pageId.split(':')[0];
-      // ✅ 使用导入的 PAGE_TYPES 常量
       if (PAGE_TYPES.includes(extractedType as any)) {
         pageType = extractedType;
         console.log(`从 pageId 提取类型: ${extractedType}`);
@@ -672,7 +695,6 @@ async approveSeo(
     // 4. 获取策略
     let strategy = await strategiesService.getStrategy(pageType, siteId);
     if (!strategy) {
-      // 回退到 'page' 策略
       strategy = await strategiesService.getStrategy('page', siteId);
       if (!strategy) {
         throw new Error(`未找到页面类型 ${pageType} 的策略，且默认 page 策略也不存在`);

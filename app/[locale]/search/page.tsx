@@ -18,8 +18,18 @@ interface SearchPageProps {
 export const revalidate = 3600;
 
 export async function generateMetadata({ params, searchParams }: SearchPageProps) {
-  const { locale } = await params;
-  const { q } = await searchParams;
+  // ✅ 防御性检查
+  const resolvedParams = await params;
+  if (!resolvedParams?.locale) {
+    return {
+      title: 'Search',
+      robots: 'noindex, follow',
+    };
+  }
+
+  const { locale } = resolvedParams;
+  const resolvedSearchParams = await searchParams;
+  const { q } = resolvedSearchParams || {};
 
   const settings = await getSiteSettings();
   const footerConfig = await getFooterConfig(locale);
@@ -84,8 +94,15 @@ export async function generateMetadata({ params, searchParams }: SearchPageProps
 }
 
 async function SearchPage({ params, searchParams }: SearchPageProps) {
-  const { locale } = await params;
-  const { q, page } = await searchParams;
+  // ✅ 防御性检查：构建时 Next.js 可能传入 undefined
+  const resolvedParams = await params;
+  if (!resolvedParams?.locale) {
+    notFound();
+  }
+
+  const { locale } = resolvedParams;
+  const resolvedSearchParams = await searchParams;
+  const { q, page } = resolvedSearchParams || {};
 
   const settings = await getSiteSettings();
   const baseUrl = (settings.websiteUrl || process.env.NEXT_PUBLIC_BASE_URL || '').replace(/\/+$/, '');
@@ -183,7 +200,6 @@ async function SearchPage({ params, searchParams }: SearchPageProps) {
           paddingBottom: 'var(--spacing-12, 3rem)',
           backgroundColor: containerBg,
           color: containerText,
-           // ✅ 新增：至少占满一屏，页脚沉底
           minHeight: '60vh',
           display: 'flex',
           flexDirection: 'column',

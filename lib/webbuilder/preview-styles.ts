@@ -1,5 +1,5 @@
 // 自动生成，请勿手动编辑
-export const PREVIEW_STYLES = `@import url("https://cdn.jsdelivr.net/gh/w3labkr/noto-cjk/subset/NotoSansSC/slim/font.min.css");
+export const PREVIEW_STYLES = `@import url("https://fastly.jsdelivr.net/gh/w3labkr/noto-cjk/subset/NotoSansSC/slim/font.min.css");
 
 /* ============================================================
    globals.css - 样式入口文件

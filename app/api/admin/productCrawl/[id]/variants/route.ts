@@ -1,13 +1,12 @@
 // app/api/admin/productCrawl/[id]/variants/route.ts
 import { NextRequest, NextResponse } from 'next/server';
-import { supabase } from '@/lib/supabase/client';
+import sql from '@/lib/db/admin';
 
 const DEFAULT_SITE_ID = '000001';
 
 // ============================================================
 // GET - 从 sku_list 字段读取变体
 // ============================================================
-
 export async function GET(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
@@ -17,17 +16,22 @@ export async function GET(
 
     console.log('[Variants API] GET 变体, parentId:', id);
 
-    // 🔥 从父记录获取 sku_list
-    const { data: parentData, error: parentError } = await supabase
-      .from('crawler_products')
-      .select('sku_list, currency')
-      .eq('site_id', DEFAULT_SITE_ID)
-      .eq('crawler_id', id)
-      .single();
-
-    if (parentError) {
+    // 从父记录获取 sku_list
+    let parentData: { sku_list: any; currency: string | null } | undefined;
+    try {
+      const rows = await sql<{ sku_list: any; currency: string | null }[]>`
+        SELECT sku_list, currency FROM public.crawler_products
+        WHERE site_id = ${DEFAULT_SITE_ID}
+          AND crawler_id = ${id}
+        LIMIT 1
+      `;
+      parentData = rows[0];
+    } catch (parentError: any) {
       console.error('❌ 查询父商品失败:', parentError);
-      // 降级：尝试从独立变体记录查询
+      return getVariantsFromRecords(id);
+    }
+
+    if (!parentData) {
       return getVariantsFromRecords(id);
     }
 
@@ -37,13 +41,12 @@ export async function GET(
       try {
         skuList = JSON.parse(skuList);
         console.log(`[Variants API] 从 sku_list 解析变体: ${skuList.length} 个`);
-      } catch (e) {
+      } catch {
         console.warn('[Variants API] sku_list 解析失败');
         skuList = [];
       }
     }
 
-    // 确保每个变体有必要的字段
     const variants = skuList.map((v: any, idx: number) => ({
       id: v.id || v.sku_code || `variant_${idx}`,
       name: v.name || '变体',
@@ -58,11 +61,10 @@ export async function GET(
     console.log('[Variants API] 返回变体数量:', variants.length);
 
     return NextResponse.json({
-      variants: variants,
+      variants,
       total: variants.length,
-      source: 'sku_list'
+      source: 'sku_list',
     });
-
   } catch (error) {
     console.error('获取变体失败:', error);
     return NextResponse.json(
@@ -75,43 +77,32 @@ export async function GET(
 // ============================================================
 // 降级方案：从独立变体记录查询
 // ============================================================
-
 async function getVariantsFromRecords(parentId: string) {
   try {
     console.log('[Variants API] 降级: 从独立变体记录查询, parentId:', parentId);
 
-    const { data, error } = await supabase
-      .from('crawler_products')
-      .select('*')
-      .eq('site_id', DEFAULT_SITE_ID)
-      .eq('parent_product_id', parentId)
-      .order('created_at', { ascending: true });
-
-    if (error) {
+    let data: any[];
+    try {
+      data = await sql<any[]>`
+        SELECT * FROM public.crawler_products
+        WHERE site_id = ${DEFAULT_SITE_ID}
+          AND parent_product_id = ${parentId}
+        ORDER BY created_at ASC
+      `;
+    } catch (error: any) {
       console.error('❌ 查询变体错误:', error);
-      return NextResponse.json(
-        { error: error.message },
-        { status: 500 }
-      );
+      return NextResponse.json({ error: error.message }, { status: 500 });
     }
 
-    const variants = (data || []).map((v: any) => {
+    const variants = data.map((v: any) => {
       let priceTiers = v.price_tiers;
       if (typeof priceTiers === 'string') {
-        try {
-          priceTiers = JSON.parse(priceTiers);
-        } catch (e) {
-          priceTiers = [];
-        }
+        try { priceTiers = JSON.parse(priceTiers); } catch { priceTiers = []; }
       }
-      
+
       let attributes = v.attributes;
       if (typeof attributes === 'string') {
-        try {
-          attributes = JSON.parse(attributes);
-        } catch (e) {
-          attributes = {};
-        }
+        try { attributes = JSON.parse(attributes); } catch { attributes = {}; }
       }
 
       return {
@@ -129,9 +120,9 @@ async function getVariantsFromRecords(parentId: string) {
     console.log('[Variants API] 降级返回变体数量:', variants.length);
 
     return NextResponse.json({
-      variants: variants,
+      variants,
       total: variants.length,
-      source: 'records'
+      source: 'records',
     });
   } catch (error) {
     console.error('降级查询变体失败:', error);
@@ -145,7 +136,6 @@ async function getVariantsFromRecords(parentId: string) {
 // ============================================================
 // PUT - 更新 sku_list
 // ============================================================
-
 export async function PUT(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
@@ -159,13 +149,9 @@ export async function PUT(
     console.log('[Variants API] 变体数量:', variants?.length || 0);
 
     if (!variants || !Array.isArray(variants)) {
-      return NextResponse.json(
-        { error: 'variants 必须是数组' },
-        { status: 400 }
-      );
+      return NextResponse.json({ error: 'variants 必须是数组' }, { status: 400 });
     }
 
-    // 准备保存的变体数据
     const variantsToSave = variants.map((v: any) => ({
       id: v.id || `variant_${Date.now()}_${Math.random().toString(36).substr(2, 4)}`,
       name: v.name || '变体',
@@ -177,31 +163,24 @@ export async function PUT(
       image_url: v.image_url || '',
     }));
 
-    // 🔥 更新父记录的 sku_list
-    const { data, error } = await supabase
-      .from('crawler_products')
-      .update({
-        sku_list: JSON.stringify(variantsToSave),
-        currency: displayCurrency || 'USD',
-        updated_at: new Date().toISOString()
-      })
-      .eq('site_id', DEFAULT_SITE_ID)
-      .eq('crawler_id', id)
-      .select();
-
-    if (error) {
+    let data: any[];
+    try {
+      data = await sql<any[]>`
+        UPDATE public.crawler_products
+        SET sku_list = ${JSON.stringify(variantsToSave)},
+            currency = ${displayCurrency || 'USD'},
+            "updatedAt" = ${new Date().toISOString()}
+        WHERE site_id = ${DEFAULT_SITE_ID}
+          AND crawler_id = ${id}
+        RETURNING *
+      `;
+    } catch (error: any) {
       console.error('❌ 更新变体失败:', error);
-      return NextResponse.json(
-        { error: error.message },
-        { status: 500 }
-      );
+      return NextResponse.json({ error: error.message }, { status: 500 });
     }
 
     if (!data || data.length === 0) {
-      return NextResponse.json(
-        { error: '商品不存在' },
-        { status: 404 }
-      );
+      return NextResponse.json({ error: '商品不存在' }, { status: 404 });
     }
 
     console.log(`[Variants API] 更新成功: ${variantsToSave.length} 个变体`);
@@ -211,9 +190,8 @@ export async function PUT(
       message: `成功更新 ${variantsToSave.length} 个变体`,
       count: variantsToSave.length,
       variants: variantsToSave,
-      total: variantsToSave.length
+      total: variantsToSave.length,
     });
-
   } catch (error) {
     console.error('[Variants API] PUT 错误:', error);
     return NextResponse.json(
@@ -226,78 +204,62 @@ export async function PUT(
 // ============================================================
 // DELETE - 从 sku_list 中删除变体
 // ============================================================
-
 export async function DELETE(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
     const { id } = await params;
-    
+
     const url = new URL(request.url);
     const variantId = url.searchParams.get('variantId');
 
     if (!variantId) {
-      return NextResponse.json(
-        { error: '缺少 variantId 参数' },
-        { status: 400 }
-      );
+      return NextResponse.json({ error: '缺少 variantId 参数' }, { status: 400 });
     }
 
     console.log('[Variants API] DELETE 变体, variantId:', variantId);
 
-    // 获取当前 sku_list
-    const { data: parentData, error: fetchError } = await supabase
-      .from('crawler_products')
-      .select('sku_list')
-      .eq('site_id', DEFAULT_SITE_ID)
-      .eq('crawler_id', id)
-      .single();
-
-    if (fetchError) {
+    let parentData: { sku_list: any } | undefined;
+    try {
+      const rows = await sql<{ sku_list: any }[]>`
+        SELECT sku_list FROM public.crawler_products
+        WHERE site_id = ${DEFAULT_SITE_ID}
+          AND crawler_id = ${id}
+        LIMIT 1
+      `;
+      parentData = rows[0];
+    } catch (fetchError: any) {
       console.error('获取父商品失败:', fetchError);
-      return NextResponse.json(
-        { error: '商品不存在' },
-        { status: 404 }
-      );
+      return NextResponse.json({ error: '商品不存在' }, { status: 404 });
+    }
+
+    if (!parentData) {
+      return NextResponse.json({ error: '商品不存在' }, { status: 404 });
     }
 
     let skuList = parentData.sku_list || [];
     if (typeof skuList === 'string') {
-      try {
-        skuList = JSON.parse(skuList);
-      } catch (e) {
-        skuList = [];
-      }
+      try { skuList = JSON.parse(skuList); } catch { skuList = []; }
     }
 
-    // 过滤掉要删除的变体
     const updatedSkuList = skuList.filter((v: any) => v.id !== variantId);
 
     if (updatedSkuList.length === skuList.length) {
-      return NextResponse.json(
-        { error: '变体不存在' },
-        { status: 404 }
-      );
+      return NextResponse.json({ error: '变体不存在' }, { status: 404 });
     }
 
-    // 更新 sku_list
-    const { data, error } = await supabase
-      .from('crawler_products')
-      .update({
-        sku_list: JSON.stringify(updatedSkuList),
-        updated_at: new Date().toISOString()
-      })
-      .eq('site_id', DEFAULT_SITE_ID)
-      .eq('crawler_id', id)
-      .select();
-
-    if (error) {
+    try {
+      await sql`
+        UPDATE public.crawler_products
+        SET sku_list = ${JSON.stringify(updatedSkuList)},
+            "updatedAt" = ${new Date().toISOString()}
+        WHERE site_id = ${DEFAULT_SITE_ID}
+          AND crawler_id = ${id}
+      `;
+    } catch (error: any) {
       console.error('删除变体失败:', error);
-      return NextResponse.json(
-        { error: error.message },
-        { status: 500 }
-      );
+      return NextResponse.json({ error: error.message }, { status: 500 });
     }
 
     console.log(`[Variants API] 删除成功, 剩余 ${updatedSkuList.length} 个变体`);
@@ -305,9 +267,8 @@ export async function DELETE(
     return NextResponse.json({
       success: true,
       message: '变体删除成功',
-      remaining: updatedSkuList.length
+      remaining: updatedSkuList.length,
     });
-
   } catch (error) {
     console.error('删除变体失败:', error);
     return NextResponse.json(

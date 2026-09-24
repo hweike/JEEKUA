@@ -53,7 +53,17 @@ async function getHomeSeoData(locale: string, page: any) {
 }
 
 export async function generateMetadata({ params }: HomePageProps) {
-  const { locale } = await params;
+  // ✅ 防御性检查：构建时 Next.js 可能传入 undefined
+  const resolvedParams = await params;
+  if (!resolvedParams?.locale) {
+    return {
+      title: 'Home',
+      robots: 'noindex, follow',
+    };
+  }
+
+  const { locale } = resolvedParams;
+
   const settings = await getSiteSettings();
   const baseUrl = (settings.websiteUrl || process.env.NEXT_PUBLIC_BASE_URL || '').replace(/\/+$/, '');
 
@@ -99,7 +109,13 @@ export async function generateMetadata({ params }: HomePageProps) {
 }
 
 async function HomePage({ params }: HomePageProps) {
-  const { locale } = await params;
+  // ✅ 防御性检查：构建时 Next.js 可能传入 undefined
+  const resolvedParams = await params;
+  if (!resolvedParams?.locale) {
+    notFound();
+  }
+
+  const { locale } = resolvedParams;
 
   // ✅ 用 Once 版本（与 generateMetadata 共享同一次查询）
   const page = await getHomePageDataOnce(locale);

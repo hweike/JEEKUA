@@ -6,7 +6,6 @@ import { useRouter } from 'next/navigation';
 import { useLocale, useTranslations } from 'next-intl';
 import { Eye, Loader2, Package, Calendar, Truck, CreditCard, User } from 'lucide-react';
 import { getCustomerProfile } from '@/lib/account';
-import { orderService } from '@/lib/payment/services/order.service';
 import { getCountryFlag, getCountryNameEn, getCountryNameZh } from '@/lib/countries';
 import type { Order } from '@/lib/payment/types/order';
 
@@ -57,22 +56,21 @@ function formatDate(dateStr: string): string {
 
 function getDisplayStatus(order: OrderWithItems, t: any): { label: string; color: string; bg: string } {
   const status = order.status;
-  // 已发送且正式订单但未付款 → 待付款
   if (order.sent_status === 'sent' && status === 'formal') {
-    return { 
-      label: t('pending'), 
-      color: 'var(--account-status-pending-text, #92400e)', 
-      bg: 'var(--account-status-pending-bg, #fef3c7)' 
+    return {
+      label: t('pending'),
+      color: 'var(--account-status-pending-text, #92400e)',
+      bg: 'var(--account-status-pending-bg, #fef3c7)'
     };
   }
   const config = STATUS_CONFIG[status];
   if (config) {
     return { label: t(config.labelKey), color: config.color, bg: config.bg };
   }
-  return { 
-    label: status, 
-    color: 'var(--account-status-default-text, #4b5563)', 
-    bg: 'var(--account-status-default-bg, #f3f4f6)' 
+  return {
+    label: status,
+    color: 'var(--account-status-default-text, #4b5563)',
+    bg: 'var(--account-status-default-bg, #f3f4f6)'
   };
 }
 
@@ -88,13 +86,11 @@ function formatCurrency(amount: number, currency: string) {
   return `${currency} ${amount.toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g, ',')}`;
 }
 
-// ✅ 获取产品详情链接 - 必须使用 slug
 function getProductLink(item: any, locale: string): string {
   if (!item?.slug) return '#';
   return `/${locale}/product/${item.slug}`;
 }
 
-// ✅ 判断是否有有效链接（必须有 slug）
 function hasValidProductLink(item: any): boolean {
   return item && !!item.slug;
 }
@@ -108,9 +104,6 @@ export default function AccountOrdersPage() {
   const [orders, setOrders] = useState<OrderWithItems[]>([]);
   const [user, setUser] = useState<any>(null);
 
-  // ============================================================
-  // ✅ 账户订单页专属 CSS 变量
-  // ============================================================
   const pageBg = 'var(--account-content-bg, #ffffff)';
   const pageText = 'var(--account-content-text, #111827)';
   const cardBg = 'var(--account-card-bg, #ffffff)';
@@ -142,15 +135,24 @@ export default function AccountOrdersPage() {
         }
         setUser(userData);
 
-        // 2. ✅ 使用服务层获取订单列表（含商品和 slug）
-        const siteId = process.env.NEXT_PUBLIC_SITE_ID || '';
-        const result = await orderService.listWithItems({
-          site_id: siteId,
-          buyer_email: userData.email,  // ✅ 按买家邮箱筛选
-          status: ['formal', 'paid', 'completed', 'cancelled', 'expired'],
-          page: 1,
-          page_size: 100,
+        // 2. ✅ 通过 API Route 查询订单（带 Bearer Token）
+        //    兼容多种 key 和存储位置，避免遗漏
+        const token =
+          typeof window !== 'undefined'
+            ? (localStorage.getItem('customer_token') ||
+               sessionStorage.getItem('customer_token') ||
+               localStorage.getItem('token') ||
+               sessionStorage.getItem('token') ||
+               '')
+            : '';
+
+        const res = await fetch('/api/account/orders', {
+          headers: token ? { Authorization: `Bearer ${token}` } : {},
         });
+        if (!res.ok) {
+          throw new Error(`获取订单失败: ${res.status}`);
+        }
+        const result = await res.json();
 
         // 3. 处理订单数据
         const ordersWithItems = (result.items || []).map((order: any) => ({
@@ -169,9 +171,8 @@ export default function AccountOrdersPage() {
     loadData();
   }, [locale, router]);
 
-  // ✅ 查看详情 - 新开页面
   const handleViewOrder = (orderId: string, shareToken?: string) => {
-    const path = shareToken 
+    const path = shareToken
       ? `/${locale}/payment/order/share/${shareToken}`
       : `/${locale}/payment/order/${orderId}`;
     window.open(path, '_blank');
@@ -219,11 +220,10 @@ export default function AccountOrdersPage() {
           const countryInfo = getCountryDisplay(order.buyer_country || '');
           const firstItem = order.items && order.items.length > 0 ? order.items[0] : null;
           const hasMultipleItems = order.items && order.items.length > 1;
-          const total = order.total_amount || 0;
-          const deposit = order.deposit_amount || 0;
+          const total = Number(order.total_amount) || 0;
+          const deposit = Number(order.deposit_amount) || 0;
           const hasDeposit = deposit > 0 && deposit < total;
 
-          // ✅ 产品详情链接（使用 slug）
           const productLink = firstItem ? getProductLink(firstItem, locale) : '#';
           const hasLink = firstItem ? hasValidProductLink(firstItem) : false;
 
@@ -236,7 +236,6 @@ export default function AccountOrdersPage() {
                 borderColor: borderColor,
               }}
             >
-              {/* 表头 */}
               <div className="flex flex-wrap items-center justify-between px-4 py-2.5 border-b"
                 style={{
                   backgroundColor: mutedBg,
@@ -250,17 +249,17 @@ export default function AccountOrdersPage() {
                   {order.contract_no && (
                     <span className="text-xs" style={{ color: labelColor }}>({order.contract_no})</span>
                   )}
-                  <span 
+                  <span
                     className="text-xs px-2 py-0.5 rounded-full"
-                    style={{ 
-                      backgroundColor: displayStatus.bg, 
-                      color: displayStatus.color 
+                    style={{
+                      backgroundColor: displayStatus.bg,
+                      color: displayStatus.color
                     }}
                   >
                     {displayStatus.label}
                   </span>
                   {order.sent_status === 'sent' && (
-                    <span 
+                    <span
                       className="text-xs px-1.5 py-0.5 rounded border"
                       style={{
                         backgroundColor: sentBg,
@@ -277,10 +276,8 @@ export default function AccountOrdersPage() {
                 </span>
               </div>
 
-              {/* 主体 */}
               <div className="p-4">
                 <div className="grid grid-cols-12 gap-3">
-                  {/* 买家信息 */}
                   <div className="col-span-12 sm:col-span-2">
                     <div className="flex flex-col min-w-0">
                       <div className="font-medium text-sm truncate" style={{ color: valueColor }}>
@@ -297,26 +294,18 @@ export default function AccountOrdersPage() {
                     </div>
                   </div>
 
-                  {/* ✅ 产品信息 - 使用 slug 链接到产品详情页 */}
                   <div className="col-span-12 sm:col-span-4">
                     {firstItem ? (
                       <div className="flex items-start gap-3">
                         {firstItem.product_image ? (
                           hasLink ? (
-                            <a
-                              href={productLink}
-                              target="_blank"
-                              rel="noopener noreferrer"
-                              className="flex-shrink-0"
-                            >
+                            <a href={productLink} target="_blank" rel="noopener noreferrer" className="flex-shrink-0">
                               <img
                                 src={firstItem.product_image}
                                 alt={firstItem.product_name}
                                 className="w-16 h-16 object-cover rounded border flex-shrink-0 hover:opacity-80 transition-opacity cursor-pointer"
                                 style={{ borderColor: borderColor }}
-                                onError={(e) => {
-                                  (e.target as HTMLImageElement).style.display = 'none';
-                                }}
+                                onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }}
                               />
                             </a>
                           ) : (
@@ -325,18 +314,13 @@ export default function AccountOrdersPage() {
                               alt={firstItem.product_name}
                               className="w-16 h-16 object-cover rounded border flex-shrink-0"
                               style={{ borderColor: borderColor }}
-                              onError={(e) => {
-                                (e.target as HTMLImageElement).style.display = 'none';
-                              }}
+                              onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }}
                             />
                           )
                         ) : (
-                          <div 
+                          <div
                             className="w-16 h-16 rounded border flex items-center justify-center text-2xl flex-shrink-0"
-                            style={{ 
-                              backgroundColor: mutedBg, 
-                              borderColor: borderColor 
-                            }}
+                            style={{ backgroundColor: mutedBg, borderColor: borderColor }}
                           >
                             📦
                           </div>
@@ -349,12 +333,8 @@ export default function AccountOrdersPage() {
                               rel="noopener noreferrer"
                               className="text-sm font-medium line-clamp-2 break-words hover:underline cursor-pointer"
                               style={{ color: valueColor }}
-                              onMouseEnter={(e) => {
-                                e.currentTarget.style.color = linkHover;
-                              }}
-                              onMouseLeave={(e) => {
-                                e.currentTarget.style.color = valueColor;
-                              }}
+                              onMouseEnter={(e) => { e.currentTarget.style.color = linkHover; }}
+                              onMouseLeave={(e) => { e.currentTarget.style.color = valueColor; }}
                             >
                               {firstItem.product_name || t('unknownProduct')}
                             </a>
@@ -370,7 +350,7 @@ export default function AccountOrdersPage() {
                           )}
                           {firstItem.price !== undefined && firstItem.quantity !== undefined && (
                             <div className="text-xs mt-0.5" style={{ color: labelColor }}>
-                              {formatCurrency(firstItem.price, order.currency)} × {firstItem.quantity}
+                              {formatCurrency(Number(firstItem.price), order.currency)} × {firstItem.quantity}
                             </div>
                           )}
                           {hasMultipleItems && (
@@ -385,7 +365,6 @@ export default function AccountOrdersPage() {
                     )}
                   </div>
 
-                  {/* 订单金额 */}
                   <div className="col-span-6 sm:col-span-2">
                     <div className="flex flex-col">
                       <div className="font-bold text-sm" style={{ color: valueColor }}>
@@ -404,35 +383,23 @@ export default function AccountOrdersPage() {
                     </div>
                   </div>
 
-                  {/* 状态 */}
                   <div className="col-span-6 sm:col-span-2">
-                    <span 
+                    <span
                       className="text-xs px-2 py-0.5 rounded-full"
-                      style={{ 
-                        backgroundColor: displayStatus.bg, 
-                        color: displayStatus.color 
-                      }}
+                      style={{ backgroundColor: displayStatus.bg, color: displayStatus.color }}
                     >
                       {displayStatus.label}
                     </span>
                   </div>
 
-                  {/* 操作 */}
                   <div className="col-span-12 sm:col-span-2">
                     <div className="flex flex-col items-end gap-1.5">
                       <button
                         onClick={() => handleViewOrder(order.id, order.share_token)}
                         className="flex items-center gap-1.5 px-4 py-1.5 text-sm rounded-lg transition-colors w-full justify-center"
-                        style={{
-                          backgroundColor: primaryBtnBg,
-                          color: primaryBtnText,
-                        }}
-                        onMouseEnter={(e) => {
-                          e.currentTarget.style.backgroundColor = primaryBtnHover;
-                        }}
-                        onMouseLeave={(e) => {
-                          e.currentTarget.style.backgroundColor = primaryBtnBg;
-                        }}
+                        style={{ backgroundColor: primaryBtnBg, color: primaryBtnText }}
+                        onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = primaryBtnHover; }}
+                        onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = primaryBtnBg; }}
                       >
                         <Eye size={16} />
                         <span>{t('viewDetail')}</span>

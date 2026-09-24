@@ -1,10 +1,10 @@
 // app/api/admin/pages/init/route.ts
 import { NextRequest, NextResponse } from 'next/server';
 import { PageData } from '@/types/page';
-import { createPage, readPage, updatePage } from '@/lib/pages/pageService';
+import { createPage } from '@/lib/pages/pageService';
 import { getTemplateById } from '@/lib/webbuilder/template-manager';
 import { createHash } from 'crypto';
-import { supabaseAdmin } from '@/lib/supabase/admin-client';
+import sql from '@/lib/db/admin';
 
 function computeTemplateHash(data: any): string {
   return createHash('sha256').update(JSON.stringify(data)).digest('hex');
@@ -38,12 +38,11 @@ const PRESET_PAGES_EN: PresetPage[] = PRESET_PAGES_ZH.map(p => ({
   }[p.id] || p.slug,
 }));
 
-// ========== 批量查询模板数据（一次读取，避免重复） ==========
+// ========== 批量查询模板数据 ==========
 async function fetchAllTemplates(templateIds: string[]): Promise<Map<string, { data: any; hash: string }>> {
-  const map = new Map();
+  const map = new Map<string, { data: any; hash: string }>();
   const uniqueIds = [...new Set(templateIds.filter(Boolean))];
 
-  // 串行读取（避免并发导致云存储限流），但每个模板只读一次
   for (const id of uniqueIds) {
     try {
       const template = await getTemplateById(id);
@@ -60,7 +59,7 @@ async function fetchAllTemplates(templateIds: string[]): Promise<Map<string, { d
   return map;
 }
 
-// ========== POST 处理（优化：批量查询 + 批量写入） ==========
+// ========== POST 处理 ==========
 export async function POST(request: NextRequest) {
   const searchParams = request.nextUrl.searchParams;
   const locale = searchParams.get('locale');
@@ -74,22 +73,26 @@ export async function POST(request: NextRequest) {
 
   // ========== 1. 一次性查询所有已存在页面的元数据 ==========
   const presetIds = presets.map(p => p.id);
-  const { data: existingPages } = await supabaseAdmin
-    .from('site_pages')
-    .select('id, template, template_hash, template_data')
-    .eq('site_id', '000001')
-    .eq('locale', locale)
-    .in('id', presetIds);
+  let existingPages: Array<{ id: string; template: string | null; template_hash: string | null; template_data: any }> = [];
+  try {
+    existingPages = await sql<{ id: string; template: string | null; template_hash: string | null; template_data: any }[]>`
+      SELECT id, template, template_hash, template_data
+      FROM public.site_pages
+      WHERE site_id = ${'000001'}
+        AND locale = ${locale}
+        AND id IN ${sql(presetIds)}
+    `;
+  } catch (error) {
+    console.error('[init] 查询已存在页面失败:', error);
+  }
 
-  const existingMap = new Map(
-    (existingPages || []).map(p => [p.id, p])
-  );
+  const existingMap = new Map(existingPages.map(p => [p.id, p]));
 
   // ========== 2. 一次性查询所有需要的模板数据 ==========
-  const templateIds = presets.map(p => p.template).filter(Boolean);
+  const templateIds = presets.map(p => p.template).filter(Boolean) as string[];
   const templateMap = await fetchAllTemplates(templateIds);
 
-  // ========== 3. 批量处理（统一构建 upsert 数据） ==========
+  // ========== 3. 批量处理 ==========
   const toUpsert: any[] = [];
   const toCreate: PresetPage[] = [];
   const results: { locale: string; id: string; status: 'created' | 'updated' | 'skipped' | 'error'; error?: string }[] = [];
@@ -99,18 +102,16 @@ export async function POST(request: NextRequest) {
       const existing = existingMap.get(preset.id);
 
       if (existing) {
-        // 页面已存在 → 检查是否需要补全 template_data
         const template = preset.template ? templateMap.get(preset.template) : null;
 
         const isTemplateDataEmpty =
           !existing.template_data ||
           (typeof existing.template_data === 'object' &&
-           !Array.isArray(existing.template_data) &&
-           Object.keys(existing.template_data).length === 0);
+            !Array.isArray(existing.template_data) &&
+            Object.keys(existing.template_data).length === 0);
 
         const needsTemplateUpdate =
-          template &&
-          (isTemplateDataEmpty || existing.template !== preset.template);
+          template && (isTemplateDataEmpty || existing.template !== preset.template);
 
         if (needsTemplateUpdate) {
           const now = new Date().toISOString();
@@ -137,7 +138,6 @@ export async function POST(request: NextRequest) {
           results.push({ locale, id: preset.id, status: 'skipped' });
         }
       } else {
-        // 页面不存在 → 需要创建
         toCreate.push(preset);
       }
     } catch (err: any) {
@@ -145,15 +145,20 @@ export async function POST(request: NextRequest) {
     }
   }
 
-  // ========== 4. 批量 upsert 已存在页面（一次请求） ==========
+  // ========== 4. 批量 upsert（逐个执行，统一在一个事务里也可以） ==========
   if (toUpsert.length > 0) {
-    const { error } = await supabaseAdmin
-      .from('site_pages')
-      .upsert(toUpsert, { onConflict: 'site_id,id,locale' });
-
-    if (error) {
+    try {
+      for (const row of toUpsert) {
+        await sql`
+          INSERT INTO public.site_pages ${sql(row)}
+          ON CONFLICT (site_id, id, locale)
+          DO UPDATE SET ${sql(row, 'title', 'type', 'preset', 'visible', 'template',
+            'template_hash', 'slug', 'seo_keywords', 'seo_title', 'seo_description',
+            'content', 'template_data', 'updated_at')}
+        `;
+      }
+    } catch (error: any) {
       console.error('[init] 批量 upsert 失败:', error);
-      // 将失败信息记录
       for (const row of toUpsert) {
         const idx = results.findIndex(r => r.id === row.id && r.locale === row.locale);
         if (idx >= 0 && results[idx].status === 'updated') {
@@ -163,7 +168,7 @@ export async function POST(request: NextRequest) {
     }
   }
 
-  // ========== 5. 批量创建不存在的页面（串行，每个独立 createPage） ==========
+  // ========== 5. 批量创建不存在的页面 ==========
   for (const preset of toCreate) {
     try {
       await createPage(

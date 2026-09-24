@@ -1,21 +1,28 @@
 // lib/payment/services/order.service.ts
-import { supabase } from '@/lib/supabase/client';
+import sql from '@/lib/db/admin';
 import { generateShareToken } from '../utils/share-token';
-import type { Order, OrderDetail, CreateOrderInput, UpdateOrderInput, OrderListParams, OrderListResult, ShippingRecord } from '../types/order';
+import type {
+  Order,
+  OrderDetail,
+  CreateOrderInput,
+  UpdateOrderInput,
+  OrderListParams,
+  OrderListResult,
+  ShippingRecord,
+} from '../types/order';
 
 // ============================================================
 // ✅ 产品 slug 内存缓存
 // ============================================================
 const productSlugCache = new Map<string, { slug: string; timestamp: number }>();
-const PRODUCT_SLUG_CACHE_TTL = 5 * 60 * 1000; // 5分钟
+const PRODUCT_SLUG_CACHE_TTL = 5 * 60 * 1000;
 
 /**
  * ✅ 批量获取产品 slug（带内存缓存）
- * 独立方法，可被 listWithItems、getById、getByShareToken 等复用
  */
 async function getProductSlugs(productIds: string[]): Promise<Record<string, string>> {
   if (!productIds || productIds.length === 0) return {};
-  
+
   const uniqueIds = [...new Set(productIds)];
   const result: Record<string, string> = {};
   const uncachedIds: string[] = [];
@@ -24,7 +31,7 @@ async function getProductSlugs(productIds: string[]): Promise<Record<string, str
   // 1. 从缓存读取
   for (const id of uniqueIds) {
     const cached = productSlugCache.get(id);
-    if (cached && (now - cached.timestamp) < PRODUCT_SLUG_CACHE_TTL) {
+    if (cached && now - cached.timestamp < PRODUCT_SLUG_CACHE_TTL) {
       result[id] = cached.slug;
     } else {
       uncachedIds.push(id);
@@ -34,26 +41,23 @@ async function getProductSlugs(productIds: string[]): Promise<Record<string, str
   // 2. 查询未缓存的数据
   if (uncachedIds.length > 0) {
     try {
-      const { data, error } = await supabase
-        .from('products')
-        .select('productId, slug')
-        .in('productId', uncachedIds);
-
-      if (!error && data) {
-        data.forEach((item: any) => {
-          if (item.productId) {
-            const slug = item.slug || '';
-            result[item.productId] = slug;
-            productSlugCache.set(item.productId, { slug, timestamp: now });
-          }
-        });
+      const rows = await sql<{ productId: string; slug: string | null }[]>`
+        SELECT "productId", slug FROM public.products
+        WHERE "productId" IN ${sql(uncachedIds)}
+      `;
+      for (const item of rows) {
+        if (item.productId) {
+          const slug = item.slug || '';
+          result[item.productId] = slug;
+          productSlugCache.set(item.productId, { slug, timestamp: now });
+        }
       }
     } catch (error) {
       console.warn('[getProductSlugs] 查询失败:', error);
     }
   }
 
-  // 3. 未查到的产品，缓存空字符串（避免重复查询不存在的 productId）
+  // 3. 未查到的缓存空字符串
   for (const id of uncachedIds) {
     if (!result[id]) {
       productSlugCache.set(id, { slug: '', timestamp: now });
@@ -63,24 +67,17 @@ async function getProductSlugs(productIds: string[]): Promise<Record<string, str
   return result;
 }
 
-/**
- * ✅ 为订单商品批量附加产品 slug（优化版）
- * 使用内存缓存，减少数据库查询
- */
 async function enrichItemsWithSlugOptimized(items: any[]): Promise<any[]> {
   if (!items || items.length === 0) return items;
 
-  // 提取所有 product_id
   const productIds = items
-    .map(item => item.product_id)
+    .map((item) => item.product_id)
     .filter((id): id is string => id !== null && id !== undefined && id !== '');
 
   if (productIds.length === 0) return items;
 
-  // ✅ 使用缓存批量获取 slug
   const slugMap = await getProductSlugs(productIds);
 
-  // 为每个 item 附加 slug
   return items.map((item: any) => ({
     ...item,
     slug: slugMap[item.product_id] || '',
@@ -88,7 +85,7 @@ async function enrichItemsWithSlugOptimized(items: any[]): Promise<any[]> {
 }
 
 // ============================================================
-// ✅ 辅助函数：异步记录订单状态日志（不阻塞主流程）
+// ✅ 辅助函数：异步记录订单状态日志
 // ============================================================
 async function logOrderStatus(
   orderId: string,
@@ -98,23 +95,22 @@ async function logOrderStatus(
   note: string
 ): Promise<void> {
   try {
-    await supabase.from('order_status_logs').insert({
-      order_id: orderId,
-      from_status: fromStatus,
-      to_status: toStatus,
-      operator: operator || 'system',
-      note: note || '',
-    });
+    await sql`
+      INSERT INTO public.order_status_logs (order_id, from_status, to_status, operator, note)
+      VALUES (${orderId}, ${fromStatus}, ${toStatus}, ${operator || 'system'}, ${note || ''})
+    `;
   } catch (error) {
     console.warn(`[orderStatusLog] 日志记录失败 (${fromStatus}→${toStatus}):`, error);
   }
 }
 
 // ============================================================
-// ✅ 辅助函数：生成发货记录ID
+// ✅ 辅助函数：生成发货记录 ID
 // ============================================================
 function generateShippingRecordId(): string {
-  return crypto.randomUUID ? crypto.randomUUID() : Date.now().toString(36) + Math.random().toString(36).substring(2);
+  return typeof crypto !== 'undefined' && crypto.randomUUID
+    ? crypto.randomUUID()
+    : Date.now().toString(36) + Math.random().toString(36).substring(2);
 }
 
 // ============================================================
@@ -140,42 +136,42 @@ function buildShippingRecord(
   };
 }
 
-/**
- * 生成系统订单号（纯数字格式）
- * 格式: 时间戳(13位) + 4位随机数 = 17位纯数字
- */
 function generateOrderNo(): string {
   const timestamp = Date.now().toString();
-  const random = Math.floor(Math.random() * 10000).toString().padStart(4, '0');
+  const random = Math.floor(Math.random() * 10000)
+    .toString()
+    .padStart(4, '0');
   return timestamp + random;
 }
 
 /**
- * 生成默认合同号
- * 格式: PI-YYYYMMDD-XXXX
+ * 生成默认合同号（格式: PI-YYYYMMDD-XXXX）
  */
 async function generateDefaultContractNo(siteId: string): Promise<string> {
   const now = new Date();
   const dateStr = now.toISOString().slice(0, 10).replace(/-/g, '');
-  
-  const { data, error } = await supabase
-    .from('orders')
-    .select('contract_no')
-    .eq('site_id', siteId)
-    .ilike('contract_no', `PI-${dateStr}-%`)
-    .order('contract_no', { ascending: false })
-    .limit(1);
+  const pattern = `PI-${dateStr}-%`;
+
+  let rows: { contract_no: string | null }[] = [];
+  try {
+    rows = await sql<{ contract_no: string | null }[]>`
+      SELECT contract_no FROM public.orders
+      WHERE site_id = ${siteId}
+        AND contract_no LIKE ${pattern}
+      ORDER BY contract_no DESC
+      LIMIT 1
+    `;
+  } catch (error) {
+    console.warn('[generateDefaultContractNo] 查询失败:', error);
+  }
 
   let nextSeq = 1;
-  if (!error && data && data.length > 0) {
-    const last = data[0].contract_no;
-    if (last) {
-      const parts = last.split('-');
-      const lastPart = parts[parts.length - 1];
-      const lastSeq = parseInt(lastPart, 10);
-      if (!isNaN(lastSeq)) {
-        nextSeq = lastSeq + 1;
-      }
+  if (rows[0]?.contract_no) {
+    const parts = rows[0].contract_no.split('-');
+    const lastPart = parts[parts.length - 1];
+    const lastSeq = parseInt(lastPart, 10);
+    if (!isNaN(lastSeq)) {
+      nextSeq = lastSeq + 1;
     }
   }
 
@@ -186,22 +182,24 @@ async function generateDefaultContractNo(siteId: string): Promise<string> {
  * 验证并确保合同号唯一
  */
 async function ensureUniqueContractNo(
-  siteId: string, 
-  contractNo: string, 
+  siteId: string,
+  contractNo: string,
   retryCount: number = 0
 ): Promise<string> {
   if (retryCount > 3) {
     return `${contractNo}-${Date.now().toString().slice(-6)}`;
   }
 
-  const { data: existing, error } = await supabase
-    .from('orders')
-    .select('contract_no')
-    .eq('site_id', siteId)
-    .eq('contract_no', contractNo)
-    .maybeSingle();
-
-  if (error) {
+  let existing: { contract_no: string } | undefined;
+  try {
+    const rows = await sql<{ contract_no: string }[]>`
+      SELECT contract_no FROM public.orders
+      WHERE site_id = ${siteId}
+        AND contract_no = ${contractNo}
+      LIMIT 1
+    `;
+    existing = rows[0];
+  } catch (error) {
     console.error('检查合同号失败:', error);
     return contractNo;
   }
@@ -215,232 +213,316 @@ async function ensureUniqueContractNo(
   return contractNo;
 }
 
+// ============================================================
+// ✅ 动态 SQL 构建辅助（合法 postgres 用法）
+// ============================================================
+
+/**
+ * 构建 INSERT 语句
+ * - 列名用 sql() 标识符注入（来自代码白名单，非用户输入）
+ * - jsonb 字段用 sql.json() 包装
+ */
+function buildInsertStatement(
+  table: string,
+  data: Record<string, any>,
+  jsonbFields: Set<string>
+) {
+  const columns = Object.keys(data);
+  const colsSql = columns
+    .map((c) => sql`${sql(c)}`)
+    .reduce((acc, c, i) => (i === 0 ? c : sql`${acc}, ${c}`), sql``);
+  const valsSql = columns
+    .map((c) => {
+      const v = data[c];
+      return jsonbFields.has(c) ? sql`${sql.json(v)}` : sql`${v}`;
+    })
+    .reduce((acc, v, i) => (i === 0 ? v : sql`${acc}, ${v}`), sql``);
+  return { colsSql, valsSql };
+}
+
+/**
+ * 构建 SET 子句（用于 UPDATE）
+ */
+function buildSetClause(
+  data: Record<string, any>,
+  jsonbFields: Set<string>
+) {
+  const clauses: any[] = [];
+  for (const [key, value] of Object.entries(data)) {
+    if (value === undefined) continue;
+    if (jsonbFields.has(key)) {
+      clauses.push(sql`${sql(key)} = ${sql.json(value)}`);
+    } else {
+      clauses.push(sql`${sql(key)} = ${value}`);
+    }
+  }
+  if (clauses.length === 0) return sql``;
+  return clauses.reduce((acc, c, i) => (i === 0 ? c : sql`${acc}, ${c}`), sql``);
+}
+
+// ============================================================
+// ✅ 动态 INSERT 构建（用于 create / reorder）
+// ============================================================
+
+/**
+ * 用 SQL 模板构建 INSERT INTO orders 并返回新订单
+ * 注意：postgres 库中 sql(obj) 只展开为 (col1, col2) VALUES (v1, v2) 片段，
+ * 不能直接跟在 INSERT INTO ... ( 之后。因此这里手动列出列名和值。
+ */
+async function insertOrder(
+  data: Record<string, any>,
+  jsonbFields: Set<string>
+): Promise<any> {
+  const { colsSql, valsSql } = buildInsertStatement('orders', data, jsonbFields);
+  const rows = await sql<any[]>`
+    INSERT INTO public.orders (${colsSql})
+    VALUES (${valsSql})
+    RETURNING *
+  `;
+  return rows[0];
+}
+
 export const orderService = {
-  /**
- * ✅ 获取订单列表（分页 + 筛选）
- * 支持按 created_by（后台）或 buyer_email（用户中心）筛选
- */
-async list(params: OrderListParams): Promise<OrderListResult> {
-  const { site_id, status, keyword, country, created_by, buyer_email, start_date, end_date, page = 1, page_size = 20 } = params;
-  
-  let query = supabase
-    .from('orders')
-    .select('*', { count: 'exact' })
-    .eq('site_id', site_id);
-
-  if (status && status !== 'all') {
-    if (Array.isArray(status) && status.length > 0) {
-      query = query.in('status', status);
-    } else if (typeof status === 'string' && status !== 'all') {
-      query = query.eq('status', status);
-    }
-  }
-
-  if (params.sent_status && Array.isArray(params.sent_status) && params.sent_status.length > 0) {
-    query = query.in('sent_status', params.sent_status);
-  } else if (params.sent_status && typeof params.sent_status === 'string' && params.sent_status !== 'all') {
-    query = query.eq('sent_status', params.sent_status);
-  }
-
-  if (country) {
-    query = query.eq('buyer_country', country);
-  }
-
-  if (created_by) {
-    query = query.eq('created_by', created_by);
-  }
-
-  // ✅ 支持按买家邮箱筛选（用户中心用）
-  if (buyer_email) {
-    query = query.eq('buyer_email', buyer_email);
-  }
-
-  if (keyword) {
-    query = query.or(`order_no.ilike.%${keyword}%,contract_no.ilike.%${keyword}%,buyer_name.ilike.%${keyword}%,buyer_email.ilike.%${keyword}%`);
-  }
-
-  if (start_date) {
-    query = query.gte('created_at', start_date);
-  }
-  if (end_date) {
-    query = query.lte('created_at', end_date);
-  }
-
-  const from = (page - 1) * page_size;
-  const to = from + page_size - 1;
-
-  const { data, error, count } = await query
-    .order('created_at', { ascending: false })
-    .range(from, to);
-
-  if (error) throw new Error(`获取订单列表失败: ${error.message}`);
-
-  return {
-    items: data || [],
-    total: count || 0,
-    page,
-    page_size,
-    total_pages: Math.ceil((count || 0) / page_size),
-  };
-},
+  // ============================================================
+  // 列表 / 详情
+  // ============================================================
 
   /**
- * ✅ 获取订单列表（含商品信息）- 优化版
- * 支持按 created_by（后台）或 buyer_email（用户中心）筛选
- * 批量查询所有商品，一次性获取 slug
- */
-async listWithItems(params: OrderListParams): Promise<OrderListResult> {
-  const { site_id, status, keyword, country, created_by, buyer_email, start_date, end_date, page = 1, page_size = 20 } = params;
-  
-  let query = supabase
-    .from('orders')
-    .select('*', { count: 'exact' })
-    .eq('site_id', site_id);
+   * ✅ 获取订单列表（分页 + 筛选）
+   */
+  async list(params: OrderListParams): Promise<OrderListResult> {
+    const {
+      site_id, status, keyword, country, created_by, buyer_email,
+      start_date, end_date, page = 1, page_size = 20,
+    } = params;
 
-  if (status && status !== 'all') {
-    if (Array.isArray(status) && status.length > 0) {
-      query = query.in('status', status);
-    } else if (typeof status === 'string' && status !== 'all') {
-      query = query.eq('status', status);
+    const conditions: any[] = [sql`site_id = ${site_id}`];
+
+    if (status && status !== 'all') {
+      if (Array.isArray(status) && status.length > 0) {
+        conditions.push(sql`status IN ${sql(status)}`);
+      } else if (typeof status === 'string') {
+        conditions.push(sql`status = ${status}`);
+      }
     }
-  }
 
-  if (params.sent_status && Array.isArray(params.sent_status) && params.sent_status.length > 0) {
-    query = query.in('sent_status', params.sent_status);
-  } else if (params.sent_status && typeof params.sent_status === 'string' && params.sent_status !== 'all') {
-    query = query.eq('sent_status', params.sent_status);
-  }
-
-  if (country) {
-    query = query.eq('buyer_country', country);
-  }
-
-  if (created_by) {
-    query = query.eq('created_by', created_by);
-  }
-
-  // ✅ 支持按买家邮箱筛选（用户中心用）
-  if (buyer_email) {
-    query = query.eq('buyer_email', buyer_email);
-  }
-
-  if (keyword) {
-    query = query.or(`order_no.ilike.%${keyword}%,contract_no.ilike.%${keyword}%,buyer_name.ilike.%${keyword}%,buyer_email.ilike.%${keyword}%`);
-  }
-
-  if (start_date) {
-    query = query.gte('created_at', start_date);
-  }
-  if (end_date) {
-    query = query.lte('created_at', end_date);
-  }
-
-  const from = (page - 1) * page_size;
-  const to = from + page_size - 1;
-
-  const { data: orders, error, count } = await query
-    .order('created_at', { ascending: false })
-    .range(from, to);
-
-  if (error) throw new Error(`获取订单列表失败: ${error.message}`);
-
-  if (!orders || orders.length === 0) {
-    return {
-      items: [],
-      total: 0,
-      page,
-      page_size,
-      total_pages: 0,
-    };
-  }
-
-  const orderIds = orders.map(o => o.id);
-  const { data: items, error: itemsError } = await supabase
-    .from('order_items')
-    .select('*')
-    .in('order_id', orderIds)
-    .order('sort_order');
-
-  if (itemsError) {
-    console.warn('获取订单商品失败:', itemsError);
-  }
-
-  // ✅ 优化：收集所有 product_id，一次性批量查询 slug
-  const allProductIds = (items || [])
-    .map(item => item.product_id)
-    .filter((id): id is string => id !== null && id !== undefined && id !== '');
-  
-  const slugMap = await getProductSlugs(allProductIds);
-
-  // ✅ 为每个商品附加 slug
-  const itemsWithSlug = (items || []).map((item: any) => ({
-    ...item,
-    slug: slugMap[item.product_id] || '',
-  }));
-
-  // 按 order_id 分组
-  const itemsMap: Record<string, any[]> = {};
-  itemsWithSlug.forEach(item => {
-    if (!itemsMap[item.order_id]) {
-      itemsMap[item.order_id] = [];
+    if (params.sent_status && Array.isArray(params.sent_status) && params.sent_status.length > 0) {
+      conditions.push(sql`sent_status IN ${sql(params.sent_status)}`);
+    } else if (
+      params.sent_status &&
+      typeof params.sent_status === 'string' &&
+      params.sent_status !== 'all'
+    ) {
+      conditions.push(sql`sent_status = ${params.sent_status}`);
     }
-    itemsMap[item.order_id].push(item);
-  });
 
-  const resultItems = orders.map(order => ({
-    ...order,
-    items: itemsMap[order.id] || [],
-  }));
+    if (country) conditions.push(sql`buyer_country = ${country}`);
+    if (created_by) conditions.push(sql`created_by = ${created_by}`);
+    if (buyer_email) conditions.push(sql`buyer_email = ${buyer_email}`);
 
-  return {
-    items: resultItems,
-    total: count || 0,
-    page,
-    page_size,
-    total_pages: Math.ceil((count || 0) / page_size),
-  };
-},
+    if (keyword) {
+      const p = `%${keyword}%`;
+      conditions.push(
+        sql`(order_no ILIKE ${p} OR contract_no ILIKE ${p} OR buyer_name ILIKE ${p} OR buyer_email ILIKE ${p})`
+      );
+    }
+
+    if (start_date) conditions.push(sql`created_at >= ${start_date}`);
+    if (end_date) conditions.push(sql`created_at <= ${end_date}`);
+
+    const whereClause = conditions.reduce(
+      (acc, c, i) => (i === 0 ? c : sql`${acc} AND ${c}`),
+      sql``
+    );
+
+    const offset = (page - 1) * page_size;
+
+    try {
+      const countRows = await sql<{ count: string }[]>`
+        SELECT COUNT(*)::text AS count FROM public.orders
+        WHERE ${whereClause}
+      `;
+      const total = parseInt(countRows[0]?.count || '0', 10);
+
+      const items = await sql<Order[]>`
+        SELECT * FROM public.orders
+        WHERE ${whereClause}
+        ORDER BY created_at DESC
+        LIMIT ${page_size} OFFSET ${offset}
+      `;
+
+      return {
+        items,
+        total,
+        page,
+        page_size,
+        total_pages: Math.ceil(total / page_size),
+      };
+    } catch (error: any) {
+      throw new Error(`获取订单列表失败: ${error.message}`);
+    }
+  },
 
   /**
-   * ✅ 获取订单详情（含商品明细 + 状态日志 + shipping_records）
+   * ✅ 获取订单列表（含商品信息）
+   */
+  async listWithItems(params: OrderListParams): Promise<OrderListResult> {
+    const {
+      site_id, status, keyword, country, created_by, buyer_email,
+      start_date, end_date, page = 1, page_size = 20,
+    } = params;
+
+    const conditions: any[] = [sql`site_id = ${site_id}`];
+
+    if (status && status !== 'all') {
+      if (Array.isArray(status) && status.length > 0) {
+        conditions.push(sql`status IN ${sql(status)}`);
+      } else if (typeof status === 'string') {
+        conditions.push(sql`status = ${status}`);
+      }
+    }
+
+    if (params.sent_status && Array.isArray(params.sent_status) && params.sent_status.length > 0) {
+      conditions.push(sql`sent_status IN ${sql(params.sent_status)}`);
+    } else if (
+      params.sent_status &&
+      typeof params.sent_status === 'string' &&
+      params.sent_status !== 'all'
+    ) {
+      conditions.push(sql`sent_status = ${params.sent_status}`);
+    }
+
+    if (country) conditions.push(sql`buyer_country = ${country}`);
+    if (created_by) conditions.push(sql`created_by = ${created_by}`);
+    if (buyer_email) conditions.push(sql`buyer_email = ${buyer_email}`);
+
+    if (keyword) {
+      const p = `%${keyword}%`;
+      conditions.push(
+        sql`(order_no ILIKE ${p} OR contract_no ILIKE ${p} OR buyer_name ILIKE ${p} OR buyer_email ILIKE ${p})`
+      );
+    }
+
+    if (start_date) conditions.push(sql`created_at >= ${start_date}`);
+    if (end_date) conditions.push(sql`created_at <= ${end_date}`);
+
+    const whereClause = conditions.reduce(
+      (acc, c, i) => (i === 0 ? c : sql`${acc} AND ${c}`),
+      sql``
+    );
+
+    const offset = (page - 1) * page_size;
+
+    try {
+      const countRows = await sql<{ count: string }[]>`
+        SELECT COUNT(*)::text AS count FROM public.orders
+        WHERE ${whereClause}
+      `;
+      const total = parseInt(countRows[0]?.count || '0', 10);
+
+      const orders = await sql<Order[]>`
+        SELECT * FROM public.orders
+        WHERE ${whereClause}
+        ORDER BY created_at DESC
+        LIMIT ${page_size} OFFSET ${offset}
+      `;
+
+      if (!orders || orders.length === 0) {
+        return { items: [], total: 0, page, page_size, total_pages: 0 };
+      }
+
+      const orderIds = orders.map((o: any) => o.id);
+
+      let items: any[] = [];
+      try {
+        items = await sql<any[]>`
+          SELECT * FROM public.order_items
+          WHERE order_id IN ${sql(orderIds)}
+          ORDER BY sort_order ASC
+        `;
+      } catch (itemsError) {
+        console.warn('获取订单商品失败:', itemsError);
+      }
+
+      const allProductIds = items
+        .map((item) => item.product_id)
+        .filter((id): id is string => id !== null && id !== undefined && id !== '');
+
+      const slugMap = await getProductSlugs(allProductIds);
+
+      const itemsWithSlug = items.map((item: any) => ({
+        ...item,
+        slug: slugMap[item.product_id] || '',
+      }));
+
+      const itemsMap: Record<string, any[]> = {};
+      itemsWithSlug.forEach((item) => {
+        if (!itemsMap[item.order_id]) itemsMap[item.order_id] = [];
+        itemsMap[item.order_id].push(item);
+      });
+
+      const resultItems = orders.map((order: any) => ({
+        ...order,
+        items: itemsMap[order.id] || [],
+      }));
+
+      return {
+        items: resultItems,
+        total,
+        page,
+        page_size,
+        total_pages: Math.ceil(total / page_size),
+      };
+    } catch (error: any) {
+      throw new Error(`获取订单列表失败: ${error.message}`);
+    }
+  },
+
+  /**
+   * ✅ 获取订单详情
    */
   async getById(siteId: string, id: string): Promise<OrderDetail> {
-    const { data: order, error: orderError } = await supabase
-      .from('orders')
-      .select('*')
-      .eq('site_id', siteId)
-      .eq('id', id)
-      .maybeSingle();
-
-    if (orderError) {
+    let order: any;
+    try {
+      const rows = await sql<any[]>`
+        SELECT * FROM public.orders
+        WHERE site_id = ${siteId}
+          AND id = ${id}
+        LIMIT 1
+      `;
+      order = rows[0];
+    } catch (orderError: any) {
       console.error('[getById] 查询失败:', orderError);
       throw new Error(`获取订单详情失败: ${orderError.message}`);
     }
+    if (!order) throw new Error('订单不存在');
 
-    if (!order) {
-      throw new Error('订单不存在');
+    let items: any[] = [];
+    try {
+      items = await sql<any[]>`
+        SELECT * FROM public.order_items
+        WHERE order_id = ${id}
+        ORDER BY sort_order ASC
+      `;
+    } catch (itemsError: any) {
+      throw new Error(`获取订单商品失败: ${itemsError.message}`);
     }
 
-    const { data: items, error: itemsError } = await supabase
-      .from('order_items')
-      .select('*')
-      .eq('order_id', id)
-      .order('sort_order');
+    const itemsWithSlug = await enrichItemsWithSlugOptimized(items);
 
-    if (itemsError) throw new Error(`获取订单商品失败: ${itemsError.message}`);
+    let logs: any[] = [];
+    try {
+      logs = await sql<any[]>`
+        SELECT * FROM public.order_status_logs
+        WHERE order_id = ${id}
+        ORDER BY created_at ASC
+      `;
+    } catch (logsError: any) {
+      throw new Error(`获取状态日志失败: ${logsError.message}`);
+    }
 
-    // ✅ 使用优化版，带缓存
-    const itemsWithSlug = await enrichItemsWithSlugOptimized(items || []);
-
-    const { data: logs, error: logsError } = await supabase
-      .from('order_status_logs')
-      .select('*')
-      .eq('order_id', id)
-      .order('created_at');
-
-    if (logsError) throw new Error(`获取状态日志失败: ${logsError.message}`);
-
-    let selectedAccountIds = (order as any).selected_account_ids || [];
+    // postgres 库自动反序列化 jsonb，但仍保留兜底解析
+    let selectedAccountIds = order.selected_account_ids || [];
     if (typeof selectedAccountIds === 'string') {
       try {
         selectedAccountIds = JSON.parse(selectedAccountIds);
@@ -449,7 +531,6 @@ async listWithItems(params: OrderListParams): Promise<OrderListResult> {
       }
     }
 
-    // ✅ 解析 shipping_records
     let shippingRecords: ShippingRecord[] = [];
     if (order.shipping_records) {
       if (typeof order.shipping_records === 'string') {
@@ -467,32 +548,33 @@ async listWithItems(params: OrderListParams): Promise<OrderListResult> {
       ...order,
       selected_account_ids: selectedAccountIds,
       items: itemsWithSlug,
-      status_logs: logs || [],
+      status_logs: logs,
       shipping_records: shippingRecords,
     };
   },
 
   /**
-   * ✅ 获取订单基本信息（不含 items 和 logs）
+   * ✅ 获取订单基本信息
    */
   async getBasicInfo(siteId: string, id: string): Promise<Order> {
-    const { data, error } = await supabase
-      .from('orders')
-      .select('id, status, sent_status, sub_total, discount, shipping_fee, tax, total_amount, selected_account_ids, shipping_records')
-      .eq('site_id', siteId)
-      .eq('id', id)
-      .maybeSingle();
-
-    if (error) {
+    let data: any;
+    try {
+      const rows = await sql<any[]>`
+        SELECT id, status, sent_status, sub_total, discount, shipping_fee, tax,
+               total_amount, selected_account_ids, shipping_records
+        FROM public.orders
+        WHERE site_id = ${siteId}
+          AND id = ${id}
+        LIMIT 1
+      `;
+      data = rows[0];
+    } catch (error: any) {
       console.error('[getBasicInfo] 查询失败:', error);
       throw new Error(`获取订单信息失败: ${error.message}`);
     }
+    if (!data) throw new Error('订单不存在');
 
-    if (!data) {
-      throw new Error('订单不存在');
-    }
-    
-    let selectedAccountIds = (data as any).selected_account_ids || [];
+    let selectedAccountIds = data.selected_account_ids || [];
     if (typeof selectedAccountIds === 'string') {
       try {
         selectedAccountIds = JSON.parse(selectedAccountIds);
@@ -502,15 +584,15 @@ async listWithItems(params: OrderListParams): Promise<OrderListResult> {
     }
 
     let shippingRecords: ShippingRecord[] = [];
-    if ((data as any).shipping_records) {
-      if (typeof (data as any).shipping_records === 'string') {
+    if (data.shipping_records) {
+      if (typeof data.shipping_records === 'string') {
         try {
-          shippingRecords = JSON.parse((data as any).shipping_records);
+          shippingRecords = JSON.parse(data.shipping_records);
         } catch {
           shippingRecords = [];
         }
-      } else if (Array.isArray((data as any).shipping_records)) {
-        shippingRecords = (data as any).shipping_records;
+      } else if (Array.isArray(data.shipping_records)) {
+        shippingRecords = data.shipping_records;
       }
     }
 
@@ -521,13 +603,17 @@ async listWithItems(params: OrderListParams): Promise<OrderListResult> {
     } as Order;
   },
 
+  // ============================================================
+  // 创建 / 更新 / 删除
+  // ============================================================
+
   /**
    * ✅ 创建订单（草稿状态）
    */
   async create(siteId: string, input: CreateOrderInput, operator: string): Promise<Order> {
     try {
       const orderNo = generateOrderNo();
-      
+
       let contractNo = input.contract_no?.trim();
       if (!contractNo) {
         contractNo = await generateDefaultContractNo(siteId);
@@ -539,7 +625,7 @@ async listWithItems(params: OrderListParams): Promise<OrderListResult> {
       const sub_total = items.reduce((sum, item) => {
         return sum + (Number(item.price) || 0) * (Number(item.quantity) || 0);
       }, 0);
-      
+
       const discount = Number(input.discount) || 0;
       const shipping_fee = Number(input.shipping_fee) || 0;
       const tax = Number(input.tax) || 0;
@@ -547,7 +633,7 @@ async listWithItems(params: OrderListParams): Promise<OrderListResult> {
 
       const defaultExpiry = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString();
 
-      const insertData = {
+      const insertData: Record<string, any> = {
         site_id: siteId,
         order_no: orderNo,
         contract_no: contractNo,
@@ -559,7 +645,9 @@ async listWithItems(params: OrderListParams): Promise<OrderListResult> {
         buyer_phone: input.buyer_phone || '',
         buyer_address: input.buyer_address || '',
         payment_method: input.payment_method || 'bank_transfer',
-        selected_account_ids: Array.isArray(input.selected_account_ids) ? input.selected_account_ids : [],
+        selected_account_ids: Array.isArray(input.selected_account_ids)
+          ? input.selected_account_ids
+          : [],
         currency: input.currency || 'USD',
         sub_total,
         discount,
@@ -585,43 +673,45 @@ async listWithItems(params: OrderListParams): Promise<OrderListResult> {
         shipping_records: [],
       };
 
+      const jsonbFields = new Set(['selected_account_ids', 'shipping_records']);
+
       console.log('[create] 准备插入数据');
 
-      const { data: order, error: orderError } = await supabase
-        .from('orders')
-        .insert(insertData)
-        .select()
-        .single();
-
-      if (orderError) {
-        console.error('[create] Supabase 插入失败:', orderError);
+      let order: any;
+      try {
+        order = await insertOrder(insertData, jsonbFields);
+      } catch (orderError: any) {
+        console.error('[create] 插入失败:', orderError);
         throw new Error(`创建订单失败: ${orderError.message}`);
       }
 
+      if (!order) throw new Error('创建订单失败：未返回数据');
+
+      // 插入 order_items
       if (items.length > 0) {
-        const itemsToInsert = items.map((item, index) => ({
-          order_id: order.id,
-          product_id: item.product_id || null,
-          locale: item.locale || 'en',
-          product_name: item.product_name || '',
-          product_image: item.product_image || '',
-          category: item.category || '',
-          specification: item.specification || '',
-          sku: item.sku || '',
-          price: Number(item.price) || 0,
-          quantity: Number(item.quantity) || 0,
-          unit: item.unit || 'pcs',
-          total: (Number(item.price) || 0) * (Number(item.quantity) || 0),
-          sort_order: index,
-        }));
-
-        const { error: itemsError } = await supabase
-          .from('order_items')
-          .insert(itemsToInsert);
-
-        if (itemsError) {
+        try {
+          for (let index = 0; index < items.length; index++) {
+            const item = items[index];
+            await sql`
+              INSERT INTO public.order_items (
+                order_id, product_id, locale, product_name, product_image,
+                category, specification, sku, price, quantity, unit, total, sort_order
+              ) VALUES (
+                ${order.id}, ${item.product_id || null}, ${item.locale || 'en'},
+                ${item.product_name || ''}, ${item.product_image || ''},
+                ${item.category || ''}, ${item.specification || ''},
+                ${item.sku || ''}, ${Number(item.price) || 0},
+                ${Number(item.quantity) || 0}, ${item.unit || 'pcs'},
+                ${(Number(item.price) || 0) * (Number(item.quantity) || 0)},
+                ${index}
+              )
+            `;
+          }
+        } catch (itemsError: any) {
           console.error('[create] 插入商品失败:', itemsError);
-          await supabase.from('orders').delete().eq('id', order.id);
+          try {
+            await sql`DELETE FROM public.orders WHERE id = ${order.id}`;
+          } catch {}
           throw new Error(`创建订单商品失败: ${itemsError.message}`);
         }
       }
@@ -636,31 +726,37 @@ async listWithItems(params: OrderListParams): Promise<OrderListResult> {
   /**
    * ✅ 更新订单（仅草稿状态可编辑）
    */
-  async update(siteId: string, id: string, input: UpdateOrderInput, operator?: string): Promise<Order> {
-    const { data: existing, error: fetchError } = await supabase
-      .from('orders')
-      .select('status, sub_total, discount, shipping_fee, tax, expiry_date, created_at')
-      .eq('site_id', siteId)
-      .eq('id', id)
-      .maybeSingle();
-
-    if (fetchError) {
+  async update(
+    siteId: string,
+    id: string,
+    input: UpdateOrderInput,
+    operator?: string
+  ): Promise<Order> {
+    // 1. 查现有订单
+    let existing: any;
+    try {
+      const rows = await sql<any[]>`
+        SELECT status, sub_total, discount, shipping_fee, tax, expiry_date, created_at
+        FROM public.orders
+        WHERE site_id = ${siteId}
+          AND id = ${id}
+        LIMIT 1
+      `;
+      existing = rows[0];
+    } catch (fetchError: any) {
       console.error('[update] 获取订单失败:', fetchError);
       throw new Error(`获取订单信息失败: ${fetchError.message}`);
     }
-    
-    if (!existing) {
-      throw new Error('订单不存在');
-    }
 
+    if (!existing) throw new Error('订单不存在');
     if (existing.status !== 'draft') {
       throw new Error('只有草稿状态的订单可以编辑');
     }
 
     const { items, selected_account_ids, ...orderUpdateData } = input;
-
     const inputAny = orderUpdateData as any;
-    
+
+    // 2. 重新计算金额
     let sub_total: number;
     if (inputAny.sub_total !== undefined && inputAny.sub_total !== null) {
       sub_total = Number(inputAny.sub_total);
@@ -672,105 +768,131 @@ async listWithItems(params: OrderListParams): Promise<OrderListResult> {
       sub_total = Number(existing.sub_total) || 0;
     }
 
-    const discount = inputAny.discount !== undefined && inputAny.discount !== null
-      ? Number(inputAny.discount)
-      : Number(existing.discount) || 0;
-
-    const shipping_fee = inputAny.shipping_fee !== undefined && inputAny.shipping_fee !== null
-      ? Number(inputAny.shipping_fee)
-      : Number(existing.shipping_fee) || 0;
-
-    const tax = inputAny.tax !== undefined && inputAny.tax !== null
-      ? Number(inputAny.tax)
-      : Number(existing.tax) || 0;
+    const discount =
+      inputAny.discount !== undefined && inputAny.discount !== null
+        ? Number(inputAny.discount)
+        : Number(existing.discount) || 0;
+    const shipping_fee =
+      inputAny.shipping_fee !== undefined && inputAny.shipping_fee !== null
+        ? Number(inputAny.shipping_fee)
+        : Number(existing.shipping_fee) || 0;
+    const tax =
+      inputAny.tax !== undefined && inputAny.tax !== null
+        ? Number(inputAny.tax)
+        : Number(existing.tax) || 0;
 
     const total_amount = sub_total + shipping_fee + tax - discount;
 
-    console.log('[update] 重新计算金额:', {
-      sub_total,
-      discount,
-      shipping_fee,
-      tax,
-      total_amount,
-      existing_sub_total: existing.sub_total,
-    });
+    console.log('[update] 重新计算金额:', { sub_total, discount, shipping_fee, tax, total_amount });
 
-    const updateData: any = {
-      ...orderUpdateData,
-      sub_total,
-      discount,
-      shipping_fee,
-      tax,
-      total_amount,
-      updated_at: new Date().toISOString(),
-    };
+    // 3. 动态 SET
+    const jsonbFields = new Set(['selected_account_ids', 'shipping_records']);
+    const setClauses: any[] = [];
 
-    // 处理 expiry_date
-    if (updateData.expiry_date === '' || updateData.expiry_date === null || updateData.expiry_date === undefined) {
-      const defaultExpiry = new Date();
-      defaultExpiry.setDate(defaultExpiry.getDate() + 30);
-      updateData.expiry_date = defaultExpiry.toISOString().split('T')[0];
-    } else if (updateData.expiry_date) {
-      try {
-        const date = new Date(updateData.expiry_date);
-        if (!isNaN(date.getTime())) {
-          updateData.expiry_date = date.toISOString().split('T')[0];
-        }
-      } catch {
-        const defaultExpiry = new Date();
-        defaultExpiry.setDate(defaultExpiry.getDate() + 30);
-        updateData.expiry_date = defaultExpiry.toISOString().split('T')[0];
+    // ✅ 需要特殊处理的字段，在遍历时跳过（避免重复赋值）
+    const specialFields = new Set([
+      'items',
+      'expiry_date',
+      'shipping_date',
+      'selected_account_ids',
+      'sub_total',
+      'discount',
+      'shipping_fee',
+      'tax',
+      'total_amount',
+    ]);
+
+    for (const [key, value] of Object.entries(orderUpdateData)) {
+      if (specialFields.has(key)) continue;
+      if (value === undefined) continue;
+      if (jsonbFields.has(key)) {
+        setClauses.push(sql`${sql(key)} = ${sql.json(value)}`);
+      } else {
+        setClauses.push(sql`${sql(key)} = ${value}`);
       }
     }
 
-    if (updateData.shipping_date === '') {
-      updateData.shipping_date = null;
+    // expiry_date 特殊处理
+    let expiryDate = inputAny.expiry_date;
+    if (expiryDate === '' || expiryDate === null || expiryDate === undefined) {
+      const d = new Date();
+      d.setDate(d.getDate() + 30);
+      expiryDate = d.toISOString().split('T')[0];
+    } else if (expiryDate) {
+      try {
+        const d = new Date(expiryDate);
+        if (!isNaN(d.getTime())) expiryDate = d.toISOString().split('T')[0];
+      } catch {
+        const d = new Date();
+        d.setDate(d.getDate() + 30);
+        expiryDate = d.toISOString().split('T')[0];
+      }
+    }
+    setClauses.push(sql`expiry_date = ${expiryDate}`);
+
+    // shipping_date 特殊处理
+    if (inputAny.shipping_date === '') {
+      setClauses.push(sql`shipping_date = NULL`);
+    } else if (inputAny.shipping_date !== undefined) {
+      setClauses.push(sql`shipping_date = ${inputAny.shipping_date}`);
     }
 
+    // selected_account_ids 特殊处理
     if (selected_account_ids !== undefined) {
-      updateData.selected_account_ids = selected_account_ids;
+      setClauses.push(sql`selected_account_ids = ${sql.json(selected_account_ids)}`);
     }
 
-    delete updateData.items;
+    setClauses.push(sql`sub_total = ${sub_total}`);
+    setClauses.push(sql`discount = ${discount}`);
+    setClauses.push(sql`shipping_fee = ${shipping_fee}`);
+    setClauses.push(sql`tax = ${tax}`);
+    setClauses.push(sql`total_amount = ${total_amount}`);
+    setClauses.push(sql`updated_at = ${new Date().toISOString()}`);
 
-    const { data, error } = await supabase
-      .from('orders')
-      .update(updateData)
-      .eq('site_id', siteId)
-      .eq('id', id)
-      .select()
-      .single();
+    const setClause = setClauses.reduce(
+      (acc, c, i) => (i === 0 ? c : sql`${acc}, ${c}`),
+      sql``
+    );
 
-    if (error) {
+    // 4. 更新订单
+    try {
+      await sql`
+        UPDATE public.orders
+        SET ${setClause}
+        WHERE site_id = ${siteId}
+          AND id = ${id}
+      `;
+    } catch (error: any) {
       console.error('[update] 更新订单失败:', error);
       throw new Error(`更新订单失败: ${error.message}`);
     }
 
+    // 5. 更新 items
     if (items !== undefined) {
-      await supabase.from('order_items').delete().eq('order_id', id);
+      try {
+        await sql`DELETE FROM public.order_items WHERE order_id = ${id}`;
+      } catch {}
 
       if (Array.isArray(items) && items.length > 0) {
-        const itemsToInsert = items.map((item: any, index: number) => ({
-          order_id: id,
-          product_id: item.product_id || null,
-          locale: item.locale || 'en',
-          product_name: item.product_name || '',
-          product_image: item.product_image || '',
-          category: item.category || '',
-          specification: item.specification || '',
-          sku: item.sku || '',
-          price: Number(item.price) || 0,
-          quantity: Number(item.quantity) || 0,
-          unit: item.unit || 'pcs',
-          total: (Number(item.price) || 0) * (Number(item.quantity) || 0),
-          sort_order: index,
-        }));
-
-        const { error: itemsError } = await supabase
-          .from('order_items')
-          .insert(itemsToInsert);
-
-        if (itemsError) {
+        try {
+          for (let index = 0; index < items.length; index++) {
+            const item: any = items[index];
+            await sql`
+              INSERT INTO public.order_items (
+                order_id, product_id, locale, product_name, product_image,
+                category, specification, sku, price, quantity, unit, total, sort_order
+              ) VALUES (
+                ${id}, ${item.product_id || null}, ${item.locale || 'en'},
+                ${item.product_name || ''}, ${item.product_image || ''},
+                ${item.category || ''}, ${item.specification || ''},
+                ${item.sku || ''}, ${Number(item.price) || 0},
+                ${Number(item.quantity) || 0}, ${item.unit || 'pcs'},
+                ${(Number(item.price) || 0) * (Number(item.quantity) || 0)},
+                ${index}
+              )
+            `;
+          }
+        } catch (itemsError) {
           console.error('[update] 更新订单商品失败:', itemsError);
         }
       }
@@ -783,63 +905,68 @@ async listWithItems(params: OrderListParams): Promise<OrderListResult> {
    * ✅ 删除订单（仅草稿/已取消可删除）
    */
   async delete(siteId: string, id: string): Promise<void> {
-    const { data: order, error: fetchError } = await supabase
-      .from('orders')
-      .select('status')
-      .eq('site_id', siteId)
-      .eq('id', id)
-      .maybeSingle();
-
-    if (fetchError) {
+    let order: { status: string } | undefined;
+    try {
+      const rows = await sql<{ status: string }[]>`
+        SELECT status FROM public.orders
+        WHERE site_id = ${siteId}
+          AND id = ${id}
+        LIMIT 1
+      `;
+      order = rows[0];
+    } catch (fetchError: any) {
       console.error('[delete] 获取订单失败:', fetchError);
       throw new Error(`获取订单信息失败: ${fetchError.message}`);
     }
-    
-    if (!order) {
-      throw new Error('订单不存在');
-    }
+
+    if (!order) throw new Error('订单不存在');
 
     const allowedStatuses = ['draft', 'cancelled'];
     if (!allowedStatuses.includes(order.status)) {
       throw new Error(`当前状态 "${order.status}" 不允许删除`);
     }
 
-    const { error } = await supabase
-      .from('orders')
-      .delete()
-      .eq('site_id', siteId)
-      .eq('id', id);
-
-    if (error) throw new Error(`删除订单失败: ${error.message}`);
+    try {
+      await sql`
+        DELETE FROM public.orders
+        WHERE site_id = ${siteId}
+          AND id = ${id}
+      `;
+    } catch (error: any) {
+      throw new Error(`删除订单失败: ${error.message}`);
+    }
   },
+
+  // ============================================================
+  // 状态流转
+  // ============================================================
 
   /**
    * ✅ 提交订单（草稿 → 正式订单）
    */
   async submit(
-    siteId: string, 
-    id: string, 
-    operator: string, 
+    siteId: string,
+    id: string,
+    operator: string,
     options?: { baseUrl?: string; locale?: string }
   ): Promise<{ order: Order; shareUrl: string }> {
     console.log('[submit] 开始提交:', { siteId, id, operator, options });
 
-    const { data: orderCheck, error: checkError } = await supabase
-      .from('orders')
-      .select('status')
-      .eq('site_id', siteId)
-      .eq('id', id)
-      .maybeSingle();
-
-    if (checkError) {
+    let orderCheck: { status: string } | undefined;
+    try {
+      const rows = await sql<{ status: string }[]>`
+        SELECT status FROM public.orders
+        WHERE site_id = ${siteId}
+          AND id = ${id}
+        LIMIT 1
+      `;
+      orderCheck = rows[0];
+    } catch (checkError: any) {
       console.error('[submit] 检查订单失败:', checkError);
       throw new Error(`获取订单信息失败: ${checkError.message}`);
     }
 
-    if (!orderCheck) {
-      throw new Error('订单不存在');
-    }
-
+    if (!orderCheck) throw new Error('订单不存在');
     if (orderCheck.status !== 'draft') {
       throw new Error(`只有草稿状态的订单可以提交，当前状态: ${orderCheck.status}`);
     }
@@ -847,21 +974,21 @@ async listWithItems(params: OrderListParams): Promise<OrderListResult> {
     const shareToken = generateShareToken();
     console.log('[submit] 生成分享Token:', shareToken);
 
-    const { data, error } = await supabase
-      .from('orders')
-      .update({
-        status: 'formal',
-        sent_status: 'sent',
-        share_token: shareToken,
-        sent_at: new Date().toISOString(),
-        updated_at: new Date().toISOString(),
-      })
-      .eq('site_id', siteId)
-      .eq('id', id)
-      .select()
-      .single();
-
-    if (error) {
+    let data: any;
+    try {
+      const rows = await sql<any[]>`
+        UPDATE public.orders
+        SET status = 'formal',
+            sent_status = 'sent',
+            share_token = ${shareToken},
+            sent_at = ${new Date().toISOString()},
+            updated_at = ${new Date().toISOString()}
+        WHERE site_id = ${siteId}
+          AND id = ${id}
+        RETURNING *
+      `;
+      data = rows[0];
+    } catch (error: any) {
       console.error('[submit] 更新失败:', error);
       throw new Error(`提交订单失败: ${error.message}`);
     }
@@ -870,9 +997,10 @@ async listWithItems(params: OrderListParams): Promise<OrderListResult> {
 
     await logOrderStatus(id, 'draft', 'formal', operator, '订单提交，已发送给客户');
 
-    const baseUrl = options?.baseUrl || process.env.NEXT_PUBLIC_SITE_URL || 'http://localhost:3000';
+    const baseUrl =
+      options?.baseUrl || process.env.NEXT_PUBLIC_SITE_URL || 'http://localhost:3000';
     const locale = options?.locale || '';
-    const shareUrl = locale 
+    const shareUrl = locale
       ? `${baseUrl}/${locale}/payment/order/share/${shareToken}`
       : `${baseUrl}/payment/order/share/${shareToken}`;
 
@@ -884,39 +1012,40 @@ async listWithItems(params: OrderListParams): Promise<OrderListResult> {
    * ✅ 取消订单
    */
   async cancel(siteId: string, id: string, operator: string, reason?: string): Promise<Order> {
-    const { data: order, error: fetchError } = await supabase
-      .from('orders')
-      .select('status')
-      .eq('site_id', siteId)
-      .eq('id', id)
-      .maybeSingle();
-
-    if (fetchError) {
+    let order: { status: string } | undefined;
+    try {
+      const rows = await sql<{ status: string }[]>`
+        SELECT status FROM public.orders
+        WHERE site_id = ${siteId}
+          AND id = ${id}
+        LIMIT 1
+      `;
+      order = rows[0];
+    } catch (fetchError: any) {
       console.error('[cancel] 获取订单失败:', fetchError);
       throw new Error(`获取订单信息失败: ${fetchError.message}`);
     }
-    
-    if (!order) {
-      throw new Error('订单不存在');
-    }
 
+    if (!order) throw new Error('订单不存在');
     if (!['draft', 'formal', 'paid'].includes(order.status)) {
       throw new Error(`当前状态 "${order.status}" 无法取消`);
     }
 
-    const { data, error } = await supabase
-      .from('orders')
-      .update({
-        status: 'cancelled',
-        cancelled_at: new Date().toISOString(),
-        updated_at: new Date().toISOString(),
-      })
-      .eq('site_id', siteId)
-      .eq('id', id)
-      .select()
-      .single();
-
-    if (error) throw new Error(`取消订单失败: ${error.message}`);
+    let data: any;
+    try {
+      const rows = await sql<any[]>`
+        UPDATE public.orders
+        SET status = 'cancelled',
+            cancelled_at = ${new Date().toISOString()},
+            updated_at = ${new Date().toISOString()}
+        WHERE site_id = ${siteId}
+          AND id = ${id}
+        RETURNING *
+      `;
+      data = rows[0];
+    } catch (error: any) {
+      throw new Error(`取消订单失败: ${error.message}`);
+    }
 
     await logOrderStatus(id, order.status, 'cancelled', operator, reason || '用户取消');
 
@@ -933,32 +1062,33 @@ async listWithItems(params: OrderListParams): Promise<OrderListResult> {
     operator: string,
     note?: string
   ): Promise<void> {
-    const { data: order, error: fetchError } = await supabase
-      .from('orders')
-      .select('status')
-      .eq('site_id', siteId)
-      .eq('id', id)
-      .maybeSingle();
-
-    if (fetchError) {
+    let order: { status: string } | undefined;
+    try {
+      const rows = await sql<{ status: string }[]>`
+        SELECT status FROM public.orders
+        WHERE site_id = ${siteId}
+          AND id = ${id}
+        LIMIT 1
+      `;
+      order = rows[0];
+    } catch (fetchError: any) {
       console.error('[updateStatus] 获取订单失败:', fetchError);
       throw new Error(`获取订单信息失败: ${fetchError.message}`);
     }
 
-    if (!order) {
-      throw new Error('订单不存在');
+    if (!order) throw new Error('订单不存在');
+
+    try {
+      await sql`
+        UPDATE public.orders
+        SET status = ${toStatus},
+            updated_at = ${new Date().toISOString()}
+        WHERE site_id = ${siteId}
+          AND id = ${id}
+      `;
+    } catch (error: any) {
+      throw new Error(`更新状态失败: ${error.message}`);
     }
-
-    const { error } = await supabase
-      .from('orders')
-      .update({
-        status: toStatus,
-        updated_at: new Date().toISOString(),
-      })
-      .eq('site_id', siteId)
-      .eq('id', id);
-
-    if (error) throw new Error(`更新状态失败: ${error.message}`);
 
     await logOrderStatus(id, order.status, toStatus, operator, note || '');
   },
@@ -967,41 +1097,44 @@ async listWithItems(params: OrderListParams): Promise<OrderListResult> {
    * ✅ 撤回订单（已发送 → 草稿）
    */
   async recall(siteId: string, id: string, operator: string): Promise<Order> {
-    const { data: order, error: fetchError } = await supabase
-      .from('orders')
-      .select('status, sent_status')
-      .eq('site_id', siteId)
-      .eq('id', id)
-      .maybeSingle();
-
-    if (fetchError) {
+    let order: { status: string; sent_status: string } | undefined;
+    try {
+      const rows = await sql<{ status: string; sent_status: string }[]>`
+        SELECT status, sent_status FROM public.orders
+        WHERE site_id = ${siteId}
+          AND id = ${id}
+        LIMIT 1
+      `;
+      order = rows[0];
+    } catch (fetchError: any) {
       console.error('[recall] 获取订单失败:', fetchError);
       throw new Error(`获取订单信息失败: ${fetchError.message}`);
     }
-    
-    if (!order) {
-      throw new Error('订单不存在');
-    }
 
+    if (!order) throw new Error('订单不存在');
     if (order.status !== 'formal' || order.sent_status !== 'sent') {
-      throw new Error(`只有已发送的正式订单可以撤回，当前状态: ${order.status}, 发送状态: ${order.sent_status}`);
+      throw new Error(
+        `只有已发送的正式订单可以撤回，当前状态: ${order.status}, 发送状态: ${order.sent_status}`
+      );
     }
 
-    const { data, error } = await supabase
-      .from('orders')
-      .update({
-        status: 'draft',
-        sent_status: 'unsent',
-        share_token: null,
-        sent_at: null,
-        updated_at: new Date().toISOString(),
-      })
-      .eq('site_id', siteId)
-      .eq('id', id)
-      .select()
-      .single();
-
-    if (error) throw new Error(`撤回订单失败: ${error.message}`);
+    let data: any;
+    try {
+      const rows = await sql<any[]>`
+        UPDATE public.orders
+        SET status = 'draft',
+            sent_status = 'unsent',
+            share_token = NULL,
+            sent_at = NULL,
+            updated_at = ${new Date().toISOString()}
+        WHERE site_id = ${siteId}
+          AND id = ${id}
+        RETURNING *
+      `;
+      data = rows[0];
+    } catch (error: any) {
+      throw new Error(`撤回订单失败: ${error.message}`);
+    }
 
     await logOrderStatus(id, 'formal', 'draft', operator, '订单撤回');
 
@@ -1012,27 +1145,28 @@ async listWithItems(params: OrderListParams): Promise<OrderListResult> {
    * ✅ 确认收款
    */
   async confirmPayment(
-    siteId: string, 
-    id: string, 
+    siteId: string,
+    id: string,
     operator: string,
     data?: { depositAmount: number; depositPercent?: number }
   ): Promise<Order> {
-    const { data: order, error: fetchError } = await supabase
-      .from('orders')
-      .select('status, total_amount, deposit_amount')
-      .eq('site_id', siteId)
-      .eq('id', id)
-      .maybeSingle();
-
-    if (fetchError) {
+    let order: { status: string; total_amount: number; deposit_amount: number | null } | undefined;
+    try {
+      const rows = await sql<
+        { status: string; total_amount: number; deposit_amount: number | null }[]
+      >`
+        SELECT status, total_amount, deposit_amount FROM public.orders
+        WHERE site_id = ${siteId}
+          AND id = ${id}
+        LIMIT 1
+      `;
+      order = rows[0];
+    } catch (fetchError: any) {
       console.error('[confirmPayment] 获取订单失败:', fetchError);
       throw new Error(`获取订单信息失败: ${fetchError.message}`);
     }
-    
-    if (!order) {
-      throw new Error('订单不存在');
-    }
 
+    if (!order) throw new Error('订单不存在');
     if (!['formal', 'paid'].includes(order.status)) {
       throw new Error(`只有正式订单或已付款订单可以确认收款，当前状态: ${order.status}`);
     }
@@ -1045,34 +1179,43 @@ async listWithItems(params: OrderListParams): Promise<OrderListResult> {
       throw new Error(`已付款金额不能超过总金额 ${order.total_amount}`);
     }
 
-    const updateData: any = {
-      deposit_amount: totalDeposit,
-      updated_at: new Date().toISOString(),
-    };
+    const setClauses: any[] = [
+      sql`deposit_amount = ${totalDeposit}`,
+      sql`updated_at = ${new Date().toISOString()}`,
+    ];
 
+    let finalStatus = order.status;
     if (order.status === 'formal') {
-      updateData.status = 'paid';
-      updateData.paid_at = new Date().toISOString();
+      setClauses.push(sql`status = 'paid'`);
+      setClauses.push(sql`paid_at = ${new Date().toISOString()}`);
+      finalStatus = 'paid';
     }
 
-    const { data: result, error } = await supabase
-      .from('orders')
-      .update(updateData)
-      .eq('site_id', siteId)
-      .eq('id', id)
-      .select()
-      .single();
+    const setClause = setClauses.reduce(
+      (acc, c, i) => (i === 0 ? c : sql`${acc}, ${c}`),
+      sql``
+    );
 
-    if (error) {
+    let result: any;
+    try {
+      const rows = await sql<any[]>`
+        UPDATE public.orders
+        SET ${setClause}
+        WHERE site_id = ${siteId}
+          AND id = ${id}
+        RETURNING *
+      `;
+      result = rows[0];
+    } catch (error: any) {
       console.error('[confirmPayment] 更新失败:', error);
       throw new Error(`确认收款失败: ${error.message}`);
     }
 
     await logOrderStatus(
-      id, 
-      order.status, 
-      order.status === 'formal' ? 'paid' : 'paid', 
-      operator, 
+      id,
+      order.status,
+      finalStatus,
+      operator,
       `确认收款 ${newDepositAmount}，累计已付: ${totalDeposit}`
     );
 
@@ -1080,7 +1223,7 @@ async listWithItems(params: OrderListParams): Promise<OrderListResult> {
   },
 
   /**
-   * ✅ 确认发货 - 追加发货记录到 shipping_records
+   * ✅ 确认发货
    */
   async confirmShipping(
     siteId: string,
@@ -1094,22 +1237,25 @@ async listWithItems(params: OrderListParams): Promise<OrderListResult> {
       trackingImage?: string;
     }
   ): Promise<Order> {
-    const { data: order, error: fetchError } = await supabase
-      .from('orders')
-      .select('status, shipping_records, shipping_method')
-      .eq('site_id', siteId)
-      .eq('id', id)
-      .maybeSingle();
-
-    if (fetchError) {
+    let order:
+      | { status: string; shipping_records: any; shipping_method: string | null }
+      | undefined;
+    try {
+      const rows = await sql<
+        { status: string; shipping_records: any; shipping_method: string | null }[]
+      >`
+        SELECT status, shipping_records, shipping_method FROM public.orders
+        WHERE site_id = ${siteId}
+          AND id = ${id}
+        LIMIT 1
+      `;
+      order = rows[0];
+    } catch (fetchError: any) {
       console.error('[confirmShipping] 获取订单失败:', fetchError);
       throw new Error(`获取订单信息失败: ${fetchError.message}`);
     }
-    
-    if (!order) {
-      throw new Error('订单不存在');
-    }
 
+    if (!order) throw new Error('订单不存在');
     if (!['paid', 'completed'].includes(order.status)) {
       throw new Error(`只有已付款或已完成订单可以确认发货，当前状态: ${order.status}`);
     }
@@ -1129,18 +1275,16 @@ async listWithItems(params: OrderListParams): Promise<OrderListResult> {
 
     let carrierNameCn = '';
     let carrierNameEn = '';
-    
     if (data?.carrierKey) {
       try {
-        const { data: carrierData, error: carrierError } = await supabase
-          .from('carriers')
-          .select('name_cn, name_en')
-          .eq('key', data.carrierKey)
-          .maybeSingle();
-        
-        if (!carrierError && carrierData) {
-          carrierNameCn = carrierData.name_cn || '';
-          carrierNameEn = carrierData.name_en || '';
+        const rows = await sql<{ name_cn: string | null; name_en: string | null }[]>`
+          SELECT name_cn, name_en FROM public.carriers
+          WHERE key = ${data.carrierKey}
+          LIMIT 1
+        `;
+        if (rows[0]) {
+          carrierNameCn = rows[0].name_cn || '';
+          carrierNameEn = rows[0].name_en || '';
         }
       } catch (carrierErr) {
         console.warn('[confirmShipping] 获取承运商信息失败:', carrierErr);
@@ -1163,41 +1307,50 @@ async listWithItems(params: OrderListParams): Promise<OrderListResult> {
 
     const updatedRecords = [...existingRecords, newRecord];
 
-    const updateData: any = {
-      shipping_records: updatedRecords,
-      updated_at: new Date().toISOString(),
-      tracking_number: data?.trackingNumber || '',
-      carrier: data?.carrierKey || '',
-      carrier_name: data?.carrierName || '',
-      tracking_image: data?.trackingImage || '',
-    };
+    const setClauses: any[] = [
+      sql`shipping_records = ${sql.json(updatedRecords)}`,
+      sql`updated_at = ${new Date().toISOString()}`,
+      sql`tracking_number = ${data?.trackingNumber || ''}`,
+      sql`carrier = ${data?.carrierKey || ''}`,
+      sql`carrier_name = ${data?.carrierName || ''}`,
+      sql`tracking_image = ${data?.trackingImage || ''}`,
+    ];
 
     if (data?.shippingMethod) {
-      updateData.shipping_method = data.shippingMethod;
+      setClauses.push(sql`shipping_method = ${data.shippingMethod}`);
     }
 
+    let finalStatus = order.status;
     if (order.status === 'paid') {
-      updateData.status = 'completed';
+      setClauses.push(sql`status = 'completed'`);
+      finalStatus = 'completed';
     }
 
-    const { data: result, error } = await supabase
-      .from('orders')
-      .update(updateData)
-      .eq('site_id', siteId)
-      .eq('id', id)
-      .select()
-      .single();
+    const setClause = setClauses.reduce(
+      (acc, c, i) => (i === 0 ? c : sql`${acc}, ${c}`),
+      sql``
+    );
 
-    if (error) {
+    let result: any;
+    try {
+      const rows = await sql<any[]>`
+        UPDATE public.orders
+        SET ${setClause}
+        WHERE site_id = ${siteId}
+          AND id = ${id}
+        RETURNING *
+      `;
+      result = rows[0];
+    } catch (error: any) {
       console.error('[confirmShipping] 更新失败:', error);
       throw new Error(`确认发货失败: ${error.message}`);
     }
 
     await logOrderStatus(
-      id, 
-      order.status, 
-      order.status === 'paid' ? 'completed' : order.status, 
-      operator, 
+      id,
+      order.status,
+      finalStatus,
+      operator,
       `已确认发货，物流单号: ${data?.trackingNumber || ''}，承运商: ${data?.carrierName || ''}`
     );
 
@@ -1209,66 +1362,46 @@ async listWithItems(params: OrderListParams): Promise<OrderListResult> {
    */
   async reorder(siteId: string, id: string, operator: string): Promise<Order> {
     const originalOrder = await this.getById(siteId, id);
-    
+
     console.log('[reorder] 原订单数据字段:', Object.keys(originalOrder));
-    
+
     const orderNo = generateOrderNo();
-    
+
     let contractNo = await generateDefaultContractNo(siteId);
     const originalContractNo = originalOrder.contract_no || '';
     if (originalContractNo) {
-      const { data: existing, error } = await supabase
-        .from('orders')
-        .select('contract_no')
-        .eq('site_id', siteId)
-        .eq('contract_no', `${originalContractNo}-2`)
-        .maybeSingle();
-      
-      if (!error && !existing) {
-        contractNo = `${originalContractNo}-2`;
-      }
+      try {
+        const rows = await sql<{ contract_no: string }[]>`
+          SELECT contract_no FROM public.orders
+          WHERE site_id = ${siteId}
+            AND contract_no = ${originalContractNo + '-2'}
+          LIMIT 1
+        `;
+        if (!rows[0]) {
+          contractNo = `${originalContractNo}-2`;
+        }
+      } catch {}
     }
 
     const excludedFields = [
-      'id',
-      'order_no',
-      'contract_no',
-      'status',
-      'sent_status',
-      'share_token',
-      'share_view_count',
-      'created_by',
-      'sent_at',
-      'cancelled_at',
-      'expired_at',
-      'created_at',
-      'updated_at',
-      'paid_at',
-      'items',
-      'status_logs',
-      'deposit_amount',
-      'payment_status',
-      'paypal_order_id',
-      'paypal_payer_id',
-      'paypal_payment_id',
-      'tracking_number',
-      'carrier',
-      'carrier_name',
-      'tracking_image',
-      'shipping_date',
-      'shipping_days',
-      'shipping_records',
+      'id', 'order_no', 'contract_no', 'status', 'sent_status',
+      'share_token', 'share_view_count', 'created_by', 'sent_at',
+      'cancelled_at', 'expired_at', 'created_at', 'updated_at', 'paid_at',
+      'items', 'status_logs', 'deposit_amount', 'payment_status',
+      'paypal_order_id', 'paypal_payer_id', 'paypal_payment_id',
+      'tracking_number', 'carrier', 'carrier_name', 'tracking_image',
+      'shipping_date', 'shipping_days', 'shipping_records',
     ];
 
-    const copyData: any = {};
+    const copyData: Record<string, any> = {};
     for (const key of Object.keys(originalOrder)) {
       if (!excludedFields.includes(key)) {
         copyData[key] = (originalOrder as any)[key];
       }
     }
 
-    const insertData: any = {
-      ...copyData,
+    const now = new Date().toISOString();
+    Object.assign(copyData, {
       site_id: siteId,
       order_no: orderNo,
       contract_no: contractNo,
@@ -1280,8 +1413,8 @@ async listWithItems(params: OrderListParams): Promise<OrderListResult> {
       sent_at: null,
       cancelled_at: null,
       expired_at: null,
-      created_at: new Date().toISOString(),
-      updated_at: new Date().toISOString(),
+      created_at: now,
+      updated_at: now,
       paid_at: null,
       deposit_amount: 0,
       payment_status: 'pending',
@@ -1295,50 +1428,56 @@ async listWithItems(params: OrderListParams): Promise<OrderListResult> {
       shipping_date: null,
       shipping_days: 0,
       shipping_records: [],
-    };
+    });
 
-    console.log('[reorder] 插入数据字段:', Object.keys(insertData));
+    console.log('[reorder] 插入数据字段:', Object.keys(copyData));
 
-    const { data: newOrder, error: orderError } = await supabase
-      .from('orders')
-      .insert(insertData)
-      .select()
-      .single();
+    const jsonbFields = new Set(['selected_account_ids', 'shipping_records']);
 
-    if (orderError) {
+    let newOrder: any;
+    try {
+      newOrder = await insertOrder(copyData, jsonbFields);
+    } catch (orderError: any) {
       console.error('[reorder] 插入订单失败:', orderError);
       throw new Error(`复制订单失败: ${orderError.message}`);
     }
 
+    if (!newOrder) throw new Error('复制订单失败：未返回数据');
+
     if (originalOrder.items && originalOrder.items.length > 0) {
-      const itemsToInsert = originalOrder.items.map((item, index) => ({
-        order_id: newOrder.id,
-        product_id: item.product_id || null,
-        locale: item.locale || 'en',
-        product_name: item.product_name,
-        product_image: item.product_image || '',
-        category: item.category || '',
-        specification: item.specification || '',
-        sku: item.sku || '',
-        price: item.price,
-        quantity: item.quantity,
-        unit: item.unit || 'pcs',
-        total: item.total,
-        sort_order: index,
-      }));
-
-      const { error: itemsError } = await supabase
-        .from('order_items')
-        .insert(itemsToInsert);
-
-      if (itemsError) {
+      try {
+        for (let index = 0; index < originalOrder.items.length; index++) {
+          const item: any = originalOrder.items[index];
+          await sql`
+            INSERT INTO public.order_items (
+              order_id, product_id, locale, product_name, product_image,
+              category, specification, sku, price, quantity, unit, total, sort_order
+            ) VALUES (
+              ${newOrder.id}, ${item.product_id || null}, ${item.locale || 'en'},
+              ${item.product_name || ''}, ${item.product_image || ''},
+              ${item.category || ''}, ${item.specification || ''},
+              ${item.sku || ''}, ${item.price || 0},
+              ${item.quantity || 0}, ${item.unit || 'pcs'},
+              ${item.total || 0}, ${index}
+            )
+          `;
+        }
+      } catch (itemsError: any) {
         console.error('[reorder] 复制商品失败:', itemsError);
-        await supabase.from('orders').delete().eq('id', newOrder.id);
+        try {
+          await sql`DELETE FROM public.orders WHERE id = ${newOrder.id}`;
+        } catch {}
         throw new Error(`复制订单商品失败: ${itemsError.message}`);
       }
     }
 
-    logOrderStatus(newOrder.id, null, 'draft', operator, `从订单 ${originalOrder.order_no} 复制`).catch(err => {
+    logOrderStatus(
+      newOrder.id,
+      null,
+      'draft',
+      operator,
+      `从订单 ${originalOrder.order_no} 复制`
+    ).catch((err) => {
       console.warn('[reorder] 记录日志失败:', err);
     });
 
@@ -1351,16 +1490,18 @@ async listWithItems(params: OrderListParams): Promise<OrderListResult> {
    */
   async getByShareToken(token: string): Promise<OrderDetail | null> {
     console.log('[getByShareToken] 查询Token:', token);
-    
-    const { data: order, error } = await supabase
-      .from('orders')
-      .select('*')
-      .eq('share_token', token)
-      .eq('sent_status', 'sent')
-      .in('status', ['formal', 'paid', 'completed'])
-      .maybeSingle();
 
-    if (error) {
+    let order: any;
+    try {
+      const rows = await sql<any[]>`
+        SELECT * FROM public.orders
+        WHERE share_token = ${token}
+          AND sent_status = 'sent'
+          AND status IN ('formal', 'paid', 'completed')
+        LIMIT 1
+      `;
+      order = rows[0];
+    } catch (error: any) {
       console.error('[getByShareToken] 查询失败:', error);
       throw new Error(`获取订单失败: ${error.message}`);
     }
@@ -1373,28 +1514,29 @@ async listWithItems(params: OrderListParams): Promise<OrderListResult> {
     console.log('[getByShareToken] 找到订单:', order.id);
 
     try {
-      await supabase
-        .from('orders')
-        .update({ share_view_count: (order.share_view_count || 0) + 1 })
-        .eq('id', order.id);
+      await sql`
+        UPDATE public.orders
+        SET share_view_count = ${(order.share_view_count || 0) + 1}
+        WHERE id = ${order.id}
+      `;
     } catch (updateError) {
       console.warn('[getByShareToken] 更新查看次数失败:', updateError);
     }
 
-    const { data: items, error: itemsError } = await supabase
-      .from('order_items')
-      .select('*')
-      .eq('order_id', order.id)
-      .order('sort_order');
-
-    if (itemsError) {
+    let items: any[] = [];
+    try {
+      items = await sql<any[]>`
+        SELECT * FROM public.order_items
+        WHERE order_id = ${order.id}
+        ORDER BY sort_order ASC
+      `;
+    } catch (itemsError) {
       console.warn('[getByShareToken] 获取商品失败:', itemsError);
     }
 
-    // ✅ 使用优化版，带缓存
-    const itemsWithSlug = await enrichItemsWithSlugOptimized(items || []);
+    const itemsWithSlug = await enrichItemsWithSlugOptimized(items);
 
-    let selectedAccountIds = (order as any).selected_account_ids || [];
+    let selectedAccountIds = order.selected_account_ids || [];
     if (typeof selectedAccountIds === 'string') {
       try {
         selectedAccountIds = JSON.parse(selectedAccountIds);
@@ -1431,33 +1573,38 @@ async listWithItems(params: OrderListParams): Promise<OrderListResult> {
   async checkExpiredOrders(siteId: string): Promise<number> {
     const now = new Date().toISOString();
 
-    const { data, error } = await supabase
-      .from('orders')
-      .update({
-        status: 'expired',
-        expired_at: now,
-        updated_at: now,
-      })
-      .eq('site_id', siteId)
-      .eq('sent_status', 'sent')
-      .eq('status', 'formal')
-      .lt('expiry_date', now)
-      .select('id');
-
-    if (error) throw new Error(`检查过期订单失败: ${error.message}`);
-
-    if (data && data.length > 0) {
-      const logs = data.map((order) => ({
-        order_id: order.id,
-        from_status: 'formal',
-        to_status: 'expired',
-        operator: 'system',
-        note: '订单已过期',
-      }));
-      await supabase.from('order_status_logs').insert(logs);
+    let expiredIds: string[] = [];
+    try {
+      const rows = await sql<{ id: string }[]>`
+        UPDATE public.orders
+        SET status = 'expired',
+            expired_at = ${now},
+            updated_at = ${now}
+        WHERE site_id = ${siteId}
+          AND sent_status = 'sent'
+          AND status = 'formal'
+          AND expiry_date < ${now}
+        RETURNING id
+      `;
+      expiredIds = rows.map((r) => r.id);
+    } catch (error: any) {
+      throw new Error(`检查过期订单失败: ${error.message}`);
     }
 
-    return data?.length || 0;
+    if (expiredIds.length > 0) {
+      try {
+        for (const orderId of expiredIds) {
+          await sql`
+            INSERT INTO public.order_status_logs (order_id, from_status, to_status, operator, note)
+            VALUES (${orderId}, 'formal', 'expired', 'system', '订单已过期')
+          `;
+        }
+      } catch (logError) {
+        console.warn('[checkExpiredOrders] 记录过期日志失败:', logError);
+      }
+    }
+
+    return expiredIds.length;
   },
 };
 

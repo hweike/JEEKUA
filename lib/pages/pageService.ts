@@ -2,7 +2,7 @@
 import { PageData, PageIndexEntry, PageType, Visibility } from '@/types/page';
 import {
   readPage,
-  readPageFresh,        // ✅ 新增导入
+  readPageFresh,
   writePage,
   deletePageFile,
   listPages,
@@ -15,6 +15,7 @@ import { getTemplateById } from '@/lib/webbuilder/template-manager';
 import { createHash } from 'crypto';
 import { registerEntity } from '@/lib/discovery/services/business-register-pages.service';
 import { deletePage as deleteDiscoveryPage } from '@/lib/discovery/register';
+import sql from '@/lib/db/admin';
 
 // ========== 工具函数 ==========
 function computeTemplateHash(data: any): string {
@@ -37,11 +38,26 @@ export function generateSlugFromTitle(title: string): string {
   return slug || 'page';
 }
 
+export async function ensureUniqueSlug(
+  locale: string,
+  baseSlug: string,
+  excludePageId?: string
+): Promise<string> {
+  if (!baseSlug) return '';
+
+  let slug = baseSlug;
+  let counter = 1;
+
+  while (await isSlugExists(locale, slug, excludePageId)) {
+    slug = `${baseSlug}-${counter}`;
+    counter++;
+  }
+
+  return slug;
+}
+
 // ========== 内部辅助函数 ==========
 
-/**
- * 获取模板数据并计算哈希
- */
 async function fetchTemplateDataAndHash(templateId: string): Promise<{ data: any; hash: string } | null> {
   if (!templateId) return null;
 
@@ -127,7 +143,6 @@ export async function createPage(
 
   const now = new Date().toISOString();
 
-  // 模板读取
   let templateData = null;
   let templateHash = null;
   if (data.template && data.template.trim() !== '') {
@@ -157,7 +172,6 @@ export async function createPage(
     locale,
   };
 
-  // ✅ 用无缓存版本检查是否已存在，保证拿最新数据
   const existing = await readPageFresh(locale, pageId);
   if (existing) {
     throw new Error(`页面 ID ${pageId} 在当前语言 ${locale} 已存在`);
@@ -178,19 +192,12 @@ export async function createPage(
 
 /**
  * 更新页面
- *
- * 模板处理逻辑：
- * - 情况 1：不关联模板（template = ''）→ 清空 templateData 和 templateHash
- * - 情况 2：模板 ID 变化 → 读取模板数据
- * - 情况 3a：模板 ID 未变，templateData 为空（null/undefined/空对象）→ 读取模板数据
- * - 情况 3b：模板 ID 未变，templateData 已存在 → 跳过读取
  */
 export async function updatePage(
   locale: string,
   pageId: string,
   data: Partial<Omit<PageData, 'id' | 'createdAt' | 'preset' | 'type'>>
 ): Promise<PageData> {
-  // ✅ 用无缓存版本读取最新数据，避免基于旧缓存判断
   const existing = await readPageFresh(locale, pageId);
   if (!existing) throw new Error('Page not found');
 
@@ -200,12 +207,10 @@ export async function updatePage(
     updatedAt: new Date().toISOString(),
   };
 
-  // ========== 模板处理 ==========
   const newTemplate = data.template !== undefined
     ? (data.template || '').trim()
     : (existing.template || '').trim();
 
-  // 判断 templateData 是否为空（null、undefined 或空对象）
   const isTemplateDataEmpty =
     !existing.templateData ||
     (typeof existing.templateData === 'object' &&
@@ -213,12 +218,10 @@ export async function updatePage(
      Object.keys(existing.templateData).length === 0);
 
   if (newTemplate === '') {
-    // 情况 1：不关联模板 → 清空
     updated.template = '';
     updated.templateData = null;
     updated.templateHash = null;
   } else if (newTemplate !== existing.template) {
-    // 情况 2：模板 ID 变化 → 读取模板数据
     const fetched = await fetchTemplateDataAndHash(newTemplate);
     if (fetched) {
       updated.template = newTemplate;
@@ -230,16 +233,13 @@ export async function updatePage(
       updated.templateHash = null;
     }
   } else if (isTemplateDataEmpty) {
-    // 情况 3a：templateData 为空 → 读取模板数据
     const fetched = await fetchTemplateDataAndHash(newTemplate);
     if (fetched) {
       updated.templateData = fetched.data;
       updated.templateHash = fetched.hash;
     }
   }
-  // 情况 3b：模板未变，templateData 已存在 → 无需处理
 
-  // ========== content 处理 ==========
   if (data.content !== undefined) {
     updated.content = data.content;
   }
@@ -263,7 +263,6 @@ export async function updatePage(
  * 删除页面
  */
 export async function deletePage(locale: string, pageId: string): Promise<void> {
-  // ✅ 用无缓存版本读取，保证拿最新数据
   const page = await readPageFresh(locale, pageId);
   if (!page) throw new Error('Page not found');
   if (page.preset) throw new Error('Cannot delete preset page');
@@ -313,13 +312,17 @@ export async function syncPageToLocales(
   pageId: string,
   sourceLocale: string,
   targetLocales: string[]
-): Promise<{ success: string[]; failed: { locale: string; error: string }[] }> {
-  // ✅ 源页面用无缓存版本，保证拿最新
+): Promise<{
+  success: string[];
+  failed: { locale: string; error: string }[];
+  syncedPages: Array<{ locale: string; slug: string }>;
+}> {
   const sourcePage = await readPageFresh(sourceLocale, pageId);
   if (!sourcePage) throw new Error('Source page not found');
 
   const success: string[] = [];
   const failed: { locale: string; error: string }[] = [];
+  const syncedPages: Array<{ locale: string; slug: string }> = [];
 
   for (const targetLocale of targetLocales) {
     try {
@@ -340,67 +343,76 @@ export async function syncPageToLocales(
       };
       await savePageAndRegister(targetLocale, targetPage);
       success.push(targetLocale);
+      syncedPages.push({ locale: targetLocale, slug: targetSlug });
     } catch (error) {
       failed.push({ locale: targetLocale, error: (error as Error).message });
     }
   }
-  return { success, failed };
+
+  return { success, failed, syncedPages };
 }
 
 /**
  * 模板更新时，同步所有引用该模板的页面
+ * ✅ 已迁移到直连（不再动态导入 supabaseAdmin）
  */
 export async function syncTemplateToPages(templateId: string): Promise<{
   updated: number;
   failed: number;
   errors: string[];
+  affectedPages: Array<{ locale: string; slug: string }>;
 }> {
-  // 1. 从云存储读取最新模板数据
   const fetched = await fetchTemplateDataAndHash(templateId);
   if (!fetched) {
-    return { updated: 0, failed: 0, errors: [`模板 ${templateId} 不存在`] };
+    return { updated: 0, failed: 0, errors: [`模板 ${templateId} 不存在`], affectedPages: [] };
   }
 
-  // 2. 查询所有引用该模板的页面
-  const { supabaseAdmin } = await import('@/lib/supabase/admin-client');
-  const { data: pages, error } = await supabaseAdmin
-    .from('site_pages')
-    .select('id, locale, template_hash')
-    .eq('site_id', '000001')
-    .eq('template', templateId);
-
-  if (error || !pages) {
-    return { updated: 0, failed: 0, errors: [error?.message || '查询失败'] };
+  // 1. 查询引用该模板的页面
+  let pages: Array<{ id: string; locale: string; slug: string; template_hash: string | null }>;
+  try {
+    pages = await sql<{ id: string; locale: string; slug: string; template_hash: string | null }[]>`
+      SELECT id, locale, slug, template_hash FROM public.site_pages
+      WHERE site_id = ${'000001'}
+        AND template = ${templateId}
+    `;
+  } catch (error: any) {
+    return { updated: 0, failed: 0, errors: [error?.message || '查询失败'], affectedPages: [] };
   }
 
-  // 3. 遍历页面，对比哈希，更新变化的页面
   let updated = 0;
   let failed = 0;
   const errors: string[] = [];
+  const affectedPages: Array<{ locale: string; slug: string }> = [];
 
   for (const page of pages) {
     if (page.template_hash === fetched.hash) continue;
 
     try {
-      await supabaseAdmin
-        .from('site_pages')
-        .update({
-          template_data: fetched.data,
-          template_hash: fetched.hash,
-          updated_at: new Date().toISOString(),
-        })
-        .eq('site_id', '000001')
-        .eq('id', page.id)
-        .eq('locale', page.locale);
+      await sql`
+        UPDATE public.site_pages
+        SET template_data = ${sql.json(fetched.data)},
+            template_hash = ${fetched.hash},
+            updated_at = ${new Date().toISOString()}
+        WHERE site_id = ${'000001'}
+          AND id = ${page.id}
+          AND locale = ${page.locale}
+      `;
 
       updated++;
+      affectedPages.push({ locale: page.locale, slug: page.slug });
     } catch (err: any) {
       failed++;
       errors.push(`${page.locale}/${page.id}: ${err?.message}`);
     }
   }
 
-  return { updated, failed, errors };
+  if (updated > 0) {
+    const { bumpVersion } = await import('@/lib/cache/cache-version');
+    await bumpVersion('pages');
+    console.log(`[syncTemplateToPages] 已递增 pages 版本号，${updated} 个页面缓存失效`);
+  }
+
+  return { updated, failed, errors, affectedPages };
 }
 
 export { getPageIdBySlug } from './storage';
@@ -429,11 +441,9 @@ export async function updatePageTranslations(
     const { id, title, content, templateData, seo_keywords, seo_title, seo_description } = trans;
 
     try {
-      // ✅ 用无缓存版本读取，保证拿最新数据
       let targetPage = await readPageFresh(targetLocale, id);
 
       if (!targetPage && sourceLocale) {
-        // ✅ 源页面也用无缓存版本
         const sourcePage = await readPageFresh(sourceLocale, id);
         if (!sourcePage) throw new Error(`源页面 ${id} 不存在`);
 
@@ -460,7 +470,6 @@ export async function updatePageTranslations(
 
         await writePage(targetLocale, targetPage);
 
-        // ✅ 复制后用无缓存版本重新读取，确认写入成功
         targetPage = await readPageFresh(targetLocale, id);
         if (!targetPage) throw new Error(`复制后无法读取页面 ${id}`);
 
@@ -507,8 +516,6 @@ export async function updatePageTranslations(
   return { success, failed, errors };
 }
 
-// ✅ 底部导出新增 readPageFresh
 export { readPage, readPageFresh } from './storage';
 
-// ========== SEO 缓存版本（重新导出） ==========
 export { getCachedPageBySlug } from './seo-cache';

@@ -1,7 +1,6 @@
 // app/api/admin/productCrawl/import/route.ts
-
 import { NextRequest, NextResponse } from 'next/server';
-import { supabase } from '@/lib/supabase/client';
+import sql from '@/lib/db/admin';
 import { createProduct, processVariant, processImages } from '@/lib/products/services/product.service';
 import { ImportTransformer } from '@/lib/productCrawl/import-transformer';
 import { createProgress, updateProgress } from '@/lib/productCrawl/import-progress';
@@ -10,36 +9,20 @@ import type { ImportResultItem } from '@/lib/productCrawl/types';
 
 const DEFAULT_SITE_ID = '000001';
 
-// ============================================================
-// 🔥 清理图片 URL，去除重复后缀（作为备用）
-// ============================================================
-
 function cleanImageUrl(url: string): string {
   if (!url) return '';
-  // 移除查询参数
   let clean = url.split('?')[0];
-  // 修复重复后缀
-  if (clean.endsWith('.jpg.jpg')) {
-    clean = clean.slice(0, -4);
-  }
-  if (clean.endsWith('.png.png')) {
-    clean = clean.slice(0, -4);
-  }
-  if (clean.endsWith('.jpeg.jpeg')) {
-    clean = clean.slice(0, -5);
-  }
-  if (clean.endsWith('.gif.gif')) {
-    clean = clean.slice(0, -4);
-  }
-  if (clean.endsWith('.webp.webp')) {
-    clean = clean.slice(0, -5);
-  }
+  if (clean.endsWith('.jpg.jpg')) clean = clean.slice(0, -4);
+  if (clean.endsWith('.png.png')) clean = clean.slice(0, -4);
+  if (clean.endsWith('.jpeg.jpeg')) clean = clean.slice(0, -5);
+  if (clean.endsWith('.gif.gif')) clean = clean.slice(0, -4);
+  if (clean.endsWith('.webp.webp')) clean = clean.slice(0, -5);
   return clean;
 }
 
 export async function POST(request: NextRequest) {
   console.log('🔵 ========== 导入路由开始 ==========');
-  
+
   try {
     const body = await request.json();
     const {
@@ -50,40 +33,30 @@ export async function POST(request: NextRequest) {
       siteId = DEFAULT_SITE_ID,
     } = body;
 
-    // 参数校验
     if (!crawlerIds || !Array.isArray(crawlerIds) || crawlerIds.length === 0) {
-      return NextResponse.json(
-        { error: '请提供要导入的 crawlerId 列表' },
-        { status: 400 }
-      );
+      return NextResponse.json({ error: '请提供要导入的 crawlerId 列表' }, { status: 400 });
     }
 
     if (!categoryId) {
-      return NextResponse.json(
-        { error: '请选择分类' },
-        { status: 400 }
-      );
+      return NextResponse.json({ error: '请选择分类' }, { status: 400 });
     }
 
-    // ============================================================
-    // 🔥 创建任务，立即返回 taskId
-    // ============================================================
     const taskId = randomUUID();
-    
-    // 先查询总记录数
-    const { count: totalCount, error: countError } = await supabase
-      .from('crawler_products')
-      .select('*', { count: 'exact', head: true })
-      .eq('site_id', siteId)
-      .in('crawler_id', crawlerIds)
-      .eq('import_status', 'pending');
 
-    if (countError) {
+    // ✅ 查询总记录数
+    let total = 0;
+    try {
+      const countRows = await sql<{ count: string }[]>`
+        SELECT COUNT(*)::text AS count FROM public.crawler_products
+        WHERE site_id = ${siteId}
+          AND crawler_id IN ${sql(crawlerIds)}
+          AND import_status = 'pending'
+      `;
+      total = parseInt(countRows[0]?.count || '0', 10);
+    } catch (countError: any) {
       throw new Error(`查询记录数失败: ${countError.message}`);
     }
 
-    const total = totalCount || 0;
-    
     if (total === 0) {
       return NextResponse.json({
         success: true,
@@ -98,7 +71,7 @@ export async function POST(request: NextRequest) {
       message: '开始导入...',
     });
 
-    // 🔥 异步执行导入，不阻塞响应
+    // 异步执行
     (async () => {
       await performImport({
         taskId,
@@ -111,17 +84,15 @@ export async function POST(request: NextRequest) {
       });
     })();
 
-    // 🔥 立即返回 taskId
     return NextResponse.json({
       success: true,
       taskId,
       message: '导入已开始，请查看进度',
     });
-
   } catch (error) {
     console.error('❌ 导入启动失败:', error);
     return NextResponse.json(
-      { 
+      {
         success: false,
         error: error instanceof Error ? error.message : '导入启动失败',
       },
@@ -129,10 +100,6 @@ export async function POST(request: NextRequest) {
     );
   }
 }
-
-// ============================================================
-// 实际导入逻辑（异步执行）- 变体图片与父商品一致
-// ============================================================
 
 async function performImport(params: {
   taskId: string;
@@ -144,19 +111,20 @@ async function performImport(params: {
   total: number;
 }) {
   const { taskId, crawlerIds, categoryId, seriesId, locale, siteId, total } = params;
-  
+
   console.log(`🔵 [任务 ${taskId}] 开始执行导入`);
 
   try {
-    // 查询采集数据
-    const { data: products, error: fetchError } = await supabase
-      .from('crawler_products')
-      .select('*')
-      .eq('site_id', siteId)
-      .in('crawler_id', crawlerIds)
-      .eq('import_status', 'pending');
-
-    if (fetchError) {
+    // ✅ 查询采集数据
+    let products: any[];
+    try {
+      products = await sql<any[]>`
+        SELECT * FROM public.crawler_products
+        WHERE site_id = ${siteId}
+          AND crawler_id IN ${sql(crawlerIds)}
+          AND import_status = 'pending'
+      `;
+    } catch (fetchError: any) {
       throw new Error(`获取待导入数据失败: ${fetchError.message}`);
     }
 
@@ -178,9 +146,9 @@ async function performImport(params: {
 
     for (let index = 0; index < products.length; index++) {
       const product = products[index];
-      
+
       console.log(`🔵 [任务 ${taskId}] 处理产品 ${index + 1}/${total}: ${product.product_name}`);
-      
+
       updateProgress(taskId, {
         current: index + 1,
         currentProduct: product.product_name,
@@ -196,26 +164,32 @@ async function performImport(params: {
       };
 
       try {
-        // 检查 SKU 是否已存在
+        // ✅ 检查 SKU 是否已存在
         console.log(`🔵 [任务 ${taskId}] 检查 SKU 是否存在: ${product.sku}`);
-        const { data: existing, error: checkError } = await supabase
-          .from('products')
-          .select('productId, product_name')
-          .eq('site_id', siteId)
-          .eq('sku', product.sku)
-          .eq('locale', locale)
-          .maybeSingle();
+        let existing: { productId: string; product_name: string | null } | undefined;
+        try {
+          const rows = await sql<{ productId: string; product_name: string | null }[]>`
+            SELECT "productId", product_name FROM public.products
+            WHERE site_id = ${siteId}
+              AND sku = ${product.sku}
+              AND locale = ${locale}
+            LIMIT 1
+          `;
+          existing = rows[0];
+        } catch (checkError: any) {
+          console.warn(`🔵 [任务 ${taskId}] 检查 SKU 失败:`, checkError);
+        }
 
-        if (!checkError && existing) {
+        if (existing) {
           console.log(`🔵 [任务 ${taskId}] SKU "${product.sku}" 已存在，跳过`);
           resultItem.status = 'skipped';
           resultItem.message = `SKU "${product.sku}" 已存在，跳过导入`;
           resultItem.product_id = existing.productId;
           skippedCount++;
-          
+
           await markImportStatus(product.crawler_id, 'skipped', resultItem.message);
           results.push(resultItem);
-          
+
           updateProgress(taskId, {
             message: `已跳过 ${skippedCount} 条（SKU已存在）`,
           });
@@ -226,23 +200,18 @@ async function performImport(params: {
         let skuList: any[] = [];
         if (product.sku_list) {
           try {
-            skuList = typeof product.sku_list === 'string' 
-              ? JSON.parse(product.sku_list) 
+            skuList = typeof product.sku_list === 'string'
+              ? JSON.parse(product.sku_list)
               : product.sku_list;
             console.log(`🔵 [任务 ${taskId}] sku_list 解析成功，数量: ${skuList.length}`);
           } catch (e) {
             console.warn(`🔵 [任务 ${taskId}] 解析 sku_list 失败:`, e);
           }
-        } else {
-          console.log(`🔵 [任务 ${taskId}] 产品无 sku_list`);
         }
 
         // 转换数据
-        console.log(`🔵 [任务 ${taskId}] 开始转换产品数据...`);
         const productData = transformer.transform(product);
-        console.log(`🔵 [任务 ${taskId}] 产品数据转换完成`);
-        
-        // 🔥 构建父产品数据 - 使用驼峰命名，与 createProduct 期望一致
+
         const parentData = {
           product_name: productData.product_name || product.product_name || '',
           sku: productData.sku || product.sku || '',
@@ -268,15 +237,6 @@ async function performImport(params: {
           templateId: product.templateId || '',
         };
 
-        console.log(`🔵 [任务 ${taskId}] 父产品数据:`, JSON.stringify({
-          product_name: parentData.product_name,
-          sku: parentData.sku,
-          categoryId: parentData.categoryId,
-          seriesId: parentData.seriesId,
-          has_price_tiers: !!parentData.price_tiers?.length,
-        }, null, 2));
-
-        // 创建父产品
         console.log(`🔵 [任务 ${taskId}] 开始创建父产品...`);
         let parentResult;
         try {
@@ -286,13 +246,11 @@ async function performImport(params: {
           console.error(`❌ [任务 ${taskId}] 父产品创建失败:`, createErr);
           throw createErr;
         }
-        
+
         const parentProductId = parentResult.productId || parentResult.id;
         console.log(`🔵 [任务 ${taskId}] 父产品 ID: ${parentProductId}`);
 
-        // ============================================================
-        // 🔥 创建变体 - 图片处理失败不影响变体导入
-        // ============================================================
+        // 创建变体
         let variantSuccessCount = 0;
         if (skuList && skuList.length > 0) {
           console.log(`🔵 [任务 ${taskId}] 开始创建 ${skuList.length} 个变体...`);
@@ -302,33 +260,28 @@ async function performImport(params: {
 
           for (let vIndex = 0; vIndex < skuList.length; vIndex++) {
             const skuItem = skuList[vIndex];
-            
+
             console.log(`🔵 [任务 ${taskId}] 创建变体 ${vIndex + 1}/${skuList.length}: ${skuItem.name || '未命名'}`);
-            
+
             updateProgress(taskId, {
               currentVariant: skuItem.name || `变体 ${vIndex + 1}`,
               message: `创建变体 ${vIndex + 1}/${skuList.length}: ${skuItem.name || ''}`,
             });
 
-            // 🔥 每个变体独立 try-catch，确保单个变体失败不影响其他变体
             try {
-              // 🔥 获取变体原始图片 URL
-              const rawVariantImage = 
-                skuItem.image || 
-                skuItem.image_url || 
-                skuItem.main_image_url || 
-                skuItem.img || 
+              const rawVariantImage =
+                skuItem.image ||
+                skuItem.image_url ||
+                skuItem.main_image_url ||
+                skuItem.img ||
                 '';
 
-              // 🔥 清理图片 URL
               const cleanedImage = cleanImageUrl(rawVariantImage);
-              
-              // 🔥 尝试处理变体图片（如果失败，使用原始 URL）
+
               let mainImageUrl = cleanedImage || product.main_image_url || '';
               let additionalImages: string[] = [];
-              
+
               try {
-                // 生成变体专用的 productId 用于图片关联
                 const variantProductId = `${parentProductId}-variant-${vIndex}`;
                 const processed = await processImages(
                   variantProductId,
@@ -339,7 +292,6 @@ async function performImport(params: {
                 additionalImages = processed.additionalImages || [];
                 console.log(`🔵 [任务 ${taskId}] 变体图片处理完成: ${mainImageUrl}`);
               } catch (imgError) {
-                // 🔥 图片处理失败，使用原始 URL，不影响变体导入
                 console.warn(`🔵 [任务 ${taskId}] 变体图片处理失败，使用原始 URL: ${cleanedImage || '无'}`);
                 mainImageUrl = cleanedImage || product.main_image_url || '';
               }
@@ -366,56 +318,48 @@ async function performImport(params: {
                 locale,
                 parentProductId,
                 variantData,
-                [],  // options 数组
-                true // isVariant
+                [],
+                true
               );
               variantSuccessCount++;
               console.log(`🔵 [任务 ${taskId}] 变体 ${vIndex + 1} 创建成功`);
-              
             } catch (variantErr) {
-              // 🔥 变体创建失败，记录详细错误但继续处理下一个
               const errorMsg = variantErr instanceof Error ? variantErr.message : String(variantErr);
               console.error(`❌ [任务 ${taskId}] 变体 ${vIndex + 1} 创建失败:`, {
                 name: skuItem.name,
                 sku: skuItem.sku_code,
                 error: errorMsg,
-                stack: variantErr instanceof Error ? variantErr.stack : undefined
               });
-              // 继续处理下一个变体，不中断整体流程
             }
           }
-          
+
           console.log(`🔵 [任务 ${taskId}] 变体创建完成: 成功 ${variantSuccessCount}/${skuList.length}`);
         }
 
-        // 标记导入成功（即使部分变体失败，父产品也算导入成功）
         await markImportStatus(product.crawler_id, 'imported', null);
-        
+
         importedCount++;
 
         resultItem.status = 'success';
-        resultItem.message = skuList && skuList.length > 0 
+        resultItem.message = skuList && skuList.length > 0
           ? `父产品 + ${variantSuccessCount}/${skuList.length} 个变体`
           : '导入成功';
         resultItem.product_id = parentProductId;
-        
+
         results.push(resultItem);
         console.log(`🔵 [任务 ${taskId}] 产品 ${index + 1} 导入成功`);
 
         updateProgress(taskId, {
           message: `已成功导入 ${importedCount} 条${skippedCount > 0 ? `，跳过 ${skippedCount} 条` : ''}`,
         });
-
       } catch (err) {
         const msg = err instanceof Error ? err.message : '未知错误';
-        const stack = err instanceof Error ? err.stack : '';
         console.error(`❌ [任务 ${taskId}] 产品 ${index + 1} 导入失败:`, msg);
-        console.error(`❌ [任务 ${taskId}] 堆栈:`, stack);
-        
+
         resultItem.status = 'failed';
         resultItem.message = msg;
         failedCount++;
-        
+
         await markImportStatus(product.crawler_id, 'failed', msg);
         results.push(resultItem);
 
@@ -425,7 +369,6 @@ async function performImport(params: {
       }
     }
 
-    // 更新最终结果
     updateProgress(taskId, {
       status: 'completed',
       current: total,
@@ -435,7 +378,6 @@ async function performImport(params: {
 
     console.log(`✅ [任务 ${taskId}] 导入完成`);
     console.log(`📊 [任务 ${taskId}] 统计: 成功 ${importedCount}, 跳过 ${skippedCount}, 失败 ${failedCount}`);
-
   } catch (error) {
     console.error(`❌ [任务 ${taskId}] 导入失败:`, error);
     updateProgress(taskId, {
@@ -445,29 +387,21 @@ async function performImport(params: {
   }
 }
 
-// ============================================================
-// 辅助函数
-// ============================================================
-
 async function markImportStatus(
   crawlerId: string,
   status: 'imported' | 'skipped' | 'failed',
   error: string | null
 ) {
   const now = new Date().toISOString();
-  const updateData: any = {
-    import_status: status,
-    imported_at: now,
-  };
-  if (error) {
-    updateData.import_error = error;
-  }
-  const { error: updateError } = await supabase
-    .from('crawler_products')
-    .update(updateData)
-    .eq('crawler_id', crawlerId);
-  
-  if (updateError) {
+  try {
+    await sql`
+      UPDATE public.crawler_products
+      SET import_status = ${status},
+          imported_at = ${now},
+          import_error = ${error}
+      WHERE crawler_id = ${crawlerId}
+    `;
+  } catch (updateError: any) {
     console.error(`❌ 更新导入状态失败 (${crawlerId}):`, updateError);
   }
 }

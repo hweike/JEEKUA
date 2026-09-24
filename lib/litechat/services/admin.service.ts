@@ -1,5 +1,5 @@
 // lib/litechat/services/admin.service.ts
-import { supabase } from '@/lib/supabase/client';
+import sql from '@/lib/db/admin';
 
 export interface AdminInfo {
   id: string;
@@ -16,7 +16,6 @@ export interface AdminInfo {
 
 /**
  * 将北京时间字符串转换为 UTC 时间分钟数
- * 北京时间 = UTC+8
  */
 function beijingTimeToUTCMinutes(beijingTime: string): number {
   if (!beijingTime) return 0;
@@ -28,25 +27,19 @@ function beijingTimeToUTCMinutes(beijingTime: string): number {
   return utcHours * 60 + minutes;
 }
 
-/**
- * 获取当前 UTC 时间分钟数
- */
 function getCurrentUTCMinutes(): number {
   const now = new Date();
   return now.getUTCHours() * 60 + now.getUTCMinutes();
 }
 
 /**
- * 获取管理员的实时在线状态（已修正时区）
- * - 管理员设置的时间按北京时间解读
- * - 服务器时间按 UTC 比较
+ * 获取管理员的实时在线状态
  */
 export function getAdminOnlineStatus(admin: AdminInfo): {
   status: 'online' | 'offline' | 'busy' | 'away';
   isOnline: boolean;
   statusText: string;
 } {
-  // 如果状态是 busy 或 away，直接返回
   if (admin.online_status === 'busy') {
     return { status: 'busy', isOnline: true, statusText: '忙碌' };
   }
@@ -57,7 +50,6 @@ export function getAdminOnlineStatus(admin: AdminInfo): {
     return { status: 'offline', isOnline: false, statusText: '离线' };
   }
 
-  // online_status === 'online'，检查时间段
   const currentUTCMinutes = getCurrentUTCMinutes();
   const startUTCMinutes = beijingTimeToUTCMinutes(admin.online_start_time);
   const endUTCMinutes = beijingTimeToUTCMinutes(admin.online_end_time);
@@ -66,7 +58,6 @@ export function getAdminOnlineStatus(admin: AdminInfo): {
   if (startUTCMinutes <= endUTCMinutes) {
     isInTimeRange = currentUTCMinutes >= startUTCMinutes && currentUTCMinutes <= endUTCMinutes;
   } else {
-    // 跨天（如 22:00 - 06:00）
     isInTimeRange = currentUTCMinutes >= startUTCMinutes || currentUTCMinutes <= endUTCMinutes;
   }
 
@@ -78,33 +69,26 @@ export function getAdminOnlineStatus(admin: AdminInfo): {
 }
 
 /**
- * 解析时间字符串为分钟数（保留，供其他场景使用）
- */
-function parseTimeToMinutes(time: string): number {
-  if (!time) return 0;
-  const parts = time.split(':');
-  return parseInt(parts[0]) * 60 + parseInt(parts[1]);
-}
-
-/**
  * 通过管理员 ID 获取管理员信息
  */
 export async function getAdminInfoById(adminId: string): Promise<AdminInfo | null> {
-  const { data, error } = await supabase
-    .from('admin_users')
-    .select('id, email, name, nickname, avatar_url, online_status, online_start_time, online_end_time, default_welcome, offline_reply')
-    .eq('id', adminId)
-    .maybeSingle();
-
-  if (error || !data) {
+  try {
+    const rows = await sql<AdminInfo[]>`
+      SELECT id, email, name, nickname, avatar_url, online_status,
+             online_start_time, online_end_time, default_welcome, offline_reply
+      FROM public.admin_users
+      WHERE id = ${adminId}
+      LIMIT 1
+    `;
+    return rows[0] ?? null;
+  } catch (error) {
     console.error('获取管理员信息失败:', error);
     return null;
   }
-  return data;
 }
 
 /**
- * 获取会话的当前管理员信息（用于前台显示）
+ * 获取会话的当前管理员信息
  */
 export async function getConversationAdminInfo(conversationId: string): Promise<{
   admin: AdminInfo | null;
@@ -115,20 +99,25 @@ export async function getConversationAdminInfo(conversationId: string): Promise<
   statusText: string;
 } | null> {
   // 1. 获取会话信息
-  const { data: conversation, error: convError } = await supabase
-    .schema('chat')
-    .from('conversations')
-    .select('agent_id')
-    .eq('id', conversationId)
-    .maybeSingle();
-
-  if (convError || !conversation) {
-    console.error('获取会话失败:', convError);
+  let agentId: string | null = null;
+  try {
+    const rows = await sql<{ agent_id: string | null }[]>`
+      SELECT agent_id FROM chat.conversations
+      WHERE id = ${conversationId}
+      LIMIT 1
+    `;
+    if (!rows[0]) {
+      console.error('获取会话失败: 会话不存在');
+      return null;
+    }
+    agentId = rows[0].agent_id;
+  } catch (error) {
+    console.error('获取会话失败:', error);
     return null;
   }
 
-  // 2. 如果会话未分配管理员，返回默认信息
-  if (!conversation.agent_id) {
+  // 2. 未分配管理员
+  if (!agentId) {
     return {
       admin: null,
       displayName: '客服团队',
@@ -140,7 +129,7 @@ export async function getConversationAdminInfo(conversationId: string): Promise<
   }
 
   // 3. 获取管理员信息
-  const admin = await getAdminInfoById(conversation.agent_id);
+  const admin = await getAdminInfoById(agentId);
   if (!admin) {
     return {
       admin: null,

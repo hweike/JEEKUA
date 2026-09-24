@@ -1,6 +1,6 @@
 // app/api/admin/files/[id]/route.ts
 import { NextRequest, NextResponse } from 'next/server';
-import { supabase } from '@/lib/supabase/client';
+import sql from '@/lib/db/admin';
 
 const DEFAULT_SITE_ID = process.env.NEXT_PUBLIC_SITE_ID || '000001';
 
@@ -12,15 +12,17 @@ export async function GET(
   try {
     const { id } = await params;
 
-    const { data, error } = await supabase
-      .from('media_files')
-      .select('*')
-      .eq('site_id', DEFAULT_SITE_ID)
-      .eq('id', id)
-      .is('deleted_at', null)
-      .maybeSingle();
-
-    if (error) {
+    let data: any;
+    try {
+      const rows = await sql<any[]>`
+        SELECT * FROM public.media_files
+        WHERE site_id = ${DEFAULT_SITE_ID}
+          AND id = ${id}
+          AND deleted_at IS NULL
+        LIMIT 1
+      `;
+      data = rows[0];
+    } catch (error: any) {
       console.error('获取文件详情失败:', error);
       return NextResponse.json({ error: '获取文件详情失败' }, { status: 500 });
     }
@@ -46,22 +48,28 @@ export async function PATCH(
     const body = await req.json();
     const { displayName, altText, categoryId } = body;
 
-    // ✅ 检查文件是否存在（使用 site_id）
-    const { data: existing, error: findError } = await supabase
-      .from('media_files')
-      .select('id')
-      .eq('site_id', DEFAULT_SITE_ID)
-      .eq('id', id)
-      .is('deleted_at', null)
-      .maybeSingle();
-
-    if (findError || !existing) {
+    // 1. 检查文件是否存在
+    let existing: { id: string } | undefined;
+    try {
+      const rows = await sql<{ id: string }[]>`
+        SELECT id FROM public.media_files
+        WHERE site_id = ${DEFAULT_SITE_ID}
+          AND id = ${id}
+          AND deleted_at IS NULL
+        LIMIT 1
+      `;
+      existing = rows[0];
+    } catch (findError: any) {
       console.error('文件不存在:', findError);
       return NextResponse.json({ error: '文件不存在' }, { status: 404 });
     }
 
-    // 构建更新对象
-    const updates: any = {};
+    if (!existing) {
+      return NextResponse.json({ error: '文件不存在' }, { status: 404 });
+    }
+
+    // 2. 构建更新对象
+    const updates: Record<string, any> = {};
     let hasUpdate = false;
 
     if (displayName !== undefined) {
@@ -73,7 +81,6 @@ export async function PATCH(
       hasUpdate = true;
     }
     if (categoryId !== undefined) {
-      // ✅ 如果 categoryId 是空字符串，设为 null
       updates.category_id = categoryId || null;
       hasUpdate = true;
     }
@@ -82,41 +89,59 @@ export async function PATCH(
       return NextResponse.json({ error: '没有需要更新的字段' }, { status: 400 });
     }
 
-    // 如果更新分类，检查分类是否存在
+    // 3. 如果更新分类，检查分类是否存在
     if (categoryId !== undefined && categoryId) {
-      const { data: category, error: catError } = await supabase
-        .from('file_categories')
-        .select('id')
-        .eq('site_id', DEFAULT_SITE_ID)
-        .eq('id', categoryId)
-        .is('deleted_at', null)
-        .maybeSingle();
-
-      if (catError || !category) {
+      let category: { id: string } | undefined;
+      try {
+        const rows = await sql<{ id: string }[]>`
+          SELECT id FROM public.file_categories
+          WHERE site_id = ${DEFAULT_SITE_ID}
+            AND id = ${categoryId}
+            AND deleted_at IS NULL
+          LIMIT 1
+        `;
+        category = rows[0];
+      } catch (catError: any) {
         console.error('分类不存在:', catError);
+        return NextResponse.json({ error: '目标分类不存在' }, { status: 400 });
+      }
+
+      if (!category) {
         return NextResponse.json({ error: '目标分类不存在' }, { status: 400 });
       }
     }
 
-    // ✅ 执行更新（使用 site_id）
-    updates.updated_at = new Date().toISOString();
-    const { data, error } = await supabase
-      .from('media_files')
-      .update(updates)
-      .eq('site_id', DEFAULT_SITE_ID)
-      .eq('id', id)
-      .select()
-      .single();
+    // 4. 动态 SET
+    const setClauses: any[] = [];
+    for (const [key, value] of Object.entries(updates)) {
+      setClauses.push(sql`${sql(key)} = ${value}`);
+    }
+    setClauses.push(sql`updated_at = ${new Date().toISOString()}`);
 
-    if (error) {
+    const setClause = setClauses.reduce(
+      (acc, c, i) => (i === 0 ? c : sql`${acc}, ${c}`),
+      sql``
+    );
+
+    let data: any;
+    try {
+      const rows = await sql<any[]>`
+        UPDATE public.media_files
+        SET ${setClause}
+        WHERE site_id = ${DEFAULT_SITE_ID}
+          AND id = ${id}
+        RETURNING *
+      `;
+      data = rows[0];
+    } catch (error: any) {
       console.error('更新文件失败:', error);
       return NextResponse.json({ error: error.message || '更新失败' }, { status: 500 });
     }
 
-    return NextResponse.json({ 
-      success: true, 
+    return NextResponse.json({
+      success: true,
       message: '更新成功',
-      data 
+      data,
     });
   } catch (error) {
     console.error('PATCH /api/admin/files/[id] error:', error);
@@ -132,47 +157,52 @@ export async function DELETE(
   try {
     const { id } = await params;
 
-    // ✅ 检查文件是否存在（使用 site_id）
-    const { data: existing, error: findError } = await supabase
-      .from('media_files')
-      .select('id, storage_key')
-      .eq('site_id', DEFAULT_SITE_ID)
-      .eq('id', id)
-      .is('deleted_at', null)
-      .maybeSingle();
+    // 1. 检查文件是否存在
+    let existing: { id: string; storage_key: string } | undefined;
+    try {
+      const rows = await sql<{ id: string; storage_key: string }[]>`
+        SELECT id, storage_key FROM public.media_files
+        WHERE site_id = ${DEFAULT_SITE_ID}
+          AND id = ${id}
+          AND deleted_at IS NULL
+        LIMIT 1
+      `;
+      existing = rows[0];
+    } catch {}
 
-    if (findError || !existing) {
+    if (!existing) {
       return NextResponse.json({ error: '文件不存在' }, { status: 404 });
     }
 
-    // 检查是否有引用
-    const { count, error: countError } = await supabase
-      .from('file_references')
-      .select('*', { count: 'exact', head: true })
-      .eq('file_id', id);
-
-    if (countError) {
+    // 2. 检查是否有引用
+    let count = 0;
+    try {
+      const countRows = await sql<{ count: string }[]>`
+        SELECT COUNT(*)::text AS count FROM public.file_references
+        WHERE file_id = ${id}
+      `;
+      count = parseInt(countRows[0]?.count || '0', 10);
+    } catch (countError: any) {
       console.error('检查引用失败:', countError);
       return NextResponse.json({ error: '检查引用失败' }, { status: 500 });
     }
 
-    if (count && count > 0) {
-      return NextResponse.json({ 
-        error: `该文件被 ${count} 个资源引用，无法删除` 
+    if (count > 0) {
+      return NextResponse.json({
+        error: `该文件被 ${count} 个资源引用，无法删除`,
       }, { status: 400 });
     }
 
-    // 软删除（使用 site_id）
-    const { error } = await supabase
-      .from('media_files')
-      .update({ 
-        deleted_at: new Date().toISOString(),
-        updated_at: new Date().toISOString()
-      })
-      .eq('site_id', DEFAULT_SITE_ID)
-      .eq('id', id);
-
-    if (error) {
+    // 3. 软删除
+    try {
+      await sql`
+        UPDATE public.media_files
+        SET deleted_at = ${new Date().toISOString()},
+            updated_at = ${new Date().toISOString()}
+        WHERE site_id = ${DEFAULT_SITE_ID}
+          AND id = ${id}
+      `;
+    } catch (error: any) {
       console.error('删除文件失败:', error);
       return NextResponse.json({ error: '删除失败' }, { status: 500 });
     }

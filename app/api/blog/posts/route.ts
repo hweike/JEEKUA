@@ -1,11 +1,10 @@
 // app/api/blog/posts/route.ts
 import { NextRequest, NextResponse } from 'next/server';
 import NodeCache from 'node-cache';
-import { supabase } from '@/lib/supabase/client';
+import sql from '@/lib/db/admin';
 
 const DEFAULT_SITE_ID = process.env.NEXT_PUBLIC_SITE_ID || '000001';
 
-// 缓存 5 分钟
 const postsCache = new NodeCache({ stdTTL: 300, checkperiod: 60 });
 
 export async function GET(request: NextRequest) {
@@ -28,25 +27,28 @@ export async function GET(request: NextRequest) {
 
   // 2. 查库
   try {
-    let query = supabase
-      .from('blog_posts')
-      .select('id, slug, title, excerpt, updated_at, category_id, author, featured_image')
-      .eq('site_id', DEFAULT_SITE_ID)
-      .eq('locale', locale)
-      .eq('visibility', 'visible');
-
+    // 动态条件
+    const conditions: any[] = [
+      sql`site_id = ${DEFAULT_SITE_ID}`,
+      sql`locale = ${locale}`,
+      sql`visibility = 'visible'`,
+    ];
     if (category) {
-      query = query.eq('category_id', category);
+      conditions.push(sql`category_id = ${category}`);
     }
+    const whereClause = conditions.reduce(
+      (acc, c, i) => (i === 0 ? c : sql`${acc} AND ${c}`),
+      sql``
+    );
 
-    const { data, error } = await query.order('updated_at', { ascending: false });
+    const data = await sql<any[]>`
+      SELECT id, slug, title, excerpt, updated_at, category_id, author, featured_image
+      FROM public.blog_posts
+      WHERE ${whereClause}
+      ORDER BY updated_at DESC
+    `;
 
-    if (error) {
-      console.error('Failed to fetch blog posts:', error);
-      return NextResponse.json({ error: error.message }, { status: 500 });
-    }
-
-    const posts = (data || []).map((row) => ({
+    const posts = data.map((row) => ({
       slug: row.slug,
       title: row.title || '无标题',
       date: row.updated_at || new Date().toISOString(),
@@ -65,8 +67,8 @@ export async function GET(request: NextRequest) {
         'X-Cache': 'MISS',
       },
     });
-  } catch (error) {
+  } catch (error: any) {
     console.error('[API] Failed to get blog posts:', error);
-    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
+    return NextResponse.json({ error: error.message || 'Internal server error' }, { status: 500 });
   }
 }

@@ -1,11 +1,10 @@
 // lib/AiHelper/services/doc.service.ts
 import { ITranslationService } from '../core/types';
 import { getDocument, updateDocTranslations } from '@/lib/docs/document';
-import { supabase } from '@/lib/supabase/client';
+import sql from '@/lib/db/admin';
 
 const DEFAULT_SITE_ID = process.env.NEXT_PUBLIC_SITE_ID || '000001';
 
-// ====== 导出数据结构 ======
 interface ExportDoc {
   id: string;
   title: string;
@@ -16,34 +15,33 @@ interface ExportDoc {
 }
 
 export const docAdapter: ITranslationService = {
-  /**
-   * 导出源语言文档数据（仅翻译字段）
-   * @param locale 源语言
-   * @param options 可选参数，包含要导出的文档 ID 列表
-   */
   async exportData(locale: string, options?: { ids?: string[] }): Promise<{ sourceLanguage: string; docs: ExportDoc[] }> {
-    // 如果没有提供 ids，则无法导出，返回空
     if (!options?.ids || options.ids.length === 0) {
       return { sourceLanguage: locale, docs: [] };
     }
 
-    // 只处理第一个文档（每次只翻译一篇）
     const docId = options.ids[0];
     if (!docId) {
       throw new Error('文档 ID 无效');
     }
 
-    // 需要先获取该文档的 lib_id
-    const { data: docInfo, error: infoError } = await supabase
-      .from('documents')
-      .select('lib_id')
-      .eq('site_id', DEFAULT_SITE_ID)
-      .eq('id', docId)
-      .eq('locale', locale)
-      .maybeSingle();
+    // ✅ 已迁移：查询 lib_id
+    let docInfo: { lib_id: string } | undefined;
+    try {
+      const rows = await sql<{ lib_id: string }[]>`
+        SELECT lib_id FROM public.documents
+        WHERE site_id = ${DEFAULT_SITE_ID}
+          AND id = ${docId}
+          AND locale = ${locale}
+        LIMIT 1
+      `;
+      docInfo = rows[0];
+    } catch (infoError: any) {
+      throw new Error(`无法获取文档 ${docId} 的信息: ${infoError.message}`);
+    }
 
-    if (infoError || !docInfo) {
-      throw new Error(`无法获取文档 ${docId} 的信息: ${infoError?.message || '不存在'}`);
+    if (!docInfo) {
+      throw new Error(`无法获取文档 ${docId} 的信息: 不存在`);
     }
 
     const doc = await getDocument(locale, docInfo.lib_id, docId);
@@ -64,15 +62,13 @@ export const docAdapter: ITranslationService = {
     };
   },
 
-  /**
-   * 生成 AI 提示词（文档专用）
-   */
   generatePrompt(
     sourceLocale: string,
     targetLocales: string[],
     sourceData: any,
     languageNames: Record<string, string>
   ): string {
+    // ... 完全不变 ...
     const targetList = targetLocales
       .map(code => `${languageNames[code] || code} (${code})`)
       .join('、');
@@ -125,13 +121,11 @@ export const docAdapter: ITranslationService = {
 请直接输出纯 JSON，不要包含任何额外解释或代码块标记。`;
   },
 
-  /**
-   * 导入多语言文档翻译数据
-   */
   async importTranslations(
     translations: Array<{ language: string; docs: any[] }>,
     sourceLocale: string
   ): Promise<{ imported: number; failed: number; errors: string[] }> {
+    // ... 完全不变 ...
     let imported = 0;
     let failed = 0;
     const errors: string[] = [];
@@ -140,7 +134,6 @@ export const docAdapter: ITranslationService = {
       const { language, docs } = trans;
       if (!docs || docs.length === 0) continue;
 
-      // 构建翻译数组
       const docUpdates = docs.map((d: any) => ({
         docId: d.id,
         title: d.title,

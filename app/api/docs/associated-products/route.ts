@@ -1,5 +1,6 @@
+// app/api/docs/associated-products/route.ts
 import { NextRequest, NextResponse } from 'next/server';
-import { supabase } from '@/lib/supabase/client';
+import sql from '@/lib/db/admin';
 
 const DEFAULT_SITE_ID = process.env.NEXT_PUBLIC_SITE_ID || '000001';
 
@@ -13,16 +14,17 @@ export async function GET(request: NextRequest) {
   }
 
   try {
-    // 使用 resource_product 表（根据你的实际表名）
-    const { data: associations, error: assocError } = await supabase
-      .from('resource_product')  // 改为你的实际表名
-      .select('product_id')
-      .eq('site_id', DEFAULT_SITE_ID)
-      .eq('resource_type', 'document')
-      .eq('resource_id', docId)
-      .order('sort_order', { ascending: true });
-
-    if (assocError) {
+    // 1. 查询关联
+    let associations: { product_id: string }[];
+    try {
+      associations = await sql<{ product_id: string }[]>`
+        SELECT product_id FROM public.resource_product
+        WHERE site_id = ${DEFAULT_SITE_ID}
+          AND resource_type = 'document'
+          AND resource_id = ${docId}
+        ORDER BY sort_order ASC
+      `;
+    } catch (assocError: any) {
       console.error('[API] Associations query error:', assocError);
       return NextResponse.json(
         { error: `Database error: ${assocError.message}` },
@@ -36,18 +38,18 @@ export async function GET(request: NextRequest) {
 
     const productIds = associations.map((a) => a.product_id);
 
-    // 查询产品详情
-    const { data: products, error: productError } = await supabase
-      .from('products')
-      .select(
-        'productId, product_name, slug, main_image_url, price_tiers, currency, availability, min_order_quantity'
-      )
-      .eq('site_id', DEFAULT_SITE_ID)
-      .eq('locale', locale)
-      .in('productId', productIds)
-      .is('parent_product_id', null);
-
-    if (productError) {
+    // 2. 查询产品详情
+    let products: any[];
+    try {
+      products = await sql<any[]>`
+        SELECT "productId", product_name, slug, main_image_url, price_tiers, currency, availability, min_order_quantity
+        FROM public.products
+        WHERE site_id = ${DEFAULT_SITE_ID}
+          AND locale = ${locale}
+          AND "productId" IN ${sql(productIds)}
+          AND parent_product_id IS NULL
+      `;
+    } catch (productError: any) {
       console.error('[API] Products query error:', productError);
       return NextResponse.json(
         { error: `Product query error: ${productError.message}` },
@@ -55,9 +57,11 @@ export async function GET(request: NextRequest) {
       );
     }
 
-    const parsedProducts = (products || []).map((p) => ({
+    const parsedProducts = products.map((p) => ({
       ...p,
-      price_tiers: JSON.parse(p.price_tiers || '[]'),
+      price_tiers: typeof p.price_tiers === 'string'
+        ? JSON.parse(p.price_tiers || '[]')
+        : p.price_tiers || [],
     }));
 
     return NextResponse.json({ products: parsedProducts });

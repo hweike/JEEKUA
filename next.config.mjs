@@ -62,8 +62,19 @@ const nextConfig = {
     ignoreBuildErrors: true,
   },
 
-  // ✅ 添加此配置，确保 Next.js 不会干扰中间件的路径匹配
+  // ✅ 确保 Next.js 不会干扰中间件的路径匹配
   skipMiddlewareUrlNormalize: true,
+
+  // ✅ 降低构建并发，避免打爆数据库连接
+  experimental: {
+    workerThreads: false,
+    cpus: 1,
+  },
+
+  // ✅ 关闭浏览器日志转发到终端（避免 unhandledRejection 日志噪音）
+  logging: {
+    browserToTerminal: false,
+  },
 };
 
 export default withNextIntl(withNextra(nextConfig));

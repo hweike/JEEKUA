@@ -3,8 +3,12 @@ import { notFound } from 'next/navigation';
 import { unstable_cache } from 'next/cache';
 import { Suspense, cache } from 'react';
 import { getTranslations } from 'next-intl/server';
-import { getCachedBlogPost, getCachedBlogCategories } from '@/lib/blog';
-import { withDynamicLocale } from '@/lib/withPageLocale';
+import {
+  getCachedBlogPost,
+  getCachedBlogCategories,
+  getAllPublishedBlogPosts,
+} from '@/lib/blog';
+import { withStaticLocale } from '@/lib/withPageLocale';
 import { getSeoInput } from '@/lib/seo/getSeoInput';
 import { generatePageMetadata } from '@/lib/seo';
 import { getSiteSettings } from '@/lib/getSiteSettings';
@@ -24,13 +28,46 @@ const getCategoriesOnce = cache(getCachedBlogCategories);
 const getSeoInputOnce = cache(getSeoInput);
 const getSiteSettingsOnce = cache(getSiteSettings);
 
+// ============================================================
+// ✅ ISR 预生成：为所有已发布文章生成静态 HTML，访问最快
+// ============================================================
+export async function generateStaticParams() {
+  const t0 = Date.now();
+  const callsite = new Error().stack?.split('\n')[2]?.trim() || 'unknown';
+
+  console.log(`[blog/[slug]] generateStaticParams 开始（调用来源: ${callsite}）`);
+
+  try {
+    const posts = await getAllPublishedBlogPosts();
+    const elapsed = Date.now() - t0;
+    console.log(`[blog/[slug]] generateStaticParams: ${posts.length} 篇文章，总耗时 ${elapsed}ms`);
+    return posts.map((p) => ({
+      locale: p.locale,
+      slug: p.slug,
+    }));
+  } catch (err) {
+    const elapsed = Date.now() - t0;
+    console.error(`[blog/[slug]] generateStaticParams 失败（耗时 ${elapsed}ms）:`, err);
+    return [];
+  }
+}
+
 // ===== generateMetadata =====
 export async function generateMetadata({
   params,
 }: {
   params: Promise<{ locale: string; slug: string }>;
 }) {
-  const { locale, slug } = await params;
+  const resolvedParams = await params;
+  if (!resolvedParams?.locale) {
+    return {
+      title: 'Blog',
+      robots: 'noindex, follow',
+    };
+  }
+
+  const { locale, slug } = resolvedParams;
+
   const settings = await getSiteSettingsOnce();
   const baseUrl = (settings.websiteUrl || process.env.NEXT_PUBLIC_BASE_URL || '').replace(/\/+$/, '');
   const siteName = settings.siteName || 'Site Name';
@@ -90,7 +127,6 @@ async function BlogPostContent({ locale, slug }: BlogPostContentProps) {
   const categories = await getCategoriesOnce(locale);
   const category = categories.find((c) => c.id === post.category) || null;
 
-  // 生成 JSON-LD
   const data = { post, category, siteName, baseUrl, t };
   const seoInput = await getSeoInputOnce('blogPost', slug, locale, data);
   let jsonLdScripts: string[] = [];
@@ -98,9 +134,6 @@ async function BlogPostContent({ locale, slug }: BlogPostContentProps) {
     jsonLdScripts = [JSON.stringify(seoInput.structuredData)];
   }
 
-  // ============================================================
-  // ✅ 博客详情页专属 CSS 变量（带最终 fallback）
-  // ============================================================
   const containerBg = 'var(--blog-detail-bg, var(--background, #ffffff))';
   const containerText = 'var(--blog-detail-text, var(--foreground, #0f172a))';
   const titleColor = 'var(--blog-detail-title-color, var(--foreground, #0f172a))';
@@ -233,7 +266,12 @@ interface BlogPostPageProps {
 }
 
 async function BlogPostPage({ params }: BlogPostPageProps) {
-  const { locale, slug } = await params;
+  const resolvedParams = await params;
+  if (!resolvedParams?.locale) {
+    notFound();
+  }
+
+  const { locale, slug } = resolvedParams;
   const decodedSlug = decodeURIComponent(slug);
 
   return (
@@ -243,9 +281,7 @@ async function BlogPostPage({ params }: BlogPostPageProps) {
   );
 }
 
-export async function generateStaticParams() {
-  return [];
-}
-
+// ✅ 预生成所有文章（构建时），新增文章由 dynamicParams 按需生成
+export const dynamicParams = true;
 export const revalidate = 3600;
-export default withDynamicLocale(BlogPostPage);
+export default withStaticLocale(BlogPostPage);

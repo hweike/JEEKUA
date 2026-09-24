@@ -24,6 +24,14 @@ import Toast from '@/components/Toast';
 import type { PaymentMethodType } from '@/lib/payment/types/account';
 
 // ============================================================
+// ✅ 数值安全格式化函数
+// ============================================================
+const formatAmount = (value: any): string => {
+  const num = Number(value);
+  return isNaN(num) ? '0.00' : num.toFixed(2);
+};
+
+// ============================================================
 // 类型定义
 // ============================================================
 interface OrderItem {
@@ -227,7 +235,6 @@ export default function OrderDetailPage() {
       
       if (result.success) {
         setToast({ message: '订单已提交', type: 'success' });
-        // 复制分享链接
         if (result.data?.shareUrl) {
           await navigator.clipboard.writeText(result.data.shareUrl);
           setToast({ message: '订单已提交，分享链接已复制', type: 'success' });
@@ -305,7 +312,6 @@ export default function OrderDetailPage() {
     }
   };
 
-  // ✅ 修复分享链接 - 自动提取当前 locale
   const handleCopyShareLink = async () => {
     if (!order?.share_token) {
       setToast({ message: '暂无分享链接', type: 'error' });
@@ -328,7 +334,6 @@ export default function OrderDetailPage() {
     }
   };
 
-  // ✅ 下载 PDF
   const handleDownloadPDF = () => {
     window.open(`/api/admin/payment/orders/${orderId}/pdf`, '_blank');
   };
@@ -431,7 +436,6 @@ export default function OrderDetailPage() {
         break;
     }
 
-    // ✅ 所有状态都添加下载PDF按钮
     buttons.push(
       <button
         key="download"
@@ -460,12 +464,12 @@ export default function OrderDetailPage() {
   };
 
   // ============================================================
-  // ✅ 获取支付记录数据
+  // ✅ 获取支付记录数据（已做数值安全转换）
   // ============================================================
   const getPaymentRecords = () => {
     if (!order) return null;
-    const total = order.total_amount || 0;
-    const deposit = order.deposit_amount || 0;
+    const total = Number(order.total_amount) || 0;
+    const deposit = Number(order.deposit_amount) || 0;
     const paid = deposit;
     const pending = total - paid;
 
@@ -600,7 +604,7 @@ export default function OrderDetailPage() {
         <div className="bg-white rounded-xl border border-gray-200 p-4">
           <div className="text-sm text-gray-500">订单金额</div>
           <div className="text-xl font-bold text-blue-600">
-            {order.currency} {order.total_amount.toFixed(2)}
+            {order.currency} {formatAmount(order.total_amount)}
           </div>
         </div>
         <div className="bg-white rounded-xl border border-gray-200 p-4">
@@ -727,12 +731,12 @@ export default function OrderDetailPage() {
                     <td className="px-3 py-2 font-medium">{item.product_name}</td>
                     <td className="px-3 py-2 text-gray-600">{item.specification || '-'}</td>
                     <td className="px-3 py-2 text-right font-mono">
-                      {order.currency} {item.price.toFixed(2)}
+                      {order.currency} {formatAmount(item.price)}
                     </td>
                     <td className="px-3 py-2 text-center">{item.quantity}</td>
                     <td className="px-3 py-2 text-center">{item.unit || 'pcs'}</td>
                     <td className="px-3 py-2 text-right font-mono text-blue-600">
-                      {order.currency} {item.total.toFixed(2)}
+                      {order.currency} {formatAmount(item.total)}
                     </td>
                   </tr>
                 ))}
@@ -745,29 +749,29 @@ export default function OrderDetailPage() {
             <div className="w-64 space-y-1">
               <div className="flex justify-between text-sm">
                 <span className="text-gray-500">商品总金额</span>
-                <span className="font-mono">{order.currency} {order.sub_total.toFixed(2)}</span>
+                <span className="font-mono">{order.currency} {formatAmount(order.sub_total)}</span>
               </div>
-              {order.discount > 0 && (
+              {Number(order.discount) > 0 && (
                 <div className="flex justify-between text-sm text-green-600">
                   <span>折扣</span>
-                  <span className="font-mono">-{order.currency} {order.discount.toFixed(2)}</span>
+                  <span className="font-mono">-{order.currency} {formatAmount(order.discount)}</span>
                 </div>
               )}
-              {order.shipping_fee > 0 && (
+              {Number(order.shipping_fee) > 0 && (
                 <div className="flex justify-between text-sm">
                   <span className="text-gray-500">运费</span>
-                  <span className="font-mono">{order.currency} {order.shipping_fee.toFixed(2)}</span>
+                  <span className="font-mono">{order.currency} {formatAmount(order.shipping_fee)}</span>
                 </div>
               )}
-              {order.tax > 0 && (
+              {Number(order.tax) > 0 && (
                 <div className="flex justify-between text-sm">
                   <span className="text-gray-500">税费</span>
-                  <span className="font-mono">{order.currency} {order.tax.toFixed(2)}</span>
+                  <span className="font-mono">{order.currency} {formatAmount(order.tax)}</span>
                 </div>
               )}
               <div className="border-t pt-2 flex justify-between font-bold text-lg">
                 <span>账单总金额</span>
-                <span className="font-mono text-blue-600">{order.currency} {order.total_amount.toFixed(2)}</span>
+                <span className="font-mono text-blue-600">{order.currency} {formatAmount(order.total_amount)}</span>
               </div>
             </div>
           </div>
@@ -775,7 +779,7 @@ export default function OrderDetailPage() {
       </div>
 
       {/* ============================================================ */}
-      {/* 3. 运输信息 - 只显示订单级运输信息 */}
+      {/* 3. 运输信息 */}
       {/* ============================================================ */}
       <div className="bg-white rounded-xl border border-gray-200 mb-4 overflow-hidden">
         <div className="px-4 py-3 border-b border-gray-100 bg-gray-50">
@@ -810,7 +814,7 @@ export default function OrderDetailPage() {
       </div>
 
       {/* ============================================================ */}
-      {/* 4. 其他信息（法律条款 + 附言） */}
+      {/* 4. 其他信息 */}
       {/* ============================================================ */}
       <div className="bg-white rounded-xl border border-gray-200 mb-4 overflow-hidden">
         <div className="px-4 py-3 border-b border-gray-100 bg-gray-50">
@@ -835,7 +839,7 @@ export default function OrderDetailPage() {
       </div>
 
       {/* ============================================================ */}
-      {/* 5. 备注 - 单独一个卡片 */}
+      {/* 5. 备注 */}
       {/* ============================================================ */}
       <div className="bg-white rounded-xl border border-gray-200 mb-4 overflow-hidden">
         <div className="px-4 py-3 border-b border-gray-100 bg-gray-50">
@@ -867,7 +871,7 @@ export default function OrderDetailPage() {
                     {paymentRecords.isFullPaid ? '已付全款' : `${paymentRecords.percent}%`}
                   </span>
                   <span className="text-sm font-medium text-gray-700">
-                    {paymentRecords.currency} {paymentRecords.paid.toFixed(2)} / {paymentRecords.currency} {paymentRecords.total.toFixed(2)}
+                    {paymentRecords.currency} {formatAmount(paymentRecords.paid)} / {paymentRecords.currency} {formatAmount(paymentRecords.total)}
                   </span>
                 </div>
                 <div className="w-full bg-gray-200 rounded-full h-2.5">
@@ -883,16 +887,16 @@ export default function OrderDetailPage() {
               <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-sm">
                 <div>
                   <div className="text-xs text-gray-400">订单总金额</div>
-                  <div className="font-semibold">{paymentRecords.currency} {paymentRecords.total.toFixed(2)}</div>
+                  <div className="font-semibold">{paymentRecords.currency} {formatAmount(paymentRecords.total)}</div>
                 </div>
                 <div>
                   <div className="text-xs text-gray-400">已付金额</div>
-                  <div className="font-semibold text-green-600">{paymentRecords.currency} {paymentRecords.paid.toFixed(2)}</div>
+                  <div className="font-semibold text-green-600">{paymentRecords.currency} {formatAmount(paymentRecords.paid)}</div>
                 </div>
                 {paymentRecords.pending > 0 && (
                   <div>
                     <div className="text-xs text-gray-400">待付金额</div>
-                    <div className="font-semibold text-orange-500">{paymentRecords.currency} {paymentRecords.pending.toFixed(2)}</div>
+                    <div className="font-semibold text-orange-500">{paymentRecords.currency} {formatAmount(paymentRecords.pending)}</div>
                   </div>
                 )}
                 <div>

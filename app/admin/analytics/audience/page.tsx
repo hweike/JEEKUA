@@ -1,5 +1,3 @@
-// app/admin/analytics/audience/page.tsx
-
 'use client';
 
 import { useState, useEffect } from 'react';
@@ -12,60 +10,61 @@ export default function AudiencePage() {
   const [dateRange, setDateRange] = useState<DateRange>('30d');
   const [startAt, setStartAt] = useState<number>(Date.now() - 30 * 24 * 60 * 60 * 1000);
   const [endAt, setEndAt] = useState<number>(Date.now());
-  
+
   const [countryData, setCountryData] = useState<MetricItem[]>([]);
   const [cityData, setCityData] = useState<MetricItem[]>([]);
   const [languageData, setLanguageData] = useState<MetricItem[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
+    // ✅ 每次 effect 都创建新的 AbortController
+    const controller = new AbortController();
+    const { signal } = controller;
+
+    const fetchData = async () => {
+      setLoading(true);
+      try {
+        const [countryRes, cityRes, languageRes] = await Promise.all([
+          fetch(`/api/admin/analytics/metrics?startAt=${startAt}&endAt=${endAt}&type=country&limit=10`, { signal }),
+          fetch(`/api/admin/analytics/metrics?startAt=${startAt}&endAt=${endAt}&type=city&limit=10`, { signal }),
+          fetch(`/api/admin/analytics/metrics?startAt=${startAt}&endAt=${endAt}&type=language&limit=8`, { signal }),
+        ]);
+
+        let countries: MetricItem[] = [];
+        let cities: MetricItem[] = [];
+        let languages: MetricItem[] = [];
+
+        try { countries = await countryRes.json(); } catch {}
+        try { cities = await cityRes.json(); } catch {}
+        try { languages = await languageRes.json(); } catch {}
+
+        // ✅ 组件卸载后不再 setState
+        if (!signal.aborted) {
+          setCountryData(Array.isArray(countries) ? countries : []);
+          setCityData(Array.isArray(cities) ? cities : []);
+          setLanguageData(Array.isArray(languages) ? languages : []);
+        }
+      } catch (error: any) {
+        // ✅ abort 导致的错误，忽略
+        if (error?.name === 'AbortError') return;
+        console.error('Failed to fetch audience data:', error);
+        if (!signal.aborted) {
+          setCountryData([]);
+          setCityData([]);
+          setLanguageData([]);
+        }
+      } finally {
+        if (!signal.aborted) setLoading(false);
+      }
+    };
+
     fetchData();
+
+    // ✅ cleanup：组件卸载或依赖变化时取消请求
+    return () => {
+      controller.abort();
+    };
   }, [startAt, endAt]);
-
-  const fetchData = async () => {
-    setLoading(true);
-    try {
-      const [countryRes, cityRes, languageRes] = await Promise.all([
-        fetch(`/api/admin/analytics/metrics?startAt=${startAt}&endAt=${endAt}&type=country&limit=10`),
-        fetch(`/api/admin/analytics/metrics?startAt=${startAt}&endAt=${endAt}&type=city&limit=10`),
-        fetch(`/api/admin/analytics/metrics?startAt=${startAt}&endAt=${endAt}&type=language&limit=8`),
-      ]);
-
-      // 安全解析 JSON，如果失败则使用空数组
-      let countries: MetricItem[] = [];
-      let cities: MetricItem[] = [];
-      let languages: MetricItem[] = [];
-
-      try {
-        countries = await countryRes.json();
-      } catch {
-        // ignore
-      }
-      try {
-        cities = await cityRes.json();
-      } catch {
-        // ignore
-      }
-      try {
-        languages = await languageRes.json();
-      } catch {
-        // ignore
-      }
-
-      // 确保是数组
-      setCountryData(Array.isArray(countries) ? countries : []);
-      setCityData(Array.isArray(cities) ? cities : []);
-      setLanguageData(Array.isArray(languages) ? languages : []);
-    } catch (error) {
-      console.error('Failed to fetch audience data:', error);
-      // 出错时全部置为空数组
-      setCountryData([]);
-      setCityData([]);
-      setLanguageData([]);
-    } finally {
-      setLoading(false);
-    }
-  };
 
   const handleDateChange = (range: DateRange, start: number, end: number) => {
     setDateRange(range);

@@ -6,7 +6,7 @@ import { getTranslations } from 'next-intl/server';
 import { injectRuntimeDataSafe } from '@/lib/webbuilder/runtime-injector';
 import { TemplateRenderer } from '@/components/webbuilder/TemplateRenderer';
 import { getCachedBlogConfig, getCachedBlogCategories, getCachedBlogPosts } from '@/lib/blog';
-import { supabase } from '@/lib/supabase/client';
+import sql from '@/lib/db/admin';
 import { extractAllTextIds } from '@/lib/webbuilder/text-utils';
 import { withDynamicLocale } from '@/lib/withPageLocale';
 import { getSeoInput } from '@/lib/seo/getSeoInput';
@@ -36,39 +36,25 @@ interface StructuredDataWithGraph {
 const DEFAULT_SITE_ID = process.env.NEXT_PUBLIC_SITE_ID || '000001';
 const DEFAULT_BLOG_TEMPLATE_ID = 'default_blog_published';
 
-// ===== 缓存：布局查询 =====
+// ===== 缓存：布局查询（已迁移到直连）=====
 const getCachedLayout = unstable_cache(
   async (templateId: string) => {
-    return supabase
-      .from('site_pages')
-      .select('id, template, template_data, template_hash, content, type')
-      .eq('site_id', DEFAULT_SITE_ID)
-      .eq('locale', 'base')
-      .eq('template', templateId)
-      .maybeSingle();
+    try {
+      const rows = await sql<any[]>`
+        SELECT id, template, template_data, template_hash, content, type
+        FROM public.site_pages
+        WHERE site_id = ${DEFAULT_SITE_ID}
+          AND locale = 'base'
+          AND template = ${templateId}
+        LIMIT 1
+      `;
+      return { data: rows[0] ?? null, error: null };
+    } catch (error: any) {
+      console.error('[getCachedLayout] 查询失败:', error);
+      return { data: null, error };
+    }
   },
   ['blog-home-layout'],
-  { revalidate: 3600 }
-);
-
-// ===== 缓存：翻译文本 =====
-const getCachedTexts = unstable_cache(
-  async (templateId: string, locale: string, textIds: string[]) => {
-    if (textIds.length === 0) return {};
-    const { data, error } = await supabase
-      .from('component_texts')
-      .select('text_id, text')
-      .eq('site_id', DEFAULT_SITE_ID)
-      .eq('template_id', templateId)
-      .eq('locale', locale)
-      .in('text_id', textIds);
-    if (error) {
-      console.error('[Texts] 查询失败:', error);
-      return {};
-    }
-    return data.reduce((acc, row) => ({ ...acc, [row.text_id]: row.text }), {});
-  },
-  ['blog-home-texts'],
   { revalidate: 3600 }
 );
 
@@ -80,8 +66,14 @@ export async function generateMetadata({
   params: Promise<{ locale: string }>;
   searchParams: Promise<{ category?: string }>;
 }) {
-  const { locale } = await params;
-  const { category: selectedCategory } = await searchParams;
+  const resolvedParams = await params;
+  if (!resolvedParams?.locale) {
+    return { title: 'Blog', robots: 'noindex, follow' };
+  }
+
+  const { locale } = resolvedParams;
+  const resolvedSearchParams = await searchParams;
+  const { category: selectedCategory } = resolvedSearchParams || {};
 
   const settings = await getSiteSettings();
   const baseUrl = (settings.websiteUrl || process.env.NEXT_PUBLIC_BASE_URL || '').replace(/\/+$/, '');
@@ -94,7 +86,6 @@ export async function generateMetadata({
     getCachedBlogPosts(locale),
   ]);
 
-  // 如果指定了分类，但分类不存在，返回 fallback（noindex）
   let category: Category | null = null;
   if (selectedCategory) {
     category = categories.find((c) => c.slug === selectedCategory) || null;
@@ -109,10 +100,7 @@ export async function generateMetadata({
   const data = { blogConfig, categories, posts, siteName, baseUrl, t };
   const seoInput = await getSeoInput('blogCategory', 'home', locale, data);
   if (!seoInput) {
-    return {
-      title: blogConfig.name || 'Blog',
-      robots: 'index, follow',
-    };
+    return { title: blogConfig.name || 'Blog', robots: 'index, follow' };
   }
 
   const { metadata } = await generatePageMetadata(seoInput, locale);
@@ -124,7 +112,7 @@ export async function generateMetadata({
   };
 }
 
-// ===== 内容组件（用于 Suspense） =====
+// ===== 内容组件 =====
 interface BlogHomeContentProps {
   locale: string;
   selectedCategorySlug?: string | null;
@@ -142,7 +130,6 @@ async function BlogHomeContent({ locale, selectedCategorySlug }: BlogHomeContent
     getCachedBlogPosts(locale),
   ]);
 
-  // 如果指定了分类，过滤文章
   let currentCategory: Category | null = null;
   let posts = allPosts;
   if (selectedCategorySlug) {
@@ -152,10 +139,8 @@ async function BlogHomeContent({ locale, selectedCategorySlug }: BlogHomeContent
     }
   }
 
-  // 确定模板 ID：使用可选链和空值合并避免 TypeScript 错误
   const templateId = currentCategory?.template || DEFAULT_BLOG_TEMPLATE_ID;
 
-  // 查询布局（缓存）
   const { data: layoutPage, error: layoutError } = await getCachedLayout(templateId);
   if (layoutError) {
     console.error('[BlogHomeContent] 查询布局失败:', layoutError);
@@ -189,8 +174,8 @@ async function BlogHomeContent({ locale, selectedCategorySlug }: BlogHomeContent
 
   const actualTemplateId = layoutPageData.template || finalTemplateId;
 
-  const textIds = extractAllTextIds(templateData);
-  const texts = await getCachedTexts(actualTemplateId, locale, textIds);
+  // ✅ component_texts 表已废弃，texts 恒为空对象
+  const texts: Record<string, string> = {};
 
   const runtimeData = {
     entityType: 'blog',
@@ -214,17 +199,12 @@ async function BlogHomeContent({ locale, selectedCategorySlug }: BlogHomeContent
     }
   }
 
-  // 生成 JSON-LD（使用类型断言）
   const seoData = { blogConfig, categories, posts, siteName, baseUrl, t };
   const seoInput = await getSeoInput('blogCategory', 'home', locale, seoData);
   let jsonLdScripts: string[] = [];
   if (seoInput?.structuredData) {
     const data = seoInput.structuredData as StructuredDataWithGraph;
-    if (data['@graph'] && Array.isArray(data['@graph'])) {
-      jsonLdScripts = [JSON.stringify(data)];
-    } else {
-      jsonLdScripts = [JSON.stringify(data)];
-    }
+    jsonLdScripts = [JSON.stringify(data)];
   }
 
   return (
@@ -248,8 +228,14 @@ interface BlogIndexPageProps {
 }
 
 async function BlogIndexPage({ params, searchParams }: BlogIndexPageProps) {
-  const { locale } = await params;
-  const { category: selectedCategory } = await searchParams;
+  const resolvedParams = await params;
+  if (!resolvedParams?.locale) {
+    notFound();
+  }
+
+  const { locale } = resolvedParams;
+  const resolvedSearchParams = await searchParams;
+  const { category: selectedCategory } = resolvedSearchParams || {};
 
   return (
     <Suspense fallback={<BlogLoading />}>

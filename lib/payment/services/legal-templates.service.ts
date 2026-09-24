@@ -1,5 +1,5 @@
 // lib/payment/services/legal-templates.service.ts
-import { supabase } from '@/lib/supabase/client';
+import sql from '@/lib/db/admin';
 
 export interface LegalTemplate {
   id: string;
@@ -35,162 +35,149 @@ export interface UpdateTemplateInput {
 const DEFAULT_SITE_ID = process.env.NEXT_PUBLIC_SITE_ID || '000001';
 
 export const legalTemplateService = {
-  /**
-   * 获取所有模板
-   */
   async list(siteId: string = DEFAULT_SITE_ID): Promise<LegalTemplate[]> {
-    const { data, error } = await supabase
-      .from('legal_templates')
-      .select('*')
-      .eq('site_id', siteId)
-      .is('deleted_at', null)
-      .order('sort_order', { ascending: true })
-      .order('created_at', { ascending: false });
-
-    if (error) {
+    try {
+      return await sql<LegalTemplate[]>`
+        SELECT * FROM public.legal_templates
+        WHERE site_id = ${siteId}
+          AND deleted_at IS NULL
+        ORDER BY sort_order ASC, created_at DESC
+      `;
+    } catch (error: any) {
       console.error('获取模板列表失败:', error);
       throw new Error(`获取模板列表失败: ${error.message}`);
     }
-    return data || [];
   },
 
-  /**
-   * 获取默认模板
-   */
   async getDefault(siteId: string = DEFAULT_SITE_ID): Promise<LegalTemplate | null> {
-    const { data, error } = await supabase
-      .from('legal_templates')
-      .select('*')
-      .eq('site_id', siteId)
-      .eq('is_default', true)
-      .is('deleted_at', null)
-      .maybeSingle();
-
-    if (error) {
+    try {
+      const rows = await sql<LegalTemplate[]>`
+        SELECT * FROM public.legal_templates
+        WHERE site_id = ${siteId}
+          AND is_default = true
+          AND deleted_at IS NULL
+        LIMIT 1
+      `;
+      return rows[0] || null;
+    } catch (error: any) {
       console.error('获取默认模板失败:', error);
       throw new Error(`获取默认模板失败: ${error.message}`);
     }
-    return data || null;
   },
 
-  /**
-   * 根据ID获取模板
-   */
   async getById(id: string, siteId: string = DEFAULT_SITE_ID): Promise<LegalTemplate | null> {
-    const { data, error } = await supabase
-      .from('legal_templates')
-      .select('*')
-      .eq('site_id', siteId)
-      .eq('id', id)
-      .is('deleted_at', null)
-      .maybeSingle();
-
-    if (error) {
+    try {
+      const rows = await sql<LegalTemplate[]>`
+        SELECT * FROM public.legal_templates
+        WHERE site_id = ${siteId}
+          AND id = ${id}
+          AND deleted_at IS NULL
+        LIMIT 1
+      `;
+      return rows[0] || null;
+    } catch (error: any) {
       console.error('获取模板详情失败:', error);
       throw new Error(`获取模板详情失败: ${error.message}`);
     }
-    return data || null;
   },
 
-  /**
-   * 创建模板
-   */
   async create(input: CreateTemplateInput, siteId: string = DEFAULT_SITE_ID): Promise<LegalTemplate> {
-    // 如果设为默认，先取消其他默认
+    // 1. 如果设为默认，先取消其他默认
     if (input.is_default) {
-      await supabase
-        .from('legal_templates')
-        .update({ is_default: false })
-        .eq('site_id', siteId)
-        .eq('is_default', true);
+      try {
+        await sql`
+          UPDATE public.legal_templates
+          SET is_default = false
+          WHERE site_id = ${siteId}
+            AND is_default = true
+        `;
+      } catch {}
     }
 
-    const insertData = {
-      site_id: siteId,
-      name: input.name,
-      content: input.content,
-      description: input.description || '',
-      is_default: input.is_default || false,
-      sort_order: input.sort_order || 0,
-      created_by: input.created_by || '',
-    };
-
-    const { data, error } = await supabase
-      .from('legal_templates')
-      .insert(insertData)
-      .select()
-      .single();
-
-    if (error) {
+    // 2. 插入
+    try {
+      const rows = await sql<LegalTemplate[]>`
+        INSERT INTO public.legal_templates (
+          site_id, name, content, description, is_default, sort_order, created_by
+        ) VALUES (
+          ${siteId}, ${input.name}, ${input.content},
+          ${input.description || ''}, ${input.is_default || false},
+          ${input.sort_order || 0}, ${input.created_by || ''}
+        )
+        RETURNING *
+      `;
+      if (!rows[0]) throw new Error('Insert returned no data');
+      return rows[0];
+    } catch (error: any) {
       console.error('创建模板失败:', error);
       throw new Error(`创建模板失败: ${error.message}`);
     }
-    return data;
   },
 
-  /**
-   * 更新模板
-   */
-  async update(id: string, input: UpdateTemplateInput, siteId: string = DEFAULT_SITE_ID): Promise<LegalTemplate> {
-    // 如果设为默认，先取消其他默认
+  async update(
+    id: string,
+    input: UpdateTemplateInput,
+    siteId: string = DEFAULT_SITE_ID
+  ): Promise<LegalTemplate> {
+    // 1. 如果设为默认，先取消其他默认（排除自己）
     if (input.is_default) {
-      await supabase
-        .from('legal_templates')
-        .update({ is_default: false })
-        .eq('site_id', siteId)
-        .eq('is_default', true)
-        .not('id', 'eq', id);
+      try {
+        await sql`
+          UPDATE public.legal_templates
+          SET is_default = false
+          WHERE site_id = ${siteId}
+            AND is_default = true
+            AND id != ${id}
+        `;
+      } catch {}
     }
 
-    const updateData: any = {
-      updated_at: new Date().toISOString(),
-    };
+    // 2. 动态 SET
+    const setClauses: any[] = [sql`updated_at = ${new Date().toISOString()}`];
+    if (input.name !== undefined) setClauses.push(sql`name = ${input.name}`);
+    if (input.content !== undefined) setClauses.push(sql`content = ${input.content}`);
+    if (input.description !== undefined) setClauses.push(sql`description = ${input.description}`);
+    if (input.is_default !== undefined) setClauses.push(sql`is_default = ${input.is_default}`);
+    if (input.sort_order !== undefined) setClauses.push(sql`sort_order = ${input.sort_order}`);
 
-    if (input.name !== undefined) updateData.name = input.name;
-    if (input.content !== undefined) updateData.content = input.content;
-    if (input.description !== undefined) updateData.description = input.description;
-    if (input.is_default !== undefined) updateData.is_default = input.is_default;
-    if (input.sort_order !== undefined) updateData.sort_order = input.sort_order;
+    const setClause = setClauses.reduce(
+      (acc, c, i) => (i === 0 ? c : sql`${acc}, ${c}`),
+      sql``
+    );
 
-    const { data, error } = await supabase
-      .from('legal_templates')
-      .update(updateData)
-      .eq('site_id', siteId)
-      .eq('id', id)
-      .select()
-      .single();
-
-    if (error) {
+    // 3. 更新
+    try {
+      const rows = await sql<LegalTemplate[]>`
+        UPDATE public.legal_templates
+        SET ${setClause}
+        WHERE site_id = ${siteId}
+          AND id = ${id}
+        RETURNING *
+      `;
+      if (!rows[0]) throw new Error('Template not found');
+      return rows[0];
+    } catch (error: any) {
       console.error('更新模板失败:', error);
       throw new Error(`更新模板失败: ${error.message}`);
     }
-    return data;
   },
 
-  /**
-   * 删除模板（软删除）
-   */
   async delete(id: string, siteId: string = DEFAULT_SITE_ID): Promise<void> {
-    const { error } = await supabase
-      .from('legal_templates')
-      .update({
-        deleted_at: new Date().toISOString(),
-        updated_at: new Date().toISOString(),
-      })
-      .eq('site_id', siteId)
-      .eq('id', id);
-
-    if (error) {
+    try {
+      await sql`
+        UPDATE public.legal_templates
+        SET deleted_at = ${new Date().toISOString()},
+            updated_at = ${new Date().toISOString()}
+        WHERE site_id = ${siteId}
+          AND id = ${id}
+      `;
+    } catch (error: any) {
       console.error('删除模板失败:', error);
       throw new Error(`删除模板失败: ${error.message}`);
     }
   },
 
-  /**
-   * 批量创建默认模板（用于初始化）
-   */
   async initializeDefaults(siteId: string = DEFAULT_SITE_ID): Promise<void> {
-    // 检查是否已有模板
     const existing = await this.list(siteId);
     if (existing.length > 0) return;
 
@@ -209,7 +196,7 @@ export const legalTemplateService = {
       },
     ];
 
-    for (const tpl of defaultTemplates) {
+    for (const tpl of tpls) {
       await this.create(tpl, siteId);
     }
   },

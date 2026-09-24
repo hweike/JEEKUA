@@ -1,13 +1,12 @@
 // app/api/admin/productCrawl/route.ts
 import { NextRequest, NextResponse } from 'next/server';
-import { supabase } from '@/lib/supabase/client';
+import sql from '@/lib/db/admin';
 
 const DEFAULT_SITE_ID = '000001';
 
 // ============================================================
 // GET - 获取采集数据列表（只显示父商品）
 // ============================================================
-
 export async function GET(request: NextRequest) {
   try {
     const searchParams = request.nextUrl.searchParams;
@@ -17,40 +16,53 @@ export async function GET(request: NextRequest) {
     const page = parseInt(searchParams.get('page') || '1');
     const size = parseInt(searchParams.get('size') || '20');
 
-    let query = supabase
-      .from('crawler_products')
-      .select('*', { count: 'exact' })
-      .eq('site_id', DEFAULT_SITE_ID)
-      .is('parent_product_id', null);  // 🔥 只显示父商品
+    const conditions: any[] = [
+      sql`site_id = ${DEFAULT_SITE_ID}`,
+      sql`parent_product_id IS NULL`,
+    ];
 
-    if (status !== 'all') {
-      query = query.eq('import_status', status);
-    }
-
-    if (platform) {
-      query = query.eq('platform', platform);
-    }
-
+    if (status !== 'all') conditions.push(sql`import_status = ${status}`);
+    if (platform) conditions.push(sql`platform = ${platform}`);
     if (keyword) {
-      query = query.or(`product_name.ilike.%${keyword}%,sku.ilike.%${keyword}%`);
+      const p = `%${keyword}%`;
+      conditions.push(sql`(product_name ILIKE ${p} OR sku ILIKE ${p})`);
     }
 
-    const from = (page - 1) * size;
-    const to = from + size - 1;
+    const whereClause = conditions.reduce(
+      (acc, c, i) => (i === 0 ? c : sql`${acc} AND ${c}`),
+      sql``
+    );
 
-    const { data, error, count } = await query
-      .order('collected_at', { ascending: false })
-      .range(from, to);
+    const offset = (page - 1) * size;
 
-    if (error) {
-      throw new Error(error.message);
+    let count = 0;
+    try {
+      const countRows = await sql<{ count: string }[]>`
+        SELECT COUNT(*)::text AS count FROM public.crawler_products
+        WHERE ${whereClause}
+      `;
+      count = parseInt(countRows[0]?.count || '0', 10);
+    } catch (countErr: any) {
+      throw new Error(countErr.message);
+    }
+
+    let data: any[];
+    try {
+      data = await sql<any[]>`
+        SELECT * FROM public.crawler_products
+        WHERE ${whereClause}
+        ORDER BY collected_at DESC
+        LIMIT ${size} OFFSET ${offset}
+      `;
+    } catch (dataErr: any) {
+      throw new Error(dataErr.message);
     }
 
     return NextResponse.json({
-      items: data || [],
-      total: count || 0,
+      items: data,
+      total: count,
       page,
-      size
+      size,
     });
   } catch (error) {
     console.error('获取采集数据失败:', error);
@@ -64,7 +76,6 @@ export async function GET(request: NextRequest) {
 // ============================================================
 // DELETE - 删除采集数据（批量）
 // ============================================================
-
 export async function DELETE(request: NextRequest) {
   try {
     const body = await request.json();
@@ -77,26 +88,33 @@ export async function DELETE(request: NextRequest) {
       );
     }
 
-    // 同时删除父商品及其变体
     for (const id of crawlerIds) {
-      // 1. 删除该父商品的所有变体
-      await supabase
-        .from('crawler_products')
-        .delete()
-        .eq('site_id', DEFAULT_SITE_ID)
-        .eq('parent_product_id', id);
+      // 1. 删除变体
+      try {
+        await sql`
+          DELETE FROM public.crawler_products
+          WHERE site_id = ${DEFAULT_SITE_ID}
+            AND parent_product_id = ${id}
+        `;
+      } catch (e) {
+        console.error(`删除变体失败: ${id}`, e);
+      }
 
-      // 2. 删除父商品本身
-      await supabase
-        .from('crawler_products')
-        .delete()
-        .eq('site_id', DEFAULT_SITE_ID)
-        .eq('crawler_id', id);
+      // 2. 删除父商品
+      try {
+        await sql`
+          DELETE FROM public.crawler_products
+          WHERE site_id = ${DEFAULT_SITE_ID}
+            AND crawler_id = ${id}
+        `;
+      } catch (e) {
+        console.error(`删除父商品失败: ${id}`, e);
+      }
     }
 
     return NextResponse.json({
       success: true,
-      deleted_count: crawlerIds.length
+      deleted_count: crawlerIds.length,
     });
   } catch (error) {
     console.error('删除采集数据失败:', error);

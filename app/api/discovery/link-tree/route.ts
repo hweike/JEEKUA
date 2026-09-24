@@ -1,5 +1,6 @@
+// app/api/discovery/link-tree/route.ts
 import { NextRequest, NextResponse } from 'next/server';
-import { supabase } from '@/lib/supabase/client';
+import sql from '@/lib/db/admin';
 import { readFullData } from '@/lib/products/utils/helpers';
 
 const SITE_ID = process.env.NEXT_PUBLIC_SITE_ID || '000001';
@@ -7,7 +8,7 @@ const PAGE_SIZE = 50;
 
 // 🔥 内存缓存
 const treeCache = new Map<string, { data: any; timestamp: number }>();
-const CACHE_TTL = 60 * 1000; // 60 秒
+const CACHE_TTL = 60 * 1000;
 
 function getCacheKey(locale: string): string {
   return `link-tree_${locale}`;
@@ -67,38 +68,41 @@ export async function GET(req: NextRequest) {
   const type = searchParams.get('type');
   const page = parseInt(searchParams.get('page') || '1', 10);
 
-  // 分页加载产品（不缓存，因为分页参数不同）
+  // 分页加载产品
   if (type === 'product') {
-    const countQuery = supabase
-      .from('pages')
-      .select('id', { count: 'exact', head: true })
-      .eq('site_id', SITE_ID)
-      .eq('locale', locale)
-      .eq('type', 'product')
-      .not('id', 'like', '%/%');
-
-    const { count, error: countError } = await countQuery;
-    if (countError) {
+    let count = 0;
+    try {
+      const countRows = await sql<{ count: string }[]>`
+        SELECT COUNT(*)::text AS count FROM public.pages
+        WHERE site_id = ${SITE_ID}
+          AND locale = ${locale}
+          AND type = 'product'
+          AND id NOT LIKE '%/%'
+      `;
+      count = parseInt(countRows[0]?.count || '0', 10);
+    } catch (countError: any) {
+      console.error('Count products error:', countError);
       return NextResponse.json({ error: 'Failed to count products' }, { status: 500 });
     }
 
-    const from = (page - 1) * PAGE_SIZE;
-    const to = from + PAGE_SIZE - 1;
-    const { data: items, error } = await supabase
-      .from('pages')
-      .select('id, title, url, type')
-      .eq('site_id', SITE_ID)
-      .eq('locale', locale)
-      .eq('type', 'product')
-      .not('id', 'like', '%/%')
-      .order('title', { ascending: true })
-      .range(from, to);
-
-    if (error) {
+    const offset = (page - 1) * PAGE_SIZE;
+    let items: any[];
+    try {
+      items = await sql<any[]>`
+        SELECT id, title, url, type FROM public.pages
+        WHERE site_id = ${SITE_ID}
+          AND locale = ${locale}
+          AND type = 'product'
+          AND id NOT LIKE '%/%'
+        ORDER BY title ASC
+        LIMIT ${PAGE_SIZE} OFFSET ${offset}
+      `;
+    } catch (error: any) {
+      console.error('Fetch products error:', error);
       return NextResponse.json({ error: 'Failed to fetch products' }, { status: 500 });
     }
 
-    const hasMore = (page * PAGE_SIZE) < (count || 0);
+    const hasMore = (page * PAGE_SIZE) < count;
     return NextResponse.json({
       items: items.map(item => ({
         id: item.id,
@@ -113,7 +117,7 @@ export async function GET(req: NextRequest) {
     });
   }
 
-  // 🔥 检查缓存
+  // 检查缓存
   const cachedTree = getCache(locale);
   if (cachedTree) {
     return NextResponse.json(
@@ -126,7 +130,7 @@ export async function GET(req: NextRequest) {
     );
   }
 
-  // 🔥 并行读取产品数据、查询本地 pages、查询 global 文档库、查询 global 文档
+  // 并行读取
   const [
     productDataResult,
     rowsLocalResult,
@@ -134,29 +138,26 @@ export async function GET(req: NextRequest) {
     rowsGlobalDocResult,
   ] = await Promise.allSettled([
     readFullData(locale).catch(() => ({ productLines: [], categories: [] })),
-    supabase
-      .from('pages')
-      .select('id, title, url, type')
-      .eq('site_id', SITE_ID)
-      .eq('locale', locale)
-      .order('type', { ascending: true })
-      .order('title', { ascending: true }),
-    // 🔥 查询 global 语言的文档库
-    supabase
-      .from('pages')
-      .select('id, title, url, type')
-      .eq('site_id', SITE_ID)
-      .eq('locale', 'global')
-      .eq('type', 'docLibrary')
-      .order('title', { ascending: true }),
-    // 🔥 查询 global 语言的文档
-    supabase
-      .from('pages')
-      .select('id, title, url, type')
-      .eq('site_id', SITE_ID)
-      .eq('locale', 'global')
-      .eq('type', 'doc')
-      .order('title', { ascending: true }),
+    sql<any[]>`
+      SELECT id, title, url, type FROM public.pages
+      WHERE site_id = ${SITE_ID}
+        AND locale = ${locale}
+      ORDER BY type ASC, title ASC
+    `,
+    sql<any[]>`
+      SELECT id, title, url, type FROM public.pages
+      WHERE site_id = ${SITE_ID}
+        AND locale = 'global'
+        AND type = 'docLibrary'
+      ORDER BY title ASC
+    `,
+    sql<any[]>`
+      SELECT id, title, url, type FROM public.pages
+      WHERE site_id = ${SITE_ID}
+        AND locale = 'global'
+        AND type = 'doc'
+      ORDER BY title ASC
+    `,
   ]);
 
   const productData = productDataResult.status === 'fulfilled'
@@ -164,15 +165,15 @@ export async function GET(req: NextRequest) {
     : { productLines: [], categories: [] };
 
   const rowsLocal = rowsLocalResult.status === 'fulfilled'
-    ? rowsLocalResult.value.data
+    ? rowsLocalResult.value
     : [];
 
   const rowsGlobalDocLibrary = rowsGlobalDocLibraryResult.status === 'fulfilled'
-    ? rowsGlobalDocLibraryResult.value.data
+    ? rowsGlobalDocLibraryResult.value
     : [];
 
   const rowsGlobalDoc = rowsGlobalDocResult.status === 'fulfilled'
-    ? rowsGlobalDocResult.value.data
+    ? rowsGlobalDocResult.value
     : [];
 
   if (rowsLocalResult.status === 'rejected') {
@@ -189,7 +190,6 @@ export async function GET(req: NextRequest) {
     });
   }
 
-  // 构建产品分类映射
   const categoryToProductLine = new Map<string, string>();
   for (const cat of productData.categories || []) {
     if (cat.id && cat.productLineId) {
@@ -199,7 +199,6 @@ export async function GET(req: NextRequest) {
 
   const groups: Record<string, Array<{ id: string; label: string; url: string; type: string }>> = {};
 
-  // 处理本地语言的数据
   for (const row of rowsLocal || []) {
     const config = typeConfig[row.type];
     if (!config) continue;
@@ -215,7 +214,7 @@ export async function GET(req: NextRequest) {
     });
   }
 
-  // 🔥 合并 global 文档库到 docLibrary 分组
+  // 合并 global 文档库
   if (rowsGlobalDocLibrary && rowsGlobalDocLibrary.length > 0) {
     if (!groups['docLibrary']) groups['docLibrary'] = [];
     for (const row of rowsGlobalDocLibrary) {
@@ -231,7 +230,7 @@ export async function GET(req: NextRequest) {
     }
   }
 
-  // 🔥 合并 global 文档到 doc 分组
+  // 合并 global 文档
   if (rowsGlobalDoc && rowsGlobalDoc.length > 0) {
     if (!groups['doc']) groups['doc'] = [];
     for (const row of rowsGlobalDoc) {
@@ -247,24 +246,25 @@ export async function GET(req: NextRequest) {
     }
   }
 
-  // 补丁：任何语言下，如果 productCollection 缺失或为空，都尝试补查
+  // 补查 productCollection
   if (!groups['productCollection'] || groups['productCollection'].length === 0) {
-    const { data: patchData, error: patchError } = await supabase
-      .from('pages')
-      .select('id, title, url, type')
-      .eq('site_id', SITE_ID)
-      .eq('locale', locale)
-      .eq('type', 'productCollection')
-      .order('title', { ascending: true });
-
-    if (!patchError && patchData && patchData.length > 0) {
-      groups['productCollection'] = patchData.map(row => ({
-        id: row.id,
-        label: row.title,
-        url: row.url,
-        type: row.type,
-      }));
-    }
+    try {
+      const patchData = await sql<any[]>`
+        SELECT id, title, url, type FROM public.pages
+        WHERE site_id = ${SITE_ID}
+          AND locale = ${locale}
+          AND type = 'productCollection'
+        ORDER BY title ASC
+      `;
+      if (patchData.length > 0) {
+        groups['productCollection'] = patchData.map(row => ({
+          id: row.id,
+          label: row.title,
+          url: row.url,
+          type: row.type,
+        }));
+      }
+    } catch {}
   }
 
   // 构建树
@@ -279,15 +279,10 @@ export async function GET(req: NextRequest) {
           break;
         }
       }
-      tree.push({
-        label,
-        type: key,
-        children: [],
-      });
+      tree.push({ label, type: key, children: [] });
       continue;
     }
 
-    // 🔥 产品分类特殊处理：两级结构
     if (key === 'productCollection') {
       const collections = groups['productCollection'] || [];
       if (collections.length === 0) continue;
@@ -329,7 +324,6 @@ export async function GET(req: NextRequest) {
       });
 
       const collectionTree: any[] = [];
-
       const sortedParents = Array.from(parentCategories.values()).sort((a, b) => {
         const lineA = a.productLineId || '';
         const lineB = b.productLineId || '';
@@ -356,7 +350,7 @@ export async function GET(req: NextRequest) {
           url: parentCat.url,
           id: parentCat.id,
           type: parentCat.type,
-          children: children,
+          children,
         });
       }
 
@@ -368,11 +362,7 @@ export async function GET(req: NextRequest) {
             break;
           }
         }
-        tree.push({
-          label,
-          type: key,
-          children: collectionTree,
-        });
+        tree.push({ label, type: key, children: collectionTree });
       }
       continue;
     }
@@ -434,7 +424,6 @@ export async function GET(req: NextRequest) {
     }
   }
 
-  // 🔥 设置缓存
   setCache(locale, tree);
 
   return NextResponse.json(

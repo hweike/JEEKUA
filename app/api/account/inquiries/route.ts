@@ -2,9 +2,8 @@
 import { NextResponse } from 'next/server';
 import { createInquiryWithCustomer } from '@/lib/CRM/repository';
 import { verifyCustomerToken } from '@/lib/account/server';
-import { supabase } from '@/lib/supabase/client';
+import sql from '@/lib/db/admin';
 
-// 辅助：获取当前用户 ID
 async function getCustomerIdFromRequest(request: Request): Promise<string> {
   const authHeader = request.headers.get('authorization');
   if (!authHeader) throw new Error('未登录');
@@ -19,14 +18,13 @@ export async function GET(request: Request) {
   try {
     const customerId = await getCustomerIdFromRequest(request);
 
-    const { data, error } = await supabase
-      .from('inquiries')
-      .select('*')
-      .eq('customer_id', customerId)
-      .order('created_at', { ascending: false });
+    const data = await sql<any[]>`
+      SELECT * FROM public.inquiries
+      WHERE customer_id = ${customerId}
+      ORDER BY created_at DESC
+    `;
 
-    if (error) throw error;
-    return NextResponse.json(data || []);
+    return NextResponse.json(data);
   } catch (error: any) {
     console.error('GET /api/account/inquiries error:', error);
     return NextResponse.json(

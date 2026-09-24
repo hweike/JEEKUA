@@ -1,4 +1,6 @@
+// app/api/SiteHeadersFooters/config/route.ts
 import { NextRequest, NextResponse } from 'next/server';
+import sql from '@/lib/db/admin';
 import { headerFooterService } from '@/lib/SiteHeadersFooters/header-footer-service';
 import { getConfig, saveConfig } from '@/lib/SiteHeadersFooters/storage';
 
@@ -53,17 +55,13 @@ export async function GET(request: NextRequest) {
     }
 
     try {
-      // 使用 headerFooterService 的方法批量查询（或保持原有 Supabase 查询）
-      // 这里保持原有逻辑（直接查 Supabase）不变，因为批量查询不涉及内存缓存
-      const { supabase } = await import('@/lib/supabase/client');
-      const { data, error } = await supabase
-        .from('site_configs')
-        .select('locale, config')
-        .eq('id', type)
-        .eq('site_id', '000001')
-        .in('locale', locales);
-
-      if (error) throw error;
+      // ✅ 已迁移：改用 sql 直连
+      const data = await sql<{ locale: string; config: any }[]>`
+        SELECT locale, config FROM public.site_configs
+        WHERE id = ${type}
+          AND site_id = ${'000001'}
+          AND locale IN ${sql(locales)}
+      `;
 
       const result: Record<string, any> = {};
       data.forEach(row => {
@@ -85,7 +83,7 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: 'Invalid type' }, { status: 400 });
   }
 
-  // 强制刷新：直接调用服务层方法从数据库获取最新数据，并更新缓存
+  // 强制刷新
   if (forceRefresh) {
     try {
       let config;
@@ -94,7 +92,6 @@ export async function GET(request: NextRequest) {
       } else {
         config = await headerFooterService.getFooterConfig(locale);
       }
-      // 更新内存缓存，以便后续不带 _t 的请求能直接使用最新数据
       setCache(type, locale, config);
       return NextResponse.json(config);
     } catch (error) {
@@ -103,7 +100,7 @@ export async function GET(request: NextRequest) {
     }
   }
 
-  // 非强制刷新：使用原有缓存逻辑
+  // 非强制刷新：使用缓存
   const cached = getCached(type, locale);
   if (cached !== null) {
     return NextResponse.json(cached);

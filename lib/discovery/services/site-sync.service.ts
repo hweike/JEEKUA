@@ -1,6 +1,6 @@
 // lib/discovery/services/site-sync.service.ts
 // 为 admin/discovery/Site-sync 提供数据服务，包含获取页面同步状态等功能
-import { supabase } from '@/lib/supabase/client';
+import sql from '@/lib/db/admin';
 import { getEnabledLanguages } from '@/lib/languages/settings';
 import { LANGUAGES } from '@/lib/languages/config';
 
@@ -29,9 +29,6 @@ export interface SiteSyncResult {
 
 /**
  * 获取源语言页面列表及其同步进度
- * @param sourceLocale - 源语言代码（如 'en'）
- * @param types - 页面类型过滤：'latest' | 'productCollection' | 'product'
- * @returns 页面列表及目标语言总数
  */
 export async function getSiteSyncStatus(
   sourceLocale: string,
@@ -39,45 +36,48 @@ export async function getSiteSyncStatus(
 ): Promise<SiteSyncResult> {
   // 1. 获取所有已开通的语言
   const enabledCodes = await getEnabledLanguages();
-  const allEnabledLocales = LANGUAGES.filter(lang => enabledCodes.includes(lang.code)).map(lang => lang.code);
+  const allEnabledLocales = LANGUAGES
+    .filter(lang => enabledCodes.includes(lang.code))
+    .map(lang => lang.code);
   const targetLocales = allEnabledLocales.filter(loc => loc !== sourceLocale);
   const totalTargetCount = targetLocales.length;
 
-  // 2. 查询该语言的所有页面（包括原始和翻译页面）
-  let query = supabase
-    .from('pages')
-    .select(`
-      id,
-      site_id,
-      locale,
-      type,
-      title,
-      slug,
-      url,
-      updatedAt,
-      content_hash,
-      source_locale,
-      source_content_hash
-    `)
-    .eq('site_id', SITE_ID)
-    .eq('locale', sourceLocale);
+  // 2. 查询该语言的所有页面（动态 WHERE + ORDER BY）
+  const conditions: any[] = [
+    sql`site_id = ${SITE_ID}`,
+    sql`locale = ${sourceLocale}`,
+  ];
 
-  // 类型过滤
   if (types === 'productCollection') {
-    query = query.eq('type', 'productCollection');
+    conditions.push(sql`type = 'productCollection'`);
   } else if (types === 'product') {
-    query = query.eq('type', 'product');
-  } else if (types === 'latest') {
-    query = query.order('updatedAt', { ascending: false });
-  } else {
-    query = query.order('updatedAt', { ascending: false });
-  }
-  if (types !== 'latest') {
-    query = query.order('title', { ascending: true });
+    conditions.push(sql`type = 'product'`);
   }
 
-  const { data: sourcePages, error: sourceError } = await query;
-  if (sourceError) throw sourceError;
+  const whereClause = conditions.reduce(
+    (acc, c, i) => (i === 0 ? c : sql`${acc} AND ${c}`),
+    sql``
+  );
+
+  // ORDER BY 白名单
+  const orderClause =
+    types === 'latest' || types === 'productCollection' || types === 'product'
+      ? sql`"updatedAt" DESC`
+      : sql`title ASC`;
+
+  let sourcePages: any[];
+  try {
+    sourcePages = await sql<any[]>`
+      SELECT id, site_id, locale, type, title, slug, url,
+             "updatedAt", content_hash, source_locale, source_content_hash
+      FROM public.pages
+      WHERE ${whereClause}
+      ORDER BY ${orderClause}
+    `;
+  } catch (sourceError: any) {
+    throw sourceError;
+  }
+
   if (!sourcePages || sourcePages.length === 0) {
     return { pages: [], totalTargetCount };
   }
@@ -86,22 +86,21 @@ export async function getSiteSyncStatus(
   let pagesWithSync: SyncPageItem[];
 
   if (sourceLocale === 'en') {
-    // ---- 英文源：需要区分原始页面和翻译页面 ----
     const originalPages = sourcePages.filter(p => p.source_locale === null);
     const translatedPages = sourcePages.filter(p => p.source_locale !== null);
 
-    // 3a. 原始英文页面：计算同步进度（到其他语言）
+    // 3a. 原始英文页面：计算同步进度
     let syncMap = new Map<string, Set<string>>();
-    if (originalPages.length > 0) {
+    if (originalPages.length > 0 && targetLocales.length > 0) {
       const pageIds = originalPages.map(p => p.id);
-      const { data: targetPages, error: targetError } = await supabase
-        .from('pages')
-        .select('id, locale, source_content_hash')
-        .in('id', pageIds)
-        .eq('site_id', SITE_ID)
-        .eq('source_locale', sourceLocale)
-        .in('locale', targetLocales);
-      if (!targetError && targetPages) {
+      try {
+        const targetPages = await sql<{ id: string; locale: string; source_content_hash: string | null }[]>`
+          SELECT id, locale, source_content_hash FROM public.pages
+          WHERE id IN ${sql(pageIds)}
+            AND site_id = ${SITE_ID}
+            AND source_locale = ${sourceLocale}
+            AND locale IN ${sql(targetLocales)}
+        `;
         originalPages.forEach(p => syncMap.set(p.id, new Set()));
         for (const tp of targetPages) {
           const srcHash = originalPages.find(sp => sp.id === tp.id)?.content_hash;
@@ -109,6 +108,8 @@ export async function getSiteSyncStatus(
             syncMap.get(tp.id)?.add(tp.locale);
           }
         }
+      } catch {
+        // 查询失败时 syncMap 保持空
       }
     }
 
@@ -128,7 +129,6 @@ export async function getSiteSyncStatus(
       source_content_hash: page.source_content_hash,
     }));
 
-    // 3b. 翻译页面（从中文同步来的）：标记为“已从中文站同步”，不可再同步
     const translatedResults: SyncPageItem[] = translatedPages.map(page => ({
       id: page.id,
       locale: page.locale,
@@ -138,22 +138,19 @@ export async function getSiteSyncStatus(
       url: page.url,
       updatedAt: page.updatedAt,
       content_hash: page.content_hash,
-      syncedCount: totalTargetCount,      // 显示为完全同步
+      syncedCount: totalTargetCount,
       totalTargetCount,
-      needSync: false,                    // 不显示“待同步”
+      needSync: false,
       source_locale: page.source_locale,
       source_content_hash: page.source_content_hash,
     }));
 
-    // 合并结果（可按标题排序）
     pagesWithSync = [...originalResults, ...translatedResults];
     pagesWithSync.sort((a, b) => a.title.localeCompare(b.title));
   } else {
-    // ---- 非英文源（如中文）：区分原始页面和从英文同步来的页面 ----
     const originalPages = sourcePages.filter(p => p.source_locale === null);
-    const translatedPages = sourcePages.filter(p => p.source_locale === 'en'); // 假设只有从英文同步来的
+    const translatedPages = sourcePages.filter(p => p.source_locale === 'en');
 
-    // 原始页面：显示“待同步”
     const originalResults: SyncPageItem[] = originalPages.map(page => ({
       id: page.id,
       locale: page.locale,
@@ -164,13 +161,12 @@ export async function getSiteSyncStatus(
       updatedAt: page.updatedAt,
       content_hash: page.content_hash,
       syncedCount: 0,
-      totalTargetCount: 1,               // 只有英文一个目标
-      needSync: true,                    // 待同步
+      totalTargetCount: 1,
+      needSync: true,
       source_locale: page.source_locale,
       source_content_hash: page.source_content_hash,
     }));
 
-    // 翻译页面（从英文同步来的）：显示“已从英文站同步”
     const translatedResults: SyncPageItem[] = translatedPages.map(page => ({
       id: page.id,
       locale: page.locale,
@@ -180,9 +176,9 @@ export async function getSiteSyncStatus(
       url: page.url,
       updatedAt: page.updatedAt,
       content_hash: page.content_hash,
-      syncedCount: 1,                    // 已同步
+      syncedCount: 1,
       totalTargetCount: 1,
-      needSync: false,                   // 不需要同步
+      needSync: false,
       source_locale: page.source_locale,
       source_content_hash: page.source_content_hash,
     }));
@@ -193,14 +189,12 @@ export async function getSiteSyncStatus(
 
   return {
     pages: pagesWithSync,
-    totalTargetCount: sourceLocale === 'en' ? totalTargetCount : 1, // 非英文目标只有英文
+    totalTargetCount: sourceLocale === 'en' ? totalTargetCount : 1,
   };
 }
 
-// 专门针对中文→英文的同步状态查询，简化逻辑只关注英文是否已同步  
 /**
  * 专门用于中文→英文的同步状态查询
- * 只关注中文页面是否已同步到英文站
  */
 export async function getCn2EnSyncStatus(
   types: string = 'latest'
@@ -214,63 +208,65 @@ export async function getCn2EnSyncStatus(
     return { pages: [], totalTargetCount: 0 };
   }
 
-  // 2. 查询所有中文页面（不再过滤 source_locale）
-  let query = supabase
-    .from('pages')
-    .select(`
-      id,
-      site_id,
-      locale,
-      type,
-      title,
-      slug,
-      url,
-      updatedAt,
-      content_hash,
-      source_locale,
-      source_content_hash
-    `)
-    .eq('site_id', SITE_ID)
-    .eq('locale', sourceLocale);
+  // 2. 查询所有中文页面（动态 WHERE + ORDER BY）
+  const conditions: any[] = [
+    sql`site_id = ${SITE_ID}`,
+    sql`locale = ${sourceLocale}`,
+  ];
 
-  // 类型过滤
   if (types === 'productCollection') {
-    query = query.eq('type', 'productCollection');
+    conditions.push(sql`type = 'productCollection'`);
   } else if (types === 'product') {
-    query = query.eq('type', 'product');
-  } else if (types === 'latest') {
-    query = query.order('updatedAt', { ascending: false });
-  } else {
-    query = query.order('updatedAt', { ascending: false });
-  }
-  if (types !== 'latest') {
-    query = query.order('title', { ascending: true });
+    conditions.push(sql`type = 'product'`);
   }
 
-  const { data: sourcePages, error: sourceError } = await query;
-  if (sourceError) throw sourceError;
+  const whereClause = conditions.reduce(
+    (acc, c, i) => (i === 0 ? c : sql`${acc} AND ${c}`),
+    sql``
+  );
+
+  const orderClause =
+    types === 'latest' || types === 'productCollection' || types === 'product'
+      ? sql`"updatedAt" DESC`
+      : sql`title ASC`;
+
+  let sourcePages: any[];
+  try {
+    sourcePages = await sql<any[]>`
+      SELECT id, site_id, locale, type, title, slug, url,
+             "updatedAt", content_hash, source_locale, source_content_hash
+      FROM public.pages
+      WHERE ${whereClause}
+      ORDER BY ${orderClause}
+    `;
+  } catch (sourceError: any) {
+    throw sourceError;
+  }
+
   if (!sourcePages || sourcePages.length === 0) {
     return { pages: [], totalTargetCount: 1 };
   }
 
-  // 3. 获取所有原始中文页面（source_locale IS NULL）的 ID，用于查询英文翻译记录
+  // 3. 获取原始中文页面 ID，查询英文翻译记录
   const originalPageIds = sourcePages
     .filter(p => p.source_locale === null)
     .map(p => p.id);
 
   let targetPages: any[] = [];
   if (originalPageIds.length > 0) {
-    const { data, error } = await supabase
-      .from('pages')
-      .select('id, source_content_hash')
-      .in('id', originalPageIds)
-      .eq('site_id', SITE_ID)
-      .eq('locale', targetLocale)
-      .eq('source_locale', sourceLocale);
-    if (!error) targetPages = data || [];
+    try {
+      targetPages = await sql<{ id: string; source_content_hash: string | null }[]>`
+        SELECT id, source_content_hash FROM public.pages
+        WHERE id IN ${sql(originalPageIds)}
+          AND site_id = ${SITE_ID}
+          AND locale = ${targetLocale}
+          AND source_locale = ${sourceLocale}
+      `;
+    } catch {
+      targetPages = [];
+    }
   }
 
-  // 构建映射：原始中文页面ID -> 是否已同步到英文
   const sourceHashMap = new Map<string, string>();
   sourcePages.forEach(p => sourceHashMap.set(p.id, p.content_hash));
 
@@ -292,14 +288,12 @@ export async function getCn2EnSyncStatus(
     let needSync: boolean;
 
     if (isOriginal) {
-      // 原始页面：根据是否已同步到英文决定状态
       const isSynced = syncedMap.get(page.id) || false;
       syncedCount = isSynced ? 1 : 0;
       needSync = !isSynced;
     } else {
-      // 非原始页面（已从其他语言同步过来），视为“已同步”状态，但不可再同步
-      syncedCount = 1;          // 显示为已完成
-      needSync = false;        // 不显示“待同步”
+      syncedCount = 1;
+      needSync = false;
     }
 
     return {
@@ -312,7 +306,7 @@ export async function getCn2EnSyncStatus(
       updatedAt: page.updatedAt,
       content_hash: page.content_hash,
       syncedCount,
-      totalTargetCount: 1,      // 固定为1（英文）
+      totalTargetCount: 1,
       needSync,
       source_locale: page.source_locale,
       source_content_hash: page.source_content_hash,

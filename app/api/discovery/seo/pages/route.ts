@@ -1,7 +1,6 @@
 // app/api/discovery/seo/pages/route.ts
-
 import { NextRequest, NextResponse } from 'next/server';
-import { supabase } from '@/lib/supabase/client';
+import sql from '@/lib/db/admin';
 import { calculateSeoScore } from '@/lib/seo/utils/score';
 import { strategiesService } from '@/lib/seo/services';
 
@@ -13,7 +12,7 @@ export async function GET(request: NextRequest) {
   try {
     const searchParams = request.nextUrl.searchParams;
 
-    // ====== 1. 解析查询参数 ======
+    // 1. 解析查询参数
     const page = Math.max(1, parseInt(searchParams.get('page') || '1'));
     const pageSize = Math.min(
       MAX_PAGE_SIZE,
@@ -26,70 +25,70 @@ export async function GET(request: NextRequest) {
 
     console.log(`[SEO Pages API] 查询参数: page=${page}, pageSize=${pageSize}, locale=${localeParam}, status=${status}, type=${typeParam}, keyword=${keyword}`);
 
-    // ====== 2. 构建基础查询 ======
-    let countQuery = supabase
-      .from('pages')
-      .select('*', { count: 'exact', head: true })
-      .eq('site_id', DEFAULT_SITE_ID);
+    // 2. 构建动态 WHERE
+    const conditions: any[] = [sql`site_id = ${DEFAULT_SITE_ID}`];
 
-    let dataQuery = supabase
-      .from('pages')
-      .select('id, title, type, locale, url, seo_title, seo_description, seo_keywords, updatedAt')
-      .eq('site_id', DEFAULT_SITE_ID);
-
-    // ====== 3. 处理 locale（支持逗号分隔的多个语言，如 "zh,global"） ======
+    // locale（支持逗号分隔）
     if (localeParam && localeParam !== 'all') {
       const locales = localeParam.split(',').filter(Boolean);
       if (locales.length === 1) {
-        countQuery = countQuery.eq('locale', locales[0]);
-        dataQuery = dataQuery.eq('locale', locales[0]);
+        conditions.push(sql`locale = ${locales[0]}`);
       } else if (locales.length > 1) {
-        countQuery = countQuery.in('locale', locales);
-        dataQuery = dataQuery.in('locale', locales);
+        conditions.push(sql`locale IN ${sql(locales)}`);
       }
     }
 
-    // ====== 4. 处理类型筛选（支持逗号分隔的多类型） ======
+    // type（支持逗号分隔）
     if (typeParam && typeParam !== 'all') {
       const types = typeParam.split(',').filter(Boolean);
       if (types.length === 1) {
-        countQuery = countQuery.eq('type', types[0]);
-        dataQuery = dataQuery.eq('type', types[0]);
+        conditions.push(sql`type = ${types[0]}`);
       } else if (types.length > 1) {
-        countQuery = countQuery.in('type', types);
-        dataQuery = dataQuery.in('type', types);
+        conditions.push(sql`type IN ${sql(types)}`);
       }
     }
 
-    // ====== 5. 关键词搜索 ======
+    // keyword
     if (keyword) {
-      countQuery = countQuery.ilike('title', `%${keyword}%`);
-      dataQuery = dataQuery.ilike('title', `%${keyword}%`);
+      conditions.push(sql`title ILIKE ${'%' + keyword + '%'}`);
     }
 
-    // ====== 6. 获取总数 ======
-    const { count: totalCount, error: countError } = await countQuery;
-    if (countError) {
+    const whereClause = conditions.reduce(
+      (acc, c, i) => (i === 0 ? c : sql`${acc} AND ${c}`),
+      sql``
+    );
+
+    // 3. 总数
+    let total = 0;
+    try {
+      const countRows = await sql<{ count: string }[]>`
+        SELECT COUNT(*)::text AS count FROM public.pages WHERE ${whereClause}
+      `;
+      total = parseInt(countRows[0]?.count || '0', 10);
+    } catch (countError: any) {
       console.error('[SEO Pages API] 计数查询失败:', countError);
       throw new Error(`计数查询失败: ${countError.message}`);
     }
 
-    const total = totalCount || 0;
     const totalPages = Math.ceil(total / pageSize);
-    const from = (page - 1) * pageSize;
-    const to = from + pageSize - 1;
+    const offset = (page - 1) * pageSize;
 
-    // ====== 7. 获取当前页数据 ======
-    const { data: pages, error: pagesError } = await dataQuery
-      .order('updatedAt', { ascending: false })
-      .range(from, to);
-
-    if (pagesError) {
+    // 4. 分页数据
+    let pages: any[];
+    try {
+      pages = await sql<any[]>`
+        SELECT id, title, type, locale, url, seo_title, seo_description, seo_keywords, "updatedAt"
+        FROM public.pages
+        WHERE ${whereClause}
+        ORDER BY "updatedAt" DESC
+        LIMIT ${pageSize} OFFSET ${offset}
+      `;
+    } catch (pagesError: any) {
       console.error('[SEO Pages API] 分页查询失败:', pagesError);
       throw new Error(`分页查询失败: ${pagesError.message}`);
     }
 
-    console.log(`[SEO Pages API] 获取到 ${pages?.length || 0} 条数据，总计 ${total} 条`);
+    console.log(`[SEO Pages API] 获取到 ${pages.length} 条数据，总计 ${total} 条`);
 
     if (!pages || pages.length === 0) {
       return NextResponse.json({
@@ -98,31 +97,31 @@ export async function GET(request: NextRequest) {
       });
     }
 
-    // ====== 8. 批量查询 page_seo_data ======
+    // 5. 批量查询 page_seo_data
     const pageIds = pages.map((p) => p.id).filter((id) => id && typeof id === 'string' && id.trim().length > 0);
 
     let statusMap: Record<string, string> = {};
     let keywordMap: Record<string, string[]> = {};
 
     if (pageIds.length > 0) {
-      const { data: seoData, error: seoError } = await supabase
-        .from('page_seo_data')
-        .select('page_id, locale, generation_status, analyzed_keywords')
-        .in('page_id', pageIds)
-        .eq('site_id', DEFAULT_SITE_ID);
-
-      if (!seoError && seoData) {
+      try {
+        const seoData = await sql<{ page_id: string; locale: string; generation_status: string; analyzed_keywords: string[] | null }[]>`
+          SELECT page_id, locale, generation_status, analyzed_keywords
+          FROM public.page_seo_data
+          WHERE page_id IN ${sql(pageIds)}
+            AND site_id = ${DEFAULT_SITE_ID}
+        `;
         seoData.forEach((item) => {
           const key = `${item.page_id}_${item.locale}`;
           statusMap[key] = item.generation_status;
           keywordMap[key] = item.analyzed_keywords || [];
         });
-      } else {
+      } catch (seoError: any) {
         console.warn('[SEO Pages API] page_seo_data 查询失败:', seoError?.message);
       }
     }
 
-    // ====== 9. 状态筛选（内存过滤） ======
+    // 6. 状态筛选（内存过滤）
     let filteredPages = pages;
     if (status !== 'all') {
       filteredPages = pages.filter((page) => {
@@ -131,8 +130,8 @@ export async function GET(request: NextRequest) {
       });
     }
 
-    // ====== 10. 获取策略配置 ======
-    let strategies = [];
+    // 7. 获取策略配置
+    let strategies: any[] = [];
     try {
       strategies = await strategiesService.getStrategies(DEFAULT_SITE_ID);
     } catch (strategyError) {
@@ -143,7 +142,7 @@ export async function GET(request: NextRequest) {
       strategyMap[s.page_type] = s.fields;
     });
 
-    // ====== 11. 计算评分 ======
+    // 8. 计算评分
     const result = filteredPages.map((page) => {
       const fields = strategyMap[page.type] || {};
       const config = {
@@ -165,7 +164,7 @@ export async function GET(request: NextRequest) {
           try {
             const str = JSON.stringify(page.seo_keywords);
             keywords = str.replace(/[\[\]"]/g, '').split(',').map((k) => k.trim()).filter(Boolean);
-          } catch (e) {
+          } catch {
             keywords = [];
           }
         }

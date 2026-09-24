@@ -1,6 +1,6 @@
 // app/api/discovery/product-sync/detail/route.ts
 import { NextRequest, NextResponse } from 'next/server';
-import { supabase } from '@/lib/supabase/client';
+import sql from '@/lib/db/admin';
 import { getEnabledLanguages } from '@/lib/languages/settings';
 import { LANGUAGES } from '@/lib/languages/config';
 
@@ -16,28 +16,30 @@ export async function GET(req: NextRequest) {
   }
 
   const enabledCodes = await getEnabledLanguages();
-  const allEnabledLocales = LANGUAGES.filter(lang => enabledCodes.includes(lang.code)).map(lang => lang.code);
+  const allEnabledLocales = LANGUAGES
+    .filter(lang => enabledCodes.includes(lang.code))
+    .map(lang => lang.code);
   const targetLocales = allEnabledLocales.filter(loc => loc !== sourceLocale);
 
-  const { data: syncRecords, error } = await supabase
-    .from('products')
-    .select('locale, source_locale, source_product_id')
-    .eq('site_id', SITE_ID)
-    .eq('productId', productId)
-    .in('locale', targetLocales)
-    .eq('source_locale', sourceLocale)
-    .eq('source_product_id', productId);
+  try {
+    const syncRecords = await sql<{ locale: string; source_locale: string | null; source_product_id: string | null }[]>`
+      SELECT locale, source_locale, source_product_id FROM public.products
+      WHERE site_id = ${SITE_ID}
+        AND "productId" = ${productId}
+        AND locale IN ${sql(targetLocales)}
+        AND source_locale = ${sourceLocale}
+        AND source_product_id = ${productId}
+    `;
 
-  if (error) {
+    const syncedSet = new Set(syncRecords.map(r => r.locale));
+    const details = targetLocales.map(locale => ({
+      locale,
+      synced: syncedSet.has(locale),
+    }));
+
+    return NextResponse.json({ details });
+  } catch (error: any) {
     console.error('查询同步详情失败:', error);
     return NextResponse.json({ error: error.message }, { status: 500 });
   }
-
-  const syncedSet = new Set(syncRecords?.map(r => r.locale) || []);
-  const details = targetLocales.map(locale => ({
-    locale,
-    synced: syncedSet.has(locale),
-  }));
-
-  return NextResponse.json({ details });
 }

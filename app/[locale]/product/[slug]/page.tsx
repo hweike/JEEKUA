@@ -6,11 +6,11 @@ import { injectRuntimeDataSafe } from '@/lib/webbuilder/runtime-injector';
 import { TemplateRenderer } from '@/components/webbuilder/TemplateRenderer';
 import { getProductUrlPattern } from '@/lib/products/productSettings';
 import { getProductSettings } from '@/lib/products/services/product-settings.service';
-import { withDynamicLocale } from '@/lib/withPageLocale';
+import { withStaticLocale } from '@/lib/withPageLocale';
 import { getSeoInput } from '@/lib/seo/getSeoInput';
 import { generatePageMetadata } from '@/lib/seo';
 import { getSiteSettings } from '@/lib/getSiteSettings';
-import { getCachedProductPageData } from '@/lib/seo/utils/catalog-data';
+import { getCachedProductPageData, getAllPublishedProducts } from '@/lib/seo/utils/catalog-data';
 import { getLayoutPageByTemplate } from '@/lib/pages/storage';
 import ProductLoading from './loading';
 
@@ -59,7 +59,16 @@ export async function generateMetadata({
 }: {
   params: Promise<{ locale: string; slug: string }>;
 }) {
-  const { locale, slug } = await params;
+  const resolvedParams = await params;
+  if (!resolvedParams?.locale) {
+    return {
+      title: 'Product',
+      robots: 'noindex, follow',
+    };
+  }
+
+  const { locale, slug } = resolvedParams;
+
   const settings = await getSiteSettings();
   const baseUrl = (settings.websiteUrl || process.env.NEXT_PUBLIC_BASE_URL || '').replace(
     /\/+$/,
@@ -143,7 +152,6 @@ async function ProductContent({
 
   const templateId = fullProduct.templateId || DEFAULT_PRODUCT_TEMPLATE_ID;
 
-  // ✅ 用 getLayoutPageByTemplate 替代本地 getCachedLayout
   let layoutPage = await getLayoutPageByTemplate('base', templateId);
 
   if (!layoutPage && templateId !== DEFAULT_PRODUCT_TEMPLATE_ID) {
@@ -151,7 +159,7 @@ async function ProductContent({
     layoutPage = await getLayoutPageByTemplate('base', DEFAULT_PRODUCT_TEMPLATE_ID);
   }
 
-  const templateData = layoutPage?.templateData; // ✅ 驼峰
+  const templateData = layoutPage?.templateData;
   const hasValidTemplate =
     templateData && Array.isArray(templateData.content) && templateData.content.length > 0;
 
@@ -199,7 +207,6 @@ async function ProductContent({
     );
   }
 
-  // ✅ 移除 texts 相关；SEO 用 Once 版本（同请求内只算一次）
   const seoData = await fetchProductSeoDataOnce(locale, slug, productData);
   const jsonLdScripts = seoData?.jsonLdScripts || [];
   const seoTitle = seoData?.seoInput?.title || product.product_name || '';
@@ -214,7 +221,7 @@ async function ProductContent({
     storeLinks,
     seoTitle,
   };
-  const finalRuntime = { ...runtimeData, locale }; // ✅ 去掉 texts
+  const finalRuntime = { ...runtimeData, locale };
 
   let finalData = injectRuntimeDataSafe(templateData, finalRuntime);
   if (!finalData.__runtime) {
@@ -249,7 +256,12 @@ interface ProductDetailPageProps {
 }
 
 async function ProductDetailPage({ params }: ProductDetailPageProps) {
-  const { locale, slug } = await params;
+  const resolvedParams = await params;
+  if (!resolvedParams?.locale) {
+    notFound();
+  }
+
+  const { locale, slug } = resolvedParams;
   const decodedSlug = decodeURIComponent(slug);
 
   const productData = await getCachedProductPageData(locale, decodedSlug);
@@ -277,5 +289,29 @@ async function ProductDetailPage({ params }: ProductDetailPageProps) {
   );
 }
 
+// ============================================================
+// ✅ ISR 预生成：为所有已发布产品生成静态 HTML，访问最快
+// ============================================================
+export async function generateStaticParams() {
+  const t0 = Date.now();
+  console.log(`[product/[slug]] generateStaticParams 开始`);
+
+  try {
+    const products = await getAllPublishedProducts();
+    const elapsed = Date.now() - t0;
+    console.log(`[product/[slug]] generateStaticParams: ${products.length} 个产品，总耗时 ${elapsed}ms`);
+
+    return products.map((p) => ({
+      locale: p.locale,
+      slug: p.slug,
+    }));
+  } catch (err) {
+    const elapsed = Date.now() - t0;
+    console.error(`[product/[slug]] generateStaticParams 失败（耗时 ${elapsed}ms）:`, err);
+    return [];
+  }
+}
+
+export const dynamicParams = true;
 export const revalidate = 3600;
-export default withDynamicLocale(ProductDetailPage);
+export default withStaticLocale(ProductDetailPage);

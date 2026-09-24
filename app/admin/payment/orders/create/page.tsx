@@ -199,10 +199,16 @@ export default function CreateOrderPage() {
   });
 
   // ============================================================
-  // ✅ 复制到剪贴板（带降级方案）
+  // ✅ 复制到剪贴板（带降级方案 + 先 focus 修复 NotAllowedError）
   // ============================================================
   const copyToClipboard = async (text: string): Promise<boolean> => {
     try {
+      // ✅ 先聚焦文档（修复 NotAllowedError: Document is not focused）
+      if (typeof window !== 'undefined' && document.hasFocus && !document.hasFocus()) {
+        window.focus();
+        await new Promise((r) => setTimeout(r, 50));
+      }
+
       await navigator.clipboard.writeText(text);
       console.log('[copyToClipboard] Clipboard API 复制成功');
       return true;
@@ -595,11 +601,14 @@ export default function CreateOrderPage() {
           // ✅ 尝试复制链接
           const copied = await copyToClipboard(submitData.data.shareUrl);
           
-          // ✅ 简化 Toast 提示，不显示完整链接
+          // ✅ 根据复制结果给出不同提示
           if (copied) {
             setToast({ message: '✅ 订单提交成功，分享链接已复制', type: 'success' });
           } else {
-            setToast({ message: '✅ 订单提交成功', type: 'success' });
+            setToast({ 
+              message: `✅ 订单提交成功。分享链接：${submitData.data.shareUrl}（请手动复制）`, 
+              type: 'success' 
+            });
           }
           setTimeout(() => router.push('/admin/payment/orders'), 1000);
         } else {

@@ -5,6 +5,14 @@ import path from 'path';
 import fs from 'fs';
 
 // ============================================================
+// ✅ 数值安全格式化函数
+// ============================================================
+const formatAmount = (value: any): string => {
+  const num = Number(value);
+  return isNaN(num) ? '0.00' : num.toFixed(2);
+};
+
+// ============================================================
 // 字体注册 - 使用本地字体
 // ============================================================
 let fontRegistered = false;
@@ -55,8 +63,8 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'flex-start',
     padding: 12,
-     paddingHorizontal: 40, // ✅ 内容左右留白 40px，与 page padding 对齐
-    marginHorizontal: -40,  // ✅ 抵消 page 的 padding，背景延伸到边缘
+     paddingHorizontal: 40,
+    marginHorizontal: -40,
     marginBottom: 8,
     backgroundColor: '#f5f5f5',
     borderRadius: 4,
@@ -613,8 +621,9 @@ export default function OrderPDF({
                     {'\n'}
                     <Text style={{ fontSize: 6, color: '#999' }}>{item.unit || 'pcs'}</Text>
                   </Text>
-                  <Text style={styles.colPrice}>{order.currency} {item.price.toFixed(2)}</Text>
-                  <Text style={styles.colTotal}>{order.currency} {item.total.toFixed(2)}</Text>
+                  {/* ✅ 修复：使用 formatAmount */}
+                  <Text style={styles.colPrice}>{order.currency} {formatAmount(item.price)}</Text>
+                  <Text style={styles.colTotal}>{order.currency} {formatAmount(item.total)}</Text>
                 </View>
               );
             })}
@@ -623,29 +632,30 @@ export default function OrderPDF({
           <View style={styles.summaryContainer}>
             <View style={styles.summaryRow}>
               <Text style={styles.summaryLabel}>Sub Total:</Text>
-              <Text style={styles.summaryValue}>{order.currency} {order.sub_total.toFixed(2)}</Text>
+              {/* ✅ 修复：使用 formatAmount */}
+              <Text style={styles.summaryValue}>{order.currency} {formatAmount(order.sub_total)}</Text>
             </View>
-            {order.discount > 0 && (
+            {Number(order.discount) > 0 && (
               <View style={styles.summaryRow}>
                 <Text style={styles.summaryLabel}>Discount:</Text>
-                <Text style={styles.summaryValue}>-{order.currency} {order.discount.toFixed(2)}</Text>
+                <Text style={styles.summaryValue}>-{order.currency} {formatAmount(order.discount)}</Text>
               </View>
             )}
-            {order.shipping_fee > 0 && (
+            {Number(order.shipping_fee) > 0 && (
               <View style={styles.summaryRow}>
                 <Text style={styles.summaryLabel}>Shipping Fee:</Text>
-                <Text style={styles.summaryValue}>{order.currency} {order.shipping_fee.toFixed(2)}</Text>
+                <Text style={styles.summaryValue}>{order.currency} {formatAmount(order.shipping_fee)}</Text>
               </View>
             )}
-            {order.tax > 0 && (
+            {Number(order.tax) > 0 && (
               <View style={styles.summaryRow}>
                 <Text style={styles.summaryLabel}>Tax:</Text>
-                <Text style={styles.summaryValue}>{order.currency} {order.tax.toFixed(2)}</Text>
+                <Text style={styles.summaryValue}>{order.currency} {formatAmount(order.tax)}</Text>
               </View>
             )}
             <View style={styles.summaryRow}>
               <Text style={styles.totalLabel}>Total Amount:</Text>
-              <Text style={styles.summaryTotal}>{order.currency} {order.total_amount.toFixed(2)}</Text>
+              <Text style={styles.summaryTotal}>{order.currency} {formatAmount(order.total_amount)}</Text>
             </View>
           </View>
         </View>
