@@ -63,7 +63,7 @@ const nextConfig = {
   },
 
   // ✅ 确保 Next.js 不会干扰中间件的路径匹配
-  skipMiddlewareUrlNormalize: true,
+  skipProxyUrlNormalize: true,
 
   // ✅ 降低构建并发，避免打爆数据库连接
   experimental: {
